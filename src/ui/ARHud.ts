@@ -22,6 +22,7 @@ export class ARHud {
 
   private readonly statusMessage: HTMLElement;
   private readonly sourceMessage: HTMLElement;
+  private readonly cameraPanel: HTMLElement;
   private readonly cameraStatusMessage: HTMLElement;
   private readonly generatedModelMessage: HTMLElement;
   private readonly modelSelect: HTMLSelectElement;
@@ -94,6 +95,7 @@ export class ARHud {
       <p class="generated-model-status">Generated model: None yet</p>
     `;
     this.cameraPreviewVideo = cameraPanel.querySelector<HTMLVideoElement>('.camera-preview')!;
+    this.cameraPanel = cameraPanel;
     this.cameraStatusMessage = cameraPanel.querySelector<HTMLElement>('.camera-status')!;
     this.generatedModelMessage = cameraPanel.querySelector<HTMLElement>('.generated-model-status')!;
 
@@ -166,6 +168,10 @@ export class ARHud {
 
   updateGeneratedModelSource(modelUrl: string): void {
     this.generatedModelMessage.textContent = `Generated model: ${modelUrl}`;
+  }
+
+  setCameraPanelVisible(isVisible: boolean): void {
+    this.cameraPanel.classList.toggle('hidden', !isVisible);
   }
 
   private createButton(label: string, className: string, onClick: () => void): HTMLButtonElement {

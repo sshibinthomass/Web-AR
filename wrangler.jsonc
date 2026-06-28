@@ -7,6 +7,8 @@
   "compatibility_date": "2026-06-28",
   "vars": {
     "MODAL_IMAGE_TO_3D_URL": "https://sshibinthomass--image-to-3d-imageto3d-generate-api.modal.run",
+    "MODAL_IMAGE_TO_3D_START_URL": "https://sshibinthomass--image-to-3d-imageto3d-start-api.modal.run",
+    "MODAL_IMAGE_TO_3D_RESULT_URL": "https://sshibinthomass--image-to-3d-imageto3d-result-api.modal.run",
     "PUBLIC_MODEL_ORIGIN": ""
   },
   "r2_buckets": [

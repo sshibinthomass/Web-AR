@@ -139,4 +139,18 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Generated model: https://assets.example/models/generated/capture.glb');
     expect((generateButton as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it('can hide the camera capture panel while AR is running', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    const cameraPanel = root.querySelector('.camera-panel');
+
+    hud.setCameraPanelVisible(false);
+
+    expect(cameraPanel?.classList.contains('hidden')).toBe(true);
+
+    hud.setCameraPanelVisible(true);
+
+    expect(cameraPanel?.classList.contains('hidden')).toBe(false);
+  });
 });

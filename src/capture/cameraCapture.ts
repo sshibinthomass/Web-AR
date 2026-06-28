@@ -34,14 +34,16 @@ export async function captureVideoFrame(
   video: HTMLVideoElement,
   imageMimeType = 'image/jpeg',
   quality = 0.9,
+  maxDimension = 768,
 ): Promise<CapturedImage> {
-  const width = video.videoWidth || video.clientWidth;
-  const height = video.videoHeight || video.clientHeight;
+  const sourceWidth = video.videoWidth || video.clientWidth;
+  const sourceHeight = video.videoHeight || video.clientHeight;
 
-  if (width <= 0 || height <= 0) {
+  if (sourceWidth <= 0 || sourceHeight <= 0) {
     throw new Error('Camera preview is not ready yet.');
   }
 
+  const { width, height } = getCaptureDimensions(sourceWidth, sourceHeight, maxDimension);
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -72,6 +74,26 @@ export async function blobToBase64(blob: Blob): Promise<string> {
   }
 
   return btoa(binary);
+}
+
+export function getCaptureDimensions(
+  sourceWidth: number,
+  sourceHeight: number,
+  maxDimension: number,
+): { width: number; height: number } {
+  const largestDimension = Math.max(sourceWidth, sourceHeight);
+  if (largestDimension <= maxDimension) {
+    return {
+      width: sourceWidth,
+      height: sourceHeight,
+    };
+  }
+
+  const scale = maxDimension / largestDimension;
+  return {
+    width: Math.round(sourceWidth * scale),
+    height: Math.round(sourceHeight * scale),
+  };
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {

@@ -14,6 +14,8 @@ export interface WorkerEnv {
   MODAL_KEY: string;
   MODAL_SECRET: string;
   MODAL_IMAGE_TO_3D_URL: string;
+  MODAL_IMAGE_TO_3D_START_URL: string;
+  MODAL_IMAGE_TO_3D_RESULT_URL: string;
   PUBLIC_MODEL_ORIGIN?: string;
   MODEL_BUCKET: ModelBucket;
 }
@@ -30,9 +32,9 @@ interface GenerateModelRequestBody {
 
 const modalPayloadDefaults = {
   seed: 42,
-  pipeline_type: '1024_cascade',
-  decimation_target: 1000000,
-  texture_size: 4096,
+  pipeline_type: '512',
+  decimation_target: 100000,
+  texture_size: 1024,
 };
 
 const corsHeaders = {
@@ -44,7 +46,7 @@ const corsHeaders = {
 export default {
   fetch(request: Request, env: WorkerEnv): Promise<Response> {
     return handleGenerateModelRequest(request, env, {
-      fetch,
+      fetch: (input, init) => fetch(input, init),
       now: () => new Date(),
     });
   },
@@ -68,6 +70,11 @@ export async function handleGenerateModelRequest(
     return serveGeneratedModel(url.pathname.slice(1), env);
   }
 
+  if (request.method === 'GET' && url.pathname.startsWith('/generate-3d/jobs/')) {
+    const jobId = decodeURIComponent(url.pathname.replace('/generate-3d/jobs/', ''));
+    return pollModalJob(request, env, deps, jobId);
+  }
+
   if (request.method !== 'POST') {
     return jsonResponse({ error: 'Only POST requests are supported.' }, 405);
   }
@@ -86,7 +93,7 @@ export async function handleGenerateModelRequest(
     return jsonResponse({ error: 'image_base64 is required.' }, 400);
   }
 
-  const modalResponse = await deps.fetch(env.MODAL_IMAGE_TO_3D_URL, {
+  const modalResponse = await deps.fetch(env.MODAL_IMAGE_TO_3D_START_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -100,7 +107,51 @@ export async function handleGenerateModelRequest(
   });
 
   if (!modalResponse.ok) {
-    return jsonResponse({ error: `Modal generation failed: ${await modalResponse.text()}` }, 502);
+    return jsonResponse({ error: `Modal job start failed: ${await modalResponse.text()}` }, 502);
+  }
+
+  const modalJob = (await modalResponse.json()) as { call_id?: unknown };
+  if (typeof modalJob.call_id !== 'string' || !modalJob.call_id) {
+    return jsonResponse({ error: 'Modal job start response did not include a call_id.' }, 502);
+  }
+
+  return jsonResponse(
+    {
+      job_id: modalJob.call_id,
+      status_url: `${url.origin}/generate-3d/jobs/${encodeURIComponent(modalJob.call_id)}`,
+    },
+    202,
+  );
+}
+
+async function pollModalJob(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  jobId: string,
+): Promise<Response> {
+  if (!jobId) {
+    return jsonResponse({ error: 'job_id is required.' }, 400);
+  }
+
+  const url = new URL(request.url);
+  const resultUrl = new URL(env.MODAL_IMAGE_TO_3D_RESULT_URL);
+  resultUrl.searchParams.set('call_id', jobId);
+
+  const modalResponse = await deps.fetch(resultUrl.toString(), {
+    method: 'GET',
+    headers: {
+      'Modal-Key': env.MODAL_KEY,
+      'Modal-Secret': env.MODAL_SECRET,
+    },
+  });
+
+  if (modalResponse.status === 202) {
+    return jsonResponse({ status: 'running' }, 202);
+  }
+
+  if (!modalResponse.ok) {
+    return jsonResponse({ error: `Modal job result failed: ${await modalResponse.text()}` }, 502);
   }
 
   const glbBytes = await modalResponse.arrayBuffer();
@@ -127,6 +178,10 @@ function validateEnv(env: WorkerEnv): string | null {
 
   if (!env.MODAL_IMAGE_TO_3D_URL) {
     return 'Modal endpoint URL is not configured.';
+  }
+
+  if (!env.MODAL_IMAGE_TO_3D_START_URL || !env.MODAL_IMAGE_TO_3D_RESULT_URL) {
+    return 'Modal async endpoint URLs are not configured.';
   }
 
   if (!env.MODEL_BUCKET) {

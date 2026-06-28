@@ -216,13 +216,17 @@ export class WebARApp {
 
     sceneContext.renderer.xr.addEventListener('sessionstart', () => {
       this.appState.setMode('scanning');
+      stopCameraPreview(this.cameraStream);
+      this.cameraStream = null;
       this.hitTestManager?.reset();
+      this.hud?.setCameraPanelVisible(false);
       this.hud?.update(this.appState.mode, this.appState.modelLoaded ? undefined : 'Select a Cloudflare model to download it.');
     });
 
     sceneContext.renderer.xr.addEventListener('sessionend', () => {
       this.appState.setMode('loading');
       this.sceneContext?.floorGrid && (this.sceneContext.floorGrid.visible = false);
+      this.hud?.setCameraPanelVisible(true);
       this.hud?.update(this.appState.mode, 'AR session ended. Start AR again to continue.');
     });
 
