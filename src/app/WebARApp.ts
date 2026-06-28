@@ -5,13 +5,17 @@ import { createScene, type SceneContext } from '../scene/createScene';
 import { loadGLBModel } from '../scene/loadModel';
 import { AppState } from '../state/AppState';
 import { ARHud } from '../ui/ARHud';
+import { resolvePublicAssetUrl } from '../utils/assets';
 import { screenPointToFloorPoint, type Point2 } from '../utils/math';
 import { HitTestManager } from '../xr/HitTestManager';
 import { PlaneTrackingManager } from '../xr/PlaneTrackingManager';
 import { checkXRSupport } from '../xr/XRSupport';
 import { createARSessionButton } from '../xr/XRSessionManager';
 
-const MODEL_URL = '/models/trellis-2-4b-fast-output.glb';
+const MODEL_URL = resolvePublicAssetUrl(
+  'models/trellis-2-4b-fast-output.glb',
+  import.meta.env.BASE_URL,
+);
 
 export class WebARApp {
   private sceneContext: SceneContext | null = null;
