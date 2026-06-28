@@ -5,7 +5,7 @@ import { createScene, type SceneContext } from '../scene/createScene';
 import { loadGLBModel } from '../scene/loadModel';
 import { AppState } from '../state/AppState';
 import { ARHud } from '../ui/ARHud';
-import { resolveModelUrl } from '../utils/assets';
+import { resolveModelSource, resolveModelUrl } from '../utils/assets';
 import { screenPointToFloorPoint, type Point2 } from '../utils/math';
 import { HitTestManager } from '../xr/HitTestManager';
 import { PlaneTrackingManager } from '../xr/PlaneTrackingManager';
@@ -17,6 +17,7 @@ const MODEL_URL = resolveModelUrl({
   fallbackAssetPath: 'models/trellis-2-4b-fast-output.glb',
   baseUrl: import.meta.env.BASE_URL,
 });
+const MODEL_SOURCE = resolveModelSource(import.meta.env.VITE_MODEL_URL);
 
 export class WebARApp {
   private sceneContext: SceneContext | null = null;
@@ -45,6 +46,7 @@ export class WebARApp {
       onRotateLeft: () => this.rotateBy(-THREE.MathUtils.degToRad(15)),
       onRotateRight: () => this.rotateBy(THREE.MathUtils.degToRad(15)),
     });
+    this.hud.updateModelSource(MODEL_SOURCE);
 
     this.gestureController = new GestureController(this.hud.gestureSurface, {
       onTap: (point) => this.handleTap(point),

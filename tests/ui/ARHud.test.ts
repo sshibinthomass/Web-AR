@@ -51,4 +51,20 @@ describe('ARHud', () => {
     expect(root.textContent).not.toContain('-15 deg');
     expect(root.textContent).not.toContain('+15 deg');
   });
+
+  it('shows the current model source in the HUD', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, {
+      onPlace: vi.fn(),
+      onEdit: vi.fn(),
+      onReset: vi.fn(),
+      onResetScale: vi.fn(),
+      onRotateLeft: vi.fn(),
+      onRotateRight: vi.fn(),
+    });
+
+    hud.updateModelSource('Cloudflare');
+
+    expect(root.textContent).toContain('Model source: Cloudflare');
+  });
 });

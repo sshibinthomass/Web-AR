@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveModelUrl, resolvePublicAssetUrl } from '../../src/utils/assets';
+import { resolveModelSource, resolveModelUrl, resolvePublicAssetUrl } from '../../src/utils/assets';
 
 describe('resolvePublicAssetUrl', () => {
   it('prefixes public assets with the Vite base path for GitHub Pages', () => {
@@ -34,5 +34,15 @@ describe('resolveModelUrl', () => {
         baseUrl: '/Web-AR/',
       }),
     ).toBe('/Web-AR/models/trellis-2-4b-fast-output.glb');
+  });
+});
+
+describe('resolveModelSource', () => {
+  it('labels configured model URLs as Cloudflare sources', () => {
+    expect(resolveModelSource('https://web-ar-model-assets.pages.dev/models/model.glb')).toBe('Cloudflare');
+  });
+
+  it('labels empty configured model URLs as local fallback sources', () => {
+    expect(resolveModelSource('')).toBe('Local fallback');
   });
 });

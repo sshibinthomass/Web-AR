@@ -10,6 +10,8 @@ type ResolveModelUrlOptions = {
   baseUrl?: string;
 };
 
+export type ModelSourceLabel = 'Cloudflare' | 'Local fallback';
+
 export function resolveModelUrl({ configuredUrl, fallbackAssetPath, baseUrl }: ResolveModelUrlOptions): string {
   const cleanConfiguredUrl = configuredUrl?.trim();
 
@@ -18,4 +20,8 @@ export function resolveModelUrl({ configuredUrl, fallbackAssetPath, baseUrl }: R
   }
 
   return resolvePublicAssetUrl(fallbackAssetPath, baseUrl);
+}
+
+export function resolveModelSource(configuredUrl?: string): ModelSourceLabel {
+  return configuredUrl?.trim() ? 'Cloudflare' : 'Local fallback';
 }

@@ -1,4 +1,5 @@
 import type { AppMode } from '../state/AppState';
+import type { ModelSourceLabel } from '../utils/assets';
 
 interface HUDHandlers {
   onPlace(): void;
@@ -15,6 +16,7 @@ export class ARHud {
   readonly arButtonSlot: HTMLElement;
 
   private readonly statusMessage: HTMLElement;
+  private readonly sourceMessage: HTMLElement;
   private readonly placeButton: HTMLButtonElement;
   private readonly editButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
@@ -51,8 +53,10 @@ export class ARHud {
     statusPanel.innerHTML = `
       <p class="status-label">Status</p>
       <p class="status-message">Loading model...</p>
+      <p class="status-source">Model source: Detecting...</p>
     `;
     this.statusMessage = statusPanel.querySelector<HTMLElement>('.status-message')!;
+    this.sourceMessage = statusPanel.querySelector<HTMLElement>('.status-source')!;
     this.overlay.appendChild(statusPanel);
 
     const actions = document.createElement('div');
@@ -90,6 +94,10 @@ export class ARHud {
     this.editButton.disabled = !hasPlacedObject;
     this.resetScaleButton.disabled = !hasPlacedObject;
     this.resetButton.disabled = !hasPlacedObject;
+  }
+
+  updateModelSource(source: ModelSourceLabel): void {
+    this.sourceMessage.textContent = `Model source: ${source}`;
   }
 
   private createButton(label: string, className: string, onClick: () => void): HTMLButtonElement {
