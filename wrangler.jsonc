@@ -2,6 +2,8 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "web-ar-generate-model",
   "main": "worker/src/index.ts",
+  "workers_dev": true,
+  "preview_urls": true,
   "compatibility_date": "2026-06-28",
   "vars": {
     "MODAL_IMAGE_TO_3D_URL": "https://sshibinthomass--image-to-3d-imageto3d-generate-api.modal.run",
