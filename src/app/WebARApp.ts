@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import { GestureController } from '../interaction/GestureController';
 import { ObjectTransformController } from '../interaction/ObjectTransformController';
 import { MODEL_OPTIONS } from './models';
+import { captureVideoFrame, startCameraPreview, stopCameraPreview, type CapturedImage } from '../capture/cameraCapture';
 import { createScene, type SceneContext } from '../scene/createScene';
 import { loadGLBModel } from '../scene/loadModel';
+import { generateModelFromImage } from '../services/generatedModelClient';
 import { AppState } from '../state/AppState';
 import { ARHud } from '../ui/ARHud';
 import { screenPointToFloorPoint, type Point2 } from '../utils/math';
@@ -21,6 +23,8 @@ export class WebARApp {
   private readonly appState = new AppState();
   private readonly transformController = new ObjectTransformController();
   private readonly clock = new THREE.Clock();
+  private cameraStream: MediaStream | null = null;
+  private capturedImage: CapturedImage | null = null;
   private lastHudMode = this.appState.mode;
 
   constructor(private readonly root: HTMLElement) {}
@@ -39,6 +43,9 @@ export class WebARApp {
       onRotateLeft: () => this.rotateBy(-THREE.MathUtils.degToRad(15)),
       onRotateRight: () => this.rotateBy(THREE.MathUtils.degToRad(15)),
       onModelSelect: (modelId) => void this.loadSelectedModel(modelId),
+      onStartCamera: () => void this.startCamera(),
+      onCaptureImage: () => void this.captureImage(),
+      onGenerateModel: () => void this.generateModel(),
     });
     this.hud.updateModelSource('Cloudflare only');
 
@@ -65,15 +72,36 @@ export class WebARApp {
       return;
     }
 
+    await this.loadModelFromUrl(modelOption.url, modelOption.label, {
+      loadingMessage: `Downloading ${modelOption.label} from Cloudflare...`,
+      successMessage: `${modelOption.label} loaded from Cloudflare.`,
+      sourceMessage: 'Cloudflare hosted model',
+      selectedModelId: modelId,
+    });
+  }
+
+  private async loadModelFromUrl(
+    modelUrl: string,
+    label: string,
+    options: {
+      loadingMessage: string;
+      successMessage: string;
+      sourceMessage: string;
+      selectedModelId?: string;
+    },
+  ): Promise<void> {
     const sceneContext = this.requireScene();
     const wasPlaced = this.appState.mode === 'placed' || this.appState.mode === 'editing';
     this.appState.modelLoaded = false;
     this.hud?.updateModelReady(false);
-    this.hud?.updateSelectedModel(modelId);
-    this.hud?.update(this.appState.mode, `Downloading ${modelOption.label} from Cloudflare...`);
+    if (options.selectedModelId) {
+      this.hud?.updateSelectedModel(options.selectedModelId);
+    }
+    this.hud?.updateModelSource(options.sourceMessage);
+    this.hud?.update(this.appState.mode, options.loadingMessage);
 
     try {
-      const model = await loadGLBModel(modelOption.url);
+      const model = await loadGLBModel(modelUrl);
       this.removeLoadedModels(sceneContext.modelRoot);
       sceneContext.modelRoot.add(model);
       this.transformController.setTarget(sceneContext.modelRoot);
@@ -82,13 +110,71 @@ export class WebARApp {
       if (!wasPlaced) {
         sceneContext.modelRoot.visible = false;
       }
-      this.hud?.update(this.appState.mode, `${modelOption.label} loaded from Cloudflare.`);
+      this.hud?.update(this.appState.mode, options.successMessage);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown model loading error.';
       this.appState.modelLoaded = false;
       this.hud?.updateModelReady(false);
-      this.appState.setError(`Could not load GLB: ${message}`);
+      this.appState.setError(`Could not load ${label}: ${message}`);
       this.hud?.update(this.appState.mode, this.appState.lastError ?? undefined);
+    }
+  }
+
+  private async startCamera(): Promise<void> {
+    const preview = this.hud?.cameraPreviewVideo;
+    if (!preview) {
+      return;
+    }
+
+    try {
+      stopCameraPreview(this.cameraStream);
+      this.cameraStream = await startCameraPreview(preview);
+      this.hud?.updateCameraStatus('Camera ready. Capture an image to generate a 3D model.', false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Camera permission was not granted.';
+      this.hud?.updateCameraStatus(`Camera unavailable: ${message}`, false);
+    }
+  }
+
+  private async captureImage(): Promise<void> {
+    const preview = this.hud?.cameraPreviewVideo;
+    if (!preview) {
+      return;
+    }
+
+    try {
+      this.capturedImage = await captureVideoFrame(preview);
+      this.hud?.updateCameraStatus('Image captured. Ready to generate.', true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not capture image.';
+      this.hud?.updateCameraStatus(`Capture failed: ${message}`, false);
+    }
+  }
+
+  private async generateModel(): Promise<void> {
+    if (!this.capturedImage) {
+      this.hud?.updateCameraStatus('Capture an image before generating a 3D model.', false);
+      return;
+    }
+
+    this.hud?.updateCameraStatus('Generating 3D model with Modal...', false);
+
+    try {
+      const generatedModel = await generateModelFromImage({
+        apiUrl: import.meta.env.VITE_GENERATE_MODEL_API_URL ?? '',
+        imageBase64: this.capturedImage.imageBase64,
+        imageMimeType: this.capturedImage.imageMimeType,
+      });
+      this.hud?.updateGeneratedModelSource(generatedModel.modelUrl);
+      this.hud?.updateCameraStatus(`Generated model saved to Cloudflare (${generatedModel.bytes} bytes).`, false);
+      await this.loadModelFromUrl(generatedModel.modelUrl, 'generated model', {
+        loadingMessage: 'Loading generated model from Cloudflare...',
+        successMessage: 'Generated model loaded. Start AR or place it on the floor.',
+        sourceMessage: 'Modal generated via Cloudflare Worker',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown generation error.';
+      this.hud?.updateCameraStatus(`Generation failed: ${message}`, true);
     }
   }
 

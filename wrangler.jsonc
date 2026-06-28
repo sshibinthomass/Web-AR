@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "web-ar-generate-model",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-06-28",
+  "vars": {
+    "MODAL_IMAGE_TO_3D_URL": "https://sshibinthomass--image-to-3d-imageto3d-generate-api.modal.run",
+    "PUBLIC_MODEL_ORIGIN": ""
+  },
+  "r2_buckets": [
+    {
+      "binding": "MODEL_BUCKET",
+      "bucket_name": "web-ar-model-assets"
+    }
+  ]
+}

@@ -9,20 +9,27 @@ interface HUDHandlers {
   onRotateLeft(): void;
   onRotateRight(): void;
   onModelSelect(modelId: string): void;
+  onStartCamera(): void;
+  onCaptureImage(): void;
+  onGenerateModel(): void;
 }
 
 export class ARHud {
   readonly overlay: HTMLElement;
   readonly gestureSurface: HTMLElement;
   readonly arButtonSlot: HTMLElement;
+  readonly cameraPreviewVideo: HTMLVideoElement;
 
   private readonly statusMessage: HTMLElement;
   private readonly sourceMessage: HTMLElement;
+  private readonly cameraStatusMessage: HTMLElement;
+  private readonly generatedModelMessage: HTMLElement;
   private readonly modelSelect: HTMLSelectElement;
   private readonly placeButton: HTMLButtonElement;
   private readonly editButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
   private readonly resetScaleButton: HTMLButtonElement;
+  private readonly generateButton: HTMLButtonElement;
   private modelReady = false;
 
   constructor(
@@ -77,6 +84,30 @@ export class ARHud {
     });
     modelPicker.appendChild(this.modelSelect);
     statusPanel.appendChild(modelPicker);
+
+    const cameraPanel = document.createElement('section');
+    cameraPanel.className = 'camera-panel';
+    cameraPanel.innerHTML = `
+      <p class="camera-label">Camera</p>
+      <video class="camera-preview" muted playsinline></video>
+      <p class="camera-status">Start the camera, capture an image, then generate a 3D model.</p>
+      <p class="generated-model-status">Generated model: None yet</p>
+    `;
+    this.cameraPreviewVideo = cameraPanel.querySelector<HTMLVideoElement>('.camera-preview')!;
+    this.cameraStatusMessage = cameraPanel.querySelector<HTMLElement>('.camera-status')!;
+    this.generatedModelMessage = cameraPanel.querySelector<HTMLElement>('.generated-model-status')!;
+
+    const cameraActions = document.createElement('div');
+    cameraActions.className = 'camera-actions';
+    cameraActions.append(
+      this.createButton('Start camera', '', this.handlers.onStartCamera),
+      this.createButton('Capture', '', this.handlers.onCaptureImage),
+    );
+    this.generateButton = this.createButton('Generate 3D', 'primary', this.handlers.onGenerateModel);
+    this.generateButton.disabled = true;
+    cameraActions.append(this.generateButton);
+    cameraPanel.appendChild(cameraActions);
+    statusPanel.appendChild(cameraPanel);
     this.overlay.appendChild(statusPanel);
 
     const actions = document.createElement('div');
@@ -126,6 +157,15 @@ export class ARHud {
 
   updateSelectedModel(modelId: string): void {
     this.modelSelect.value = modelId;
+  }
+
+  updateCameraStatus(message: string, canGenerate: boolean): void {
+    this.cameraStatusMessage.textContent = message;
+    this.generateButton.disabled = !canGenerate;
+  }
+
+  updateGeneratedModelSource(modelUrl: string): void {
+    this.generatedModelMessage.textContent = `Generated model: ${modelUrl}`;
   }
 
   private createButton(label: string, className: string, onClick: () => void): HTMLButtonElement {

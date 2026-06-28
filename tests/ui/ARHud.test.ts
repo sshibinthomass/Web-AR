@@ -23,6 +23,9 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onRotateLeft: vi.fn(),
     onRotateRight: vi.fn(),
     onModelSelect: vi.fn(),
+    onStartCamera: vi.fn(),
+    onCaptureImage: vi.fn(),
+    onGenerateModel: vi.fn(),
     ...overrides,
   };
 }
@@ -92,5 +95,48 @@ describe('ARHud', () => {
     select.dispatchEvent(new Event('change'));
 
     expect(onModelSelect).toHaveBeenCalledWith('img4-output');
+  });
+
+  it('renders camera capture controls', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+
+    expect(root.textContent).toContain('Camera');
+    expect([...root.querySelectorAll('button')].map((button) => button.textContent)).toEqual(
+      expect.arrayContaining(['Start camera', 'Capture', 'Generate 3D']),
+    );
+  });
+
+  it('calls camera handlers from capture controls', () => {
+    const root = document.createElement('div');
+    const onStartCamera = vi.fn();
+    const onCaptureImage = vi.fn();
+    const onGenerateModel = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onStartCamera, onCaptureImage, onGenerateModel }));
+
+    const buttons = [...root.querySelectorAll('button')];
+    buttons.find((button) => button.textContent === 'Start camera')?.click();
+    buttons.find((button) => button.textContent === 'Capture')?.click();
+    hud.updateCameraStatus('Image captured. Ready to generate.', true);
+    buttons.find((button) => button.textContent === 'Generate 3D')?.click();
+
+    expect(onStartCamera).toHaveBeenCalledTimes(1);
+    expect(onCaptureImage).toHaveBeenCalledTimes(1);
+    expect(onGenerateModel).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows generated model status and enables generation after capture', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    hud.updateCameraStatus('Image captured. Ready to generate.', true);
+    hud.updateGeneratedModelSource('https://assets.example/models/generated/capture.glb');
+
+    const generateButton = [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Generate 3D',
+    );
+    expect(root.textContent).toContain('Image captured. Ready to generate.');
+    expect(root.textContent).toContain('Generated model: https://assets.example/models/generated/capture.glb');
+    expect((generateButton as HTMLButtonElement).disabled).toBe(false);
   });
 });
