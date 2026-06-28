@@ -1,23 +1,16 @@
 import * as THREE from 'three';
 import { GestureController } from '../interaction/GestureController';
 import { ObjectTransformController } from '../interaction/ObjectTransformController';
+import { MODEL_OPTIONS } from './models';
 import { createScene, type SceneContext } from '../scene/createScene';
 import { loadGLBModel } from '../scene/loadModel';
 import { AppState } from '../state/AppState';
 import { ARHud } from '../ui/ARHud';
-import { resolveModelSource, resolveModelUrl } from '../utils/assets';
 import { screenPointToFloorPoint, type Point2 } from '../utils/math';
 import { HitTestManager } from '../xr/HitTestManager';
 import { PlaneTrackingManager } from '../xr/PlaneTrackingManager';
 import { checkXRSupport } from '../xr/XRSupport';
 import { createARSessionButton } from '../xr/XRSessionManager';
-
-const MODEL_URL = resolveModelUrl({
-  configuredUrl: import.meta.env.VITE_MODEL_URL,
-  fallbackAssetPath: 'models/trellis-2-4b-fast-output.glb',
-  baseUrl: import.meta.env.BASE_URL,
-});
-const MODEL_SOURCE = resolveModelSource(import.meta.env.VITE_MODEL_URL);
 
 export class WebARApp {
   private sceneContext: SceneContext | null = null;
@@ -38,15 +31,16 @@ export class WebARApp {
     this.hitTestManager = new HitTestManager(sceneContext.reticle);
     this.planeTrackingManager = new PlaneTrackingManager(sceneContext.floorGrid);
 
-    this.hud = new ARHud(this.root, {
+    this.hud = new ARHud(this.root, MODEL_OPTIONS, {
       onPlace: () => this.placeAtLatestHit(),
       onEdit: () => this.setEditing(),
       onReset: () => this.resetObject(),
       onResetScale: () => this.resetScale(),
       onRotateLeft: () => this.rotateBy(-THREE.MathUtils.degToRad(15)),
       onRotateRight: () => this.rotateBy(THREE.MathUtils.degToRad(15)),
+      onModelSelect: (modelId) => void this.loadSelectedModel(modelId),
     });
-    this.hud.updateModelSource(MODEL_SOURCE);
+    this.hud.updateModelSource('Cloudflare only');
 
     this.gestureController = new GestureController(this.hud.gestureSurface, {
       onTap: (point) => this.handleTap(point),
@@ -56,7 +50,6 @@ export class WebARApp {
     });
     this.gestureController.connect();
 
-    await this.loadModel(sceneContext);
     await this.configureXR(sceneContext);
 
     const controller = sceneContext.renderer.xr.getController(0);
@@ -66,18 +59,56 @@ export class WebARApp {
     sceneContext.renderer.setAnimationLoop((time, frame) => this.render(time, frame));
   }
 
-  private async loadModel(sceneContext: SceneContext): Promise<void> {
+  private async loadSelectedModel(modelId: string): Promise<void> {
+    const modelOption = MODEL_OPTIONS.find((model) => model.id === modelId);
+    if (!modelOption) {
+      return;
+    }
+
+    const sceneContext = this.requireScene();
+    const wasPlaced = this.appState.mode === 'placed' || this.appState.mode === 'editing';
+    this.appState.modelLoaded = false;
+    this.hud?.updateModelReady(false);
+    this.hud?.updateSelectedModel(modelId);
+    this.hud?.update(this.appState.mode, `Downloading ${modelOption.label} from Cloudflare...`);
+
     try {
-      const model = await loadGLBModel(MODEL_URL);
+      const model = await loadGLBModel(modelOption.url);
+      this.removeLoadedModels(sceneContext.modelRoot);
       sceneContext.modelRoot.add(model);
       this.transformController.setTarget(sceneContext.modelRoot);
       this.appState.modelLoaded = true;
-      this.hud?.update(this.appState.mode, 'Model loaded. Start AR on the phone.');
+      this.hud?.updateModelReady(true);
+      if (!wasPlaced) {
+        sceneContext.modelRoot.visible = false;
+      }
+      this.hud?.update(this.appState.mode, `${modelOption.label} loaded from Cloudflare.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown model loading error.';
+      this.appState.modelLoaded = false;
+      this.hud?.updateModelReady(false);
       this.appState.setError(`Could not load GLB: ${message}`);
       this.hud?.update(this.appState.mode, this.appState.lastError ?? undefined);
     }
+  }
+
+  private removeLoadedModels(root: THREE.Group): void {
+    root.children
+      .filter((child) => child.name === 'loaded-glb-model')
+      .forEach((model) => {
+        this.disposeModel(model);
+        root.remove(model);
+      });
+  }
+
+  private disposeModel(root: THREE.Object3D): void {
+    root.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((material) => material.dispose());
+      }
+    });
   }
 
   private async configureXR(sceneContext: SceneContext): Promise<void> {
@@ -100,17 +131,17 @@ export class WebARApp {
     sceneContext.renderer.xr.addEventListener('sessionstart', () => {
       this.appState.setMode('scanning');
       this.hitTestManager?.reset();
-      this.hud?.update(this.appState.mode);
+      this.hud?.update(this.appState.mode, this.appState.modelLoaded ? undefined : 'Select a Cloudflare model to download it.');
     });
 
     sceneContext.renderer.xr.addEventListener('sessionend', () => {
-      this.appState.setMode(this.appState.modelLoaded ? 'loading' : 'unsupported');
+      this.appState.setMode('loading');
       this.sceneContext?.floorGrid && (this.sceneContext.floorGrid.visible = false);
       this.hud?.update(this.appState.mode, 'AR session ended. Start AR again to continue.');
     });
 
     this.appState.setMode('loading');
-    this.hud?.update(this.appState.mode, 'Model loaded. Tap Start AR on the phone.');
+    this.hud?.update(this.appState.mode, 'Select a Cloudflare model to download it.');
   }
 
   private render(_time: number, frame?: XRFrame): void {
@@ -182,6 +213,10 @@ export class WebARApp {
   }
 
   private placeAtLatestHit(): void {
+    if (!this.appState.modelLoaded) {
+      return;
+    }
+
     if (this.appState.mode !== 'readyToPlace' && this.appState.mode !== 'scanning') {
       return;
     }

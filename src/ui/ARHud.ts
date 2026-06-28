@@ -1,5 +1,5 @@
 import type { AppMode } from '../state/AppState';
-import type { ModelSourceLabel } from '../utils/assets';
+import type { ModelOption } from '../app/models';
 
 interface HUDHandlers {
   onPlace(): void;
@@ -8,6 +8,7 @@ interface HUDHandlers {
   onResetScale(): void;
   onRotateLeft(): void;
   onRotateRight(): void;
+  onModelSelect(modelId: string): void;
 }
 
 export class ARHud {
@@ -17,13 +18,16 @@ export class ARHud {
 
   private readonly statusMessage: HTMLElement;
   private readonly sourceMessage: HTMLElement;
+  private readonly modelSelect: HTMLSelectElement;
   private readonly placeButton: HTMLButtonElement;
   private readonly editButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
   private readonly resetScaleButton: HTMLButtonElement;
+  private modelReady = false;
 
   constructor(
     root: HTMLElement,
+    modelOptions: ModelOption[],
     private readonly handlers: HUDHandlers,
   ) {
     const shell = document.createElement('div');
@@ -57,6 +61,22 @@ export class ARHud {
     `;
     this.statusMessage = statusPanel.querySelector<HTMLElement>('.status-message')!;
     this.sourceMessage = statusPanel.querySelector<HTMLElement>('.status-source')!;
+
+    const modelPicker = document.createElement('label');
+    modelPicker.className = 'model-picker';
+    modelPicker.innerHTML = '<span>Model</span>';
+    this.modelSelect = document.createElement('select');
+    this.modelSelect.append(new Option('Select model', '', true, true));
+    modelOptions.forEach((model) => {
+      this.modelSelect.append(new Option(model.label, model.id));
+    });
+    this.modelSelect.addEventListener('change', () => {
+      if (this.modelSelect.value) {
+        this.handlers.onModelSelect(this.modelSelect.value);
+      }
+    });
+    modelPicker.appendChild(this.modelSelect);
+    statusPanel.appendChild(modelPicker);
     this.overlay.appendChild(statusPanel);
 
     const actions = document.createElement('div');
@@ -90,14 +110,22 @@ export class ARHud {
     this.statusMessage.textContent = customMessage ?? this.messageForMode(mode);
 
     const hasPlacedObject = mode === 'placed' || mode === 'editing';
-    this.placeButton.disabled = mode !== 'scanning' && mode !== 'readyToPlace';
+    this.placeButton.disabled = !this.modelReady || (mode !== 'scanning' && mode !== 'readyToPlace');
     this.editButton.disabled = !hasPlacedObject;
     this.resetScaleButton.disabled = !hasPlacedObject;
     this.resetButton.disabled = !hasPlacedObject;
   }
 
-  updateModelSource(source: ModelSourceLabel): void {
+  updateModelSource(source: string): void {
     this.sourceMessage.textContent = `Model source: ${source}`;
+  }
+
+  updateModelReady(isReady: boolean): void {
+    this.modelReady = isReady;
+  }
+
+  updateSelectedModel(modelId: string): void {
+    this.modelSelect.value = modelId;
   }
 
   private createButton(label: string, className: string, onClick: () => void): HTMLButtonElement {
