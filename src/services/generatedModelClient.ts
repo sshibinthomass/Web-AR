@@ -1,3 +1,5 @@
+import type { ModelOption } from '../app/models';
+
 export interface GenerateModelInput {
   apiUrl: string;
   imageBase64: string;
@@ -13,6 +15,18 @@ export interface GeneratedModelResult {
   bytes: number;
 }
 
+export interface StartGeneratedModelJobResult {
+  id: string;
+  label: string;
+  status: 'running';
+  statusUrl: string;
+}
+
+interface ListGeneratedModelsInput {
+  apiUrl: string;
+  fetchImpl?: typeof fetch;
+}
+
 interface WorkerSuccessResponse {
   model_url: string;
   object_key: string;
@@ -25,7 +39,80 @@ interface WorkerErrorResponse {
 
 interface WorkerJobResponse {
   job_id: string;
+  label?: string;
+  status?: string;
   status_url: string;
+}
+
+interface WorkerGeneratedModelEntry {
+  id: string;
+  label: string;
+  model_url: string;
+  object_key: string;
+}
+
+interface WorkerGeneratedModelsResponse {
+  models?: WorkerGeneratedModelEntry[];
+}
+
+export async function startGeneratedModelJob({
+  apiUrl,
+  imageBase64,
+  imageMimeType,
+  fetchImpl = fetch,
+}: GenerateModelInput): Promise<StartGeneratedModelJobResult> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const response = await fetchImpl(apiUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      image_base64: imageBase64,
+      image_mime_type: imageMimeType,
+    }),
+  });
+
+  const body = (await response.json()) as WorkerJobResponse | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Generation failed with HTTP ${response.status}.`);
+  }
+
+  if (!('job_id' in body) || !body.job_id || !body.status_url) {
+    throw new Error('Worker response did not include a generated model job.');
+  }
+
+  return {
+    id: body.job_id,
+    label: body.label ?? body.job_id,
+    status: 'running',
+    statusUrl: body.status_url,
+  };
+}
+
+export async function listGeneratedModels({
+  apiUrl,
+  fetchImpl = fetch,
+}: ListGeneratedModelsInput): Promise<ModelOption[]> {
+  if (!apiUrl) {
+    return [];
+  }
+
+  const response = await fetchImpl(`${apiUrl.replace(/\/+$/, '')}/models`);
+  const body = (await response.json()) as WorkerGeneratedModelsResponse | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Model list failed with HTTP ${response.status}.`);
+  }
+
+  const modelList = body as WorkerGeneratedModelsResponse;
+  return (modelList.models ?? [])
+    .filter((model: WorkerGeneratedModelEntry) => model.id && model.label && model.model_url)
+    .map((model: WorkerGeneratedModelEntry) => ({
+      id: `generated-${model.id}`,
+      label: model.label,
+      url: model.model_url,
+    }));
 }
 
 export async function generateModelFromImage({

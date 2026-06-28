@@ -31,6 +31,7 @@ export class ARHud {
   private readonly resetButton: HTMLButtonElement;
   private readonly resetScaleButton: HTMLButtonElement;
   private readonly generateButton: HTMLButtonElement;
+  private readonly baseModelOptions: ModelOption[];
   private modelReady = false;
 
   constructor(
@@ -38,6 +39,7 @@ export class ARHud {
     modelOptions: ModelOption[],
     private readonly handlers: HUDHandlers,
   ) {
+    this.baseModelOptions = [...modelOptions];
     const shell = document.createElement('div');
     shell.className = 'app-shell';
     root.appendChild(shell);
@@ -168,6 +170,17 @@ export class ARHud {
 
   updateGeneratedModelSource(modelUrl: string): void {
     this.generatedModelMessage.textContent = `Generated model: ${modelUrl}`;
+  }
+
+  updateGeneratedModels(generatedModels: ModelOption[]): void {
+    const selectedModelId = this.modelSelect.value;
+    this.modelSelect.replaceChildren(new Option('Select model', '', true, !selectedModelId));
+    [...this.baseModelOptions, ...generatedModels].forEach((model) => {
+      this.modelSelect.append(new Option(model.label, model.id));
+    });
+    if ([...this.modelSelect.options].some((option) => option.value === selectedModelId)) {
+      this.modelSelect.value = selectedModelId;
+    }
   }
 
   setCameraPanelVisible(isVisible: boolean): void {

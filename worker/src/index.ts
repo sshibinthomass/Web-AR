@@ -2,6 +2,8 @@ export interface ModelBucket {
   get(key: string): Promise<{
     body: BodyInit | null;
     httpMetadata?: { contentType?: string };
+    text?(): Promise<string>;
+    arrayBuffer?(): Promise<ArrayBuffer>;
   } | null>;
   put(
     key: string,
@@ -20,6 +22,15 @@ export interface WorkerEnv {
   MODEL_BUCKET: ModelBucket;
 }
 
+interface ScheduledEvent {
+  cron: string;
+  scheduledTime: number;
+}
+
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
 interface GenerateModelDeps {
   fetch: typeof fetch;
   now: () => Date;
@@ -30,6 +41,48 @@ interface GenerateModelRequestBody {
   image_mime_type?: unknown;
 }
 
+interface StoredJob {
+  id: string;
+  label: string;
+  status: 'running' | 'completed' | 'failed';
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+  failed_at?: string;
+  error?: string;
+  model_url?: string;
+  object_key?: string;
+  bytes?: number;
+}
+
+interface JobsIndex {
+  pending: string[];
+}
+
+interface GeneratedModelEntry {
+  id: string;
+  label: string;
+  model_url: string;
+  object_key: string;
+  completed_at: string;
+  bytes: number;
+}
+
+interface GeneratedModelsIndex {
+  models: GeneratedModelEntry[];
+}
+
+interface ScheduledPollResult {
+  completed: number;
+  failed: number;
+  stillRunning: number;
+}
+
+type ProcessJobResult =
+  | { state: 'running'; job: StoredJob }
+  | { state: 'completed'; job: StoredJob }
+  | { state: 'failed'; job: StoredJob };
+
 const modalPayloadDefaults = {
   seed: 42,
   pipeline_type: '512',
@@ -37,9 +90,13 @@ const modalPayloadDefaults = {
   texture_size: 1024,
 };
 
+const generatedModelsIndexKey = 'models/generated/index.json';
+const pendingJobsIndexKey = 'models/generated/jobs/index.json';
+const jobKeyPrefix = 'models/generated/jobs/';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -49,6 +106,14 @@ export default {
       fetch: (input, init) => fetch(input, init),
       now: () => new Date(),
     });
+  },
+  scheduled(_event: ScheduledEvent, env: WorkerEnv, ctx: ExecutionContext): void {
+    ctx.waitUntil(
+      handleScheduledPendingJobs(env, {
+        fetch: (input, init) => fetch(input, init),
+        now: () => new Date(),
+      }),
+    );
   },
 };
 
@@ -68,6 +133,13 @@ export async function handleGenerateModelRequest(
 
   if (request.method === 'GET' && url.pathname.startsWith('/models/generated/')) {
     return serveGeneratedModel(url.pathname.slice(1), env);
+  }
+
+  if (request.method === 'GET' && url.pathname === '/generate-3d/models') {
+    const index = await readGeneratedModelsIndex(env);
+    return jsonResponse({
+      models: index.models.sort((left, right) => right.completed_at.localeCompare(left.completed_at)),
+    });
   }
 
   if (request.method === 'GET' && url.pathname.startsWith('/generate-3d/jobs/')) {
@@ -115,9 +187,22 @@ export async function handleGenerateModelRequest(
     return jsonResponse({ error: 'Modal job start response did not include a call_id.' }, 502);
   }
 
+  const now = deps.now();
+  const job: StoredJob = {
+    id: modalJob.call_id,
+    label: formatDisplayTimestamp(now),
+    status: 'running',
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+  };
+  await saveJob(env, job);
+  await addPendingJob(env, job.id);
+
   return jsonResponse(
     {
       job_id: modalJob.call_id,
+      label: job.label,
+      status: job.status,
       status_url: `${url.origin}/generate-3d/jobs/${encodeURIComponent(modalJob.call_id)}`,
     },
     202,
@@ -135,8 +220,64 @@ async function pollModalJob(
   }
 
   const url = new URL(request.url);
+  const result = await processModalJob(env, deps, jobId, url.origin);
+
+  if (result.state === 'running') {
+    return jsonResponse({ status: 'running' }, 202);
+  }
+
+  if (result.state === 'failed') {
+    return jsonResponse({ error: result.job.error ?? 'Modal job result failed.' }, 502);
+  }
+
+  return jsonResponse(toJobResponse(result.job));
+}
+
+export async function handleScheduledPendingJobs(
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<ScheduledPollResult> {
+  const configError = validateEnv(env);
+  if (configError) {
+    return { completed: 0, failed: 1, stillRunning: 0 };
+  }
+
+  const index = await readJobsIndex(env);
+  const counts: ScheduledPollResult = { completed: 0, failed: 0, stillRunning: 0 };
+
+  for (const jobId of index.pending) {
+    const result = await processModalJob(env, deps, jobId);
+    if (result.state === 'completed') {
+      counts.completed += 1;
+    } else if (result.state === 'failed') {
+      counts.failed += 1;
+    } else {
+      counts.stillRunning += 1;
+    }
+  }
+
+  return counts;
+}
+
+async function processModalJob(
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  jobId: string,
+  requestOrigin?: string,
+): Promise<ProcessJobResult> {
   const resultUrl = new URL(env.MODAL_IMAGE_TO_3D_RESULT_URL);
   resultUrl.searchParams.set('call_id', jobId);
+  const now = deps.now();
+  const existingJob = await readJob(env, jobId);
+  const job =
+    existingJob ??
+    ({
+      id: jobId,
+      label: formatDisplayTimestamp(now),
+      status: 'running',
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
+    } satisfies StoredJob);
 
   const modalResponse = await deps.fetch(resultUrl.toString(), {
     method: 'GET',
@@ -147,15 +288,30 @@ async function pollModalJob(
   });
 
   if (modalResponse.status === 202) {
-    return jsonResponse({ status: 'running' }, 202);
+    const runningJob: StoredJob = {
+      ...job,
+      status: 'running',
+      updated_at: now.toISOString(),
+    };
+    await saveJob(env, runningJob);
+    return { state: 'running', job: runningJob };
   }
 
   if (!modalResponse.ok) {
-    return jsonResponse({ error: `Modal job result failed: ${await modalResponse.text()}` }, 502);
+    const failedJob: StoredJob = {
+      ...job,
+      status: 'failed',
+      error: `Modal job result failed: ${await modalResponse.text()}`,
+      failed_at: now.toISOString(),
+      updated_at: now.toISOString(),
+    };
+    await saveJob(env, failedJob);
+    await removePendingJob(env, jobId);
+    return { state: 'failed', job: failedJob };
   }
 
   const glbBytes = await modalResponse.arrayBuffer();
-  const objectKey = `models/generated/capture-${formatTimestamp(deps.now())}.glb`;
+  const objectKey = `models/generated/capture-${formatTimestamp(new Date(job.created_at))}-${safeObjectKeyPart(job.id)}.glb`;
 
   await env.MODEL_BUCKET.put(objectKey, glbBytes, {
     httpMetadata: {
@@ -163,12 +319,20 @@ async function pollModalJob(
     },
   });
 
-  const publicOrigin = (env.PUBLIC_MODEL_ORIGIN || url.origin).replace(/\/+$/, '');
-  return jsonResponse({
+  const publicOrigin = getPublicOrigin(env, requestOrigin);
+  const completedJob: StoredJob = {
+    ...job,
+    status: 'completed',
+    completed_at: now.toISOString(),
+    updated_at: now.toISOString(),
     model_url: `${publicOrigin}/${objectKey}`,
     object_key: objectKey,
     bytes: glbBytes.byteLength,
-  });
+  };
+  await saveJob(env, completedJob);
+  await upsertGeneratedModel(env, completedJob);
+  await removePendingJob(env, jobId);
+  return { state: 'completed', job: completedJob };
 }
 
 function validateEnv(env: WorkerEnv): string | null {
@@ -221,6 +385,112 @@ async function serveGeneratedModel(objectKey: string, env: WorkerEnv): Promise<R
   });
 }
 
+async function readJob(env: WorkerEnv, jobId: string): Promise<StoredJob | null> {
+  return readJsonObject<StoredJob | null>(env, jobStorageKey(jobId), null);
+}
+
+async function saveJob(env: WorkerEnv, job: StoredJob): Promise<void> {
+  await writeJsonObject(env, jobStorageKey(job.id), job);
+}
+
+async function readJobsIndex(env: WorkerEnv): Promise<JobsIndex> {
+  return readJsonObject<JobsIndex>(env, pendingJobsIndexKey, { pending: [] });
+}
+
+async function addPendingJob(env: WorkerEnv, jobId: string): Promise<void> {
+  const index = await readJobsIndex(env);
+  if (!index.pending.includes(jobId)) {
+    index.pending.push(jobId);
+  }
+  await writeJsonObject(env, pendingJobsIndexKey, index);
+}
+
+async function removePendingJob(env: WorkerEnv, jobId: string): Promise<void> {
+  const index = await readJobsIndex(env);
+  const nextPending = index.pending.filter((pendingJobId) => pendingJobId !== jobId);
+  await writeJsonObject(env, pendingJobsIndexKey, { pending: nextPending });
+}
+
+async function readGeneratedModelsIndex(env: WorkerEnv): Promise<GeneratedModelsIndex> {
+  return readJsonObject<GeneratedModelsIndex>(env, generatedModelsIndexKey, { models: [] });
+}
+
+async function upsertGeneratedModel(env: WorkerEnv, job: StoredJob): Promise<void> {
+  if (!job.model_url || !job.object_key || !job.completed_at || typeof job.bytes !== 'number') {
+    return;
+  }
+
+  const index = await readGeneratedModelsIndex(env);
+  const entry: GeneratedModelEntry = {
+    id: job.id,
+    label: job.label,
+    model_url: job.model_url,
+    object_key: job.object_key,
+    completed_at: job.completed_at,
+    bytes: job.bytes,
+  };
+  const models = [entry, ...index.models.filter((model) => model.id !== entry.id)].sort((left, right) =>
+    right.completed_at.localeCompare(left.completed_at),
+  );
+  await writeJsonObject(env, generatedModelsIndexKey, { models });
+}
+
+async function readJsonObject<T>(env: WorkerEnv, key: string, fallback: T): Promise<T> {
+  const object = await env.MODEL_BUCKET.get(key);
+  if (!object?.body) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(await readObjectText(object)) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeJsonObject(env: WorkerEnv, key: string, value: unknown): Promise<void> {
+  await env.MODEL_BUCKET.put(key, JSON.stringify(value), {
+    httpMetadata: {
+      contentType: 'application/json',
+    },
+  });
+}
+
+async function readObjectText(object: {
+  body: BodyInit | null;
+  text?(): Promise<string>;
+  arrayBuffer?(): Promise<ArrayBuffer>;
+}): Promise<string> {
+  if (object.text) {
+    return object.text();
+  }
+
+  if (typeof object.body === 'string') {
+    return object.body;
+  }
+
+  if (object.arrayBuffer) {
+    return new TextDecoder().decode(await object.arrayBuffer());
+  }
+
+  if (object.body instanceof ArrayBuffer) {
+    return new TextDecoder().decode(object.body);
+  }
+
+  return new Response(object.body).text();
+}
+
+function toJobResponse(job: StoredJob): Record<string, unknown> {
+  return {
+    id: job.id,
+    label: job.label,
+    status: job.status,
+    model_url: job.model_url,
+    object_key: job.object_key,
+    bytes: job.bytes,
+  };
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -229,6 +499,14 @@ function jsonResponse(body: unknown, status = 200): Response {
       'Content-Type': 'application/json',
     },
   });
+}
+
+function jobStorageKey(jobId: string): string {
+  return `${jobKeyPrefix}${safeObjectKeyPart(jobId)}.json`;
+}
+
+function getPublicOrigin(env: WorkerEnv, requestOrigin?: string): string {
+  return (env.PUBLIC_MODEL_ORIGIN || requestOrigin || '').replace(/\/+$/, '');
 }
 
 function formatTimestamp(date: Date): string {
@@ -242,4 +520,15 @@ function formatTimestamp(date: Date): string {
     pad(date.getUTCMinutes()),
     pad(date.getUTCSeconds()),
   ].join('');
+}
+
+function formatDisplayTimestamp(date: Date): string {
+  const pad = (value: number): string => value.toString().padStart(2, '0');
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(
+    date.getUTCHours(),
+  )}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} UTC`;
+}
+
+function safeObjectKeyPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80);
 }

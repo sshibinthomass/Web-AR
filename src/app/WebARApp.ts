@@ -5,7 +5,7 @@ import { MODEL_OPTIONS } from './models';
 import { captureVideoFrame, startCameraPreview, stopCameraPreview, type CapturedImage } from '../capture/cameraCapture';
 import { createScene, type SceneContext } from '../scene/createScene';
 import { loadGLBModel } from '../scene/loadModel';
-import { generateModelFromImage } from '../services/generatedModelClient';
+import { listGeneratedModels, startGeneratedModelJob } from '../services/generatedModelClient';
 import { AppState } from '../state/AppState';
 import { ARHud } from '../ui/ARHud';
 import { screenPointToFloorPoint, type Point2 } from '../utils/math';
@@ -26,6 +26,7 @@ export class WebARApp {
   private cameraStream: MediaStream | null = null;
   private capturedImage: CapturedImage | null = null;
   private lastHudMode = this.appState.mode;
+  private availableModels = [...MODEL_OPTIONS];
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -48,6 +49,13 @@ export class WebARApp {
       onGenerateModel: () => void this.generateModel(),
     });
     this.hud.updateModelSource('Cloudflare only');
+    void this.refreshGeneratedModels();
+    window.setInterval(() => {
+      void this.refreshGeneratedModels();
+    }, 60_000);
+    window.addEventListener('focus', () => {
+      void this.refreshGeneratedModels();
+    });
 
     this.gestureController = new GestureController(this.hud.gestureSurface, {
       onTap: (point) => this.handleTap(point),
@@ -67,7 +75,7 @@ export class WebARApp {
   }
 
   private async loadSelectedModel(modelId: string): Promise<void> {
-    const modelOption = MODEL_OPTIONS.find((model) => model.id === modelId);
+    const modelOption = this.availableModels.find((model) => model.id === modelId);
     if (!modelOption) {
       return;
     }
@@ -157,24 +165,39 @@ export class WebARApp {
       return;
     }
 
-    this.hud?.updateCameraStatus('Generating 3D model with Modal...', false);
+    this.hud?.updateCameraStatus('Starting background generation...', false);
 
     try {
-      const generatedModel = await generateModelFromImage({
+      const job = await startGeneratedModelJob({
         apiUrl: import.meta.env.VITE_GENERATE_MODEL_API_URL ?? '',
         imageBase64: this.capturedImage.imageBase64,
         imageMimeType: this.capturedImage.imageMimeType,
       });
-      this.hud?.updateGeneratedModelSource(generatedModel.modelUrl);
-      this.hud?.updateCameraStatus(`Generated model saved to Cloudflare (${generatedModel.bytes} bytes).`, false);
-      await this.loadModelFromUrl(generatedModel.modelUrl, 'generated model', {
-        loadingMessage: 'Loading generated model from Cloudflare...',
-        successMessage: 'Generated model loaded. Start AR or place it on the floor.',
-        sourceMessage: 'Modal generated via Cloudflare Worker',
-      });
+      this.capturedImage = null;
+      this.hud?.updateGeneratedModelSource(`${job.label} (generating in background)`);
+      this.hud?.updateCameraStatus(
+        `Generation started: ${job.label}. You can close the app; it will appear in the Model dropdown when ready.`,
+        false,
+      );
+      void this.refreshGeneratedModels();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown generation error.';
       this.hud?.updateCameraStatus(`Generation failed: ${message}`, true);
+    }
+  }
+
+  private async refreshGeneratedModels(): Promise<void> {
+    const apiUrl = import.meta.env.VITE_GENERATE_MODEL_API_URL ?? '';
+    if (!apiUrl) {
+      return;
+    }
+
+    try {
+      const generatedModels = await listGeneratedModels({ apiUrl });
+      this.availableModels = [...MODEL_OPTIONS, ...generatedModels];
+      this.hud?.updateGeneratedModels(generatedModels);
+    } catch (error) {
+      console.warn('Could not refresh generated models.', error);
     }
   }
 

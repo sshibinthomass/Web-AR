@@ -1,5 +1,80 @@
 import { describe, expect, it, vi } from 'vitest';
-import { generateModelFromImage } from '../../src/services/generatedModelClient';
+import {
+  generateModelFromImage,
+  listGeneratedModels,
+  startGeneratedModelJob,
+} from '../../src/services/generatedModelClient';
+
+describe('startGeneratedModelJob', () => {
+  it('starts a Worker job without polling for the final GLB', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          job_id: 'fc-123',
+          label: '2026-06-28 12:00:00 UTC',
+          status: 'running',
+          status_url: 'https://worker.example/generate-3d/jobs/fc-123',
+        }),
+        {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const job = await startGeneratedModelJob({
+      apiUrl: 'https://worker.example/generate-3d',
+      imageBase64: 'abc123',
+      imageMimeType: 'image/jpeg',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(job).toEqual({
+      id: 'fc-123',
+      label: '2026-06-28 12:00:00 UTC',
+      status: 'running',
+      statusUrl: 'https://worker.example/generate-3d/jobs/fc-123',
+    });
+  });
+});
+
+describe('listGeneratedModels', () => {
+  it('loads permanent generated models for the dropdown', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          models: [
+            {
+              id: 'fc-123',
+              label: '2026-06-28 12:00:00 UTC',
+              model_url: 'https://assets.example/generated.glb',
+              object_key: 'models/generated/capture.glb',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const models = await listGeneratedModels({
+      apiUrl: 'https://worker.example/generate-3d',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith('https://worker.example/generate-3d/models');
+    expect(models).toEqual([
+      {
+        id: 'generated-fc-123',
+        label: '2026-06-28 12:00:00 UTC',
+        url: 'https://assets.example/generated.glb',
+      },
+    ]);
+  });
+});
 
 describe('generateModelFromImage', () => {
   it('posts the captured image to the Worker and returns the generated model result', async () => {

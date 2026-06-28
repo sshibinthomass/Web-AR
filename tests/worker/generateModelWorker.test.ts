@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import worker, { handleGenerateModelRequest, type WorkerEnv } from '../../worker/src/index';
+import worker, { handleGenerateModelRequest, handleScheduledPendingJobs, type WorkerEnv } from '../../worker/src/index';
 
 function createEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
   return {
@@ -88,7 +88,7 @@ describe('handleGenerateModelRequest', () => {
     );
 
     expect(await response.json()).toMatchObject({
-      model_url: 'https://worker.example/models/generated/capture-20260628-120000.glb',
+      model_url: 'https://worker.example/models/generated/capture-20260628-120000-fc-123.glb',
     });
   });
 
@@ -139,9 +139,21 @@ describe('handleGenerateModelRequest', () => {
         }),
       }),
     );
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/jobs/fc-123.json',
+      expect.stringContaining('"label":"2026-06-28 12:00:00 UTC"'),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/jobs/index.json',
+      JSON.stringify({ pending: ['fc-123'] }),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({
       job_id: 'fc-123',
+      label: '2026-06-28 12:00:00 UTC',
+      status: 'running',
       status_url: 'https://worker.example/generate-3d/jobs/fc-123',
     });
   });
@@ -178,14 +190,17 @@ describe('handleGenerateModelRequest', () => {
     );
 
     expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
-      'models/generated/capture-20260628-120000.glb',
+      'models/generated/capture-20260628-120000-fc-123.glb',
       expect.any(ArrayBuffer),
       { httpMetadata: { contentType: 'model/gltf-binary' } },
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      model_url: 'https://web-ar-model-assets.pages.dev/models/generated/capture-20260628-120000.glb',
-      object_key: 'models/generated/capture-20260628-120000.glb',
+    expect(await response.json()).toMatchObject({
+      id: 'fc-123',
+      label: '2026-06-28 12:00:00 UTC',
+      status: 'completed',
+      model_url: 'https://web-ar-model-assets.pages.dev/models/generated/capture-20260628-120000-fc-123.glb',
+      object_key: 'models/generated/capture-20260628-120000-fc-123.glb',
       bytes: 4,
     });
   });
@@ -195,6 +210,111 @@ describe('handleGenerateModelRequest', () => {
 
     expect(source).not.toContain('fetch,');
     expect(source).toContain('fetch(input, init)');
+  });
+
+  it('lists permanently generated models from R2 newest first', async () => {
+    const env = createEnv({
+      MODEL_BUCKET: {
+        get: vi.fn().mockResolvedValue({
+          body: JSON.stringify({
+            models: [
+              {
+                id: 'older',
+                label: '2026-06-28 11:00:00 UTC',
+                model_url: 'https://assets.example/older.glb',
+                object_key: 'models/generated/older.glb',
+                completed_at: '2026-06-28T11:00:00.000Z',
+                bytes: 4,
+              },
+              {
+                id: 'newer',
+                label: '2026-06-28 12:00:00 UTC',
+                model_url: 'https://assets.example/newer.glb',
+                object_key: 'models/generated/newer.glb',
+                completed_at: '2026-06-28T12:00:00.000Z',
+                bytes: 4,
+              },
+            ],
+          }),
+          httpMetadata: { contentType: 'application/json' },
+        }),
+        put: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    const response = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/models'),
+      env,
+      { fetch: vi.fn(), now: () => new Date('2026-06-28T12:00:00Z') },
+    );
+
+    expect(env.MODEL_BUCKET.get).toHaveBeenCalledWith('models/generated/index.json');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      models: [
+        expect.objectContaining({ id: 'newer', label: '2026-06-28 12:00:00 UTC' }),
+        expect.objectContaining({ id: 'older', label: '2026-06-28 11:00:00 UTC' }),
+      ],
+    });
+  });
+
+  it('scheduled polling completes pending Modal jobs and indexes them permanently', async () => {
+    const storedObjects = new Map<string, string>();
+    storedObjects.set('models/generated/jobs/index.json', JSON.stringify({ pending: ['fc-123'] }));
+    storedObjects.set(
+      'models/generated/jobs/fc-123.json',
+      JSON.stringify({
+        id: 'fc-123',
+        label: '2026-06-28 12:00:00 UTC',
+        status: 'running',
+        created_at: '2026-06-28T12:00:00.000Z',
+        updated_at: '2026-06-28T12:00:00.000Z',
+      }),
+    );
+    storedObjects.set('models/generated/index.json', JSON.stringify({ models: [] }));
+    const env = createEnv({
+      MODEL_BUCKET: {
+        get: vi.fn((key: string) => {
+          const value = storedObjects.get(key);
+          return Promise.resolve(
+            value
+              ? {
+                  body: value,
+                  httpMetadata: { contentType: 'application/json' },
+                }
+              : null,
+          );
+        }),
+        put: vi.fn((key: string, value: ArrayBuffer | ReadableStream | string) => {
+          if (typeof value === 'string') {
+            storedObjects.set(key, value);
+          }
+          return Promise.resolve(undefined);
+        }),
+      },
+    });
+
+    const processed = await handleScheduledPendingJobs(env, {
+      fetch: vi.fn().mockResolvedValue(
+        new Response(new Uint8Array([0x67, 0x6c, 0x54, 0x46]).buffer, {
+          status: 200,
+          headers: { 'Content-Type': 'model/gltf-binary' },
+        }),
+      ),
+      now: () => new Date('2026-06-28T12:05:00Z'),
+    });
+
+    expect(processed).toEqual({ completed: 1, failed: 0, stillRunning: 0 });
+    expect(JSON.parse(storedObjects.get('models/generated/jobs/index.json')!)).toEqual({ pending: [] });
+    expect(JSON.parse(storedObjects.get('models/generated/index.json')!)).toEqual({
+      models: [
+        expect.objectContaining({
+          id: 'fc-123',
+          label: '2026-06-28 12:00:00 UTC',
+          model_url: 'https://web-ar-model-assets.pages.dev/models/generated/capture-20260628-120000-fc-123.glb',
+        }),
+      ],
+    });
   });
 
   it('returns a gateway error when Modal fails', async () => {

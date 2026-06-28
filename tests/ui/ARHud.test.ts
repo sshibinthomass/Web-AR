@@ -140,6 +140,31 @@ describe('ARHud', () => {
     expect((generateButton as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('refreshes generated datetime models in the dropdown without losing built-in models', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-fc-123',
+        label: '2026-06-28 12:00:00 UTC',
+        url: 'https://assets.example/generated.glb',
+      },
+    ]);
+
+    const options = [...root.querySelectorAll('option')].map((option) => ({
+      label: option.textContent,
+      value: option.value,
+    }));
+
+    expect(options).toEqual([
+      { label: 'Select model', value: '' },
+      { label: 'Fast output', value: 'trellis-fast-output' },
+      { label: 'Image 4 output', value: 'img4-output' },
+      { label: '2026-06-28 12:00:00 UTC', value: 'generated-fc-123' },
+    ]);
+  });
+
   it('can hide the camera capture panel while AR is running', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
