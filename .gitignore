@@ -1,0 +1,14 @@
+node_modules/
+dist/
+artifacts/
+
+*.log
+localtunnel*.out.log
+localtunnel*.err.log
+vite-dev*.log
+vite-preview*.log
+
+.DS_Store
+Thumbs.db
+.env
+.env.*

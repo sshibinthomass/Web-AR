@@ -1,0 +1,192 @@
+:root {
+  color: #f8fafc;
+  background: #0f172a;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+
+body {
+  background:
+    radial-gradient(circle at 50% 18%, rgba(20, 184, 166, 0.18), transparent 34%),
+    linear-gradient(145deg, #101820 0%, #162226 48%, #241f33 100%);
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.app-shell {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+.xr-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom));
+  pointer-events: none;
+}
+
+.gesture-surface {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.status-panel {
+  position: relative;
+  z-index: 3;
+  align-self: stretch;
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(10, 15, 20, 0.68);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.status-label {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.status-message {
+  margin: 4px 0 0;
+  color: #ffffff;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.hud-actions {
+  position: fixed;
+  right: 16px;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  left: 16px;
+  z-index: 4;
+  align-self: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 620px;
+  margin: 0 auto;
+  pointer-events: auto;
+}
+
+.hud-actions button,
+#ARButton {
+  min-width: 48px;
+  min-height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #f8fafc;
+  background: rgba(5, 10, 14, 0.78);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(14px);
+}
+
+.hud-actions button:disabled {
+  color: rgba(248, 250, 252, 0.48);
+  background: rgba(5, 10, 14, 0.38);
+}
+
+.hud-actions button.primary,
+#ARButton {
+  color: #031b18;
+  background: #5eead4;
+}
+
+.hud-actions button.primary:disabled {
+  color: rgba(248, 250, 252, 0.48);
+  background: rgba(5, 10, 14, 0.38);
+}
+
+.ar-button-slot {
+  flex: 1 0 100%;
+  display: flex;
+  justify-content: center;
+  min-height: 52px;
+  pointer-events: auto;
+}
+
+.ar-button-slot #ARButton {
+  position: static !important;
+  inset: auto !important;
+  transform: none !important;
+  width: min(420px, 100%) !important;
+  min-width: 0 !important;
+  min-height: 52px !important;
+  margin: 0 !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  font-size: 15px !important;
+  text-align: center !important;
+  touch-action: manipulation;
+}
+
+.landing {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 24px 24px 190px;
+  pointer-events: none;
+}
+
+.landing-inner {
+  width: min(640px, 100%);
+}
+
+.landing h1 {
+  margin: 0 0 12px;
+  color: #ffffff;
+  font-size: clamp(32px, 9vw, 68px);
+  line-height: 0.96;
+  letter-spacing: 0;
+}
+
+.landing p {
+  max-width: 56ch;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 16px;
+  line-height: 1.5;
+}
