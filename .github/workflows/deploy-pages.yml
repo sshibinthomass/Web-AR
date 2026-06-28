@@ -38,6 +38,7 @@ jobs:
         run: npm run build
         env:
           GITHUB_PAGES: "true"
+          VITE_MODEL_URL: ${{ vars.CLOUDFLARE_MODEL_URL }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

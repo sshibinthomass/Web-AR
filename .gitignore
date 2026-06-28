@@ -12,3 +12,4 @@ vite-preview*.log
 Thumbs.db
 .env
 .env.*
+!.env.example
