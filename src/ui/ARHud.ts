@@ -43,11 +43,12 @@ export class ARHud {
   private readonly editButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
   private readonly resetScaleButton: HTMLButtonElement;
+  private readonly captureButton: HTMLButtonElement;
+  private readonly submitButton: HTMLButtonElement;
   private readonly generateButton: HTMLButtonElement;
   private readonly baseModelOptions: ModelOption[];
   private modelReady = false;
   private activeRoute: HudRoute | null = null;
-  private captureReadyForGeneration = false;
 
   constructor(
     root: HTMLElement,
@@ -144,12 +145,13 @@ export class ARHud {
 
     const cameraActions = document.createElement('div');
     cameraActions.className = 'camera-actions';
-    cameraActions.append(
-      this.createButton('Capture', '', () => this.handleCaptureClick()),
-    );
+    this.captureButton = this.createButton('Capture', '', () => this.handleCaptureClick());
+    this.submitButton = this.createButton('Submit', '', () => this.handleSubmitClick());
+    this.submitButton.classList.add('hidden');
+    this.submitButton.disabled = true;
     this.generateButton = this.createButton('Generate 3D', 'primary', () => this.handleGenerateClick());
     this.generateButton.disabled = true;
-    cameraActions.append(this.generateButton);
+    cameraActions.append(this.captureButton, this.submitButton, this.generateButton);
     cameraPanel.appendChild(cameraActions);
     this.statusPanel.appendChild(cameraPanel);
     this.overlay.appendChild(this.statusPanel);
@@ -209,6 +211,9 @@ export class ARHud {
   updateCameraStatus(message: string, canGenerate: boolean): void {
     this.cameraStatusMessage.textContent = message;
     this.generateButton.disabled = !canGenerate;
+    if (!this.submitButton.classList.contains('hidden')) {
+      this.submitButton.disabled = !canGenerate;
+    }
   }
 
   showLiveCameraPreview(): void {
@@ -218,8 +223,13 @@ export class ARHud {
     this.targetObjectInput.value = '';
     this.targetObjectInput.classList.add('hidden');
     this.targetObjectLabel.classList.add('hidden');
-    this.captureReadyForGeneration = false;
-    this.generateButton.textContent = 'Generate 3D';
+    this.captureButton.classList.remove('hidden');
+    this.captureButton.disabled = false;
+    this.submitButton.classList.add('hidden');
+    this.submitButton.disabled = true;
+    this.generateButton.classList.remove('hidden');
+    this.generateButton.textContent = this.generationButtonLabel();
+    this.generateButton.disabled = true;
   }
 
   showCapturedImagePreview(imageUrl: string): void {
@@ -228,9 +238,12 @@ export class ARHud {
     this.cameraPreviewImage.classList.remove('hidden');
     this.targetObjectInput.classList.remove('hidden');
     this.targetObjectLabel.classList.remove('hidden');
-    this.captureReadyForGeneration = false;
-    this.generateButton.textContent = 'Submit';
-    this.updateCameraStatus('Image captured. Submit it to GPT before generating a 3D model.', true);
+    this.captureButton.classList.add('hidden');
+    this.captureButton.disabled = true;
+    this.submitButton.classList.remove('hidden');
+    this.generateButton.classList.remove('hidden');
+    this.generateButton.textContent = this.generationButtonLabel();
+    this.updateCameraStatus('Image captured. Submit to GPT or generate a 3D model directly.', true);
   }
 
   showExtractedImageReady(imageUrl: string): void {
@@ -239,8 +252,12 @@ export class ARHud {
     this.cameraPreviewImage.classList.remove('hidden');
     this.targetObjectInput.classList.add('hidden');
     this.targetObjectLabel.classList.add('hidden');
-    this.captureReadyForGeneration = true;
-    this.generateButton.textContent = this.activeRoute === 'full-flow' ? 'Generate and Place' : 'Generate 3D';
+    this.captureButton.classList.add('hidden');
+    this.captureButton.disabled = true;
+    this.submitButton.classList.add('hidden');
+    this.submitButton.disabled = true;
+    this.generateButton.classList.remove('hidden');
+    this.generateButton.textContent = this.generationButtonLabel();
     this.updateCameraStatus('GPT extraction complete. Generate the 3D model when ready.', true);
   }
 
@@ -413,19 +430,22 @@ export class ARHud {
     this.handlers.onCaptureImage();
   }
 
+  private handleSubmitClick(): void {
+    this.handlers.onSubmitTarget(this.targetObjectInput.value.trim());
+  }
+
   private handleGenerateClick(): void {
     const targetObject = this.targetObjectInput.value.trim();
-    if (!this.captureReadyForGeneration) {
-      this.handlers.onSubmitTarget(targetObject);
-      return;
-    }
-
     if (this.activeRoute === 'full-flow') {
       this.handlers.onFullFlowCapture(targetObject);
       return;
     }
 
     this.handlers.onGenerateModel(targetObject);
+  }
+
+  private generationButtonLabel(): string {
+    return this.activeRoute === 'full-flow' ? 'Generate and Place' : 'Generate 3D';
   }
 
   private createButton(label: string, className: string, onClick: () => void): HTMLButtonElement {

@@ -113,7 +113,7 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Capture');
   });
 
-  it('submits target text before running Full Flow generation', () => {
+  it('offers direct or GPT-assisted Full Flow generation after capture', () => {
     const root = document.createElement('div');
     const onCaptureImage = vi.fn();
     const onSubmitTarget = vi.fn();
@@ -130,15 +130,28 @@ describe('ARHud', () => {
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
     expect(targetInput?.classList.contains('hidden')).toBe(false);
     targetInput!.value = ' laptop ';
+    const directGenerateButton = [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Generate and Place',
+    );
+    expect((directGenerateButton as HTMLButtonElement).disabled).toBe(false);
+    directGenerateButton?.click();
+
+    expect(onFullFlowCapture).toHaveBeenCalledWith('laptop');
+    expect(onSubmitTarget).not.toHaveBeenCalled();
+
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit')?.click();
 
     expect(onSubmitTarget).toHaveBeenCalledWith('laptop');
-    expect(onFullFlowCapture).not.toHaveBeenCalled();
 
     hud.showExtractedImageReady('blob:extracted-image');
+    const submitButton = [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Submit',
+    );
+    expect(submitButton?.classList.contains('hidden')).toBe(true);
+    expect((submitButton as HTMLButtonElement).disabled).toBe(true);
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate and Place')?.click();
 
-    expect(onFullFlowCapture).toHaveBeenCalledTimes(1);
+    expect(onFullFlowCapture).toHaveBeenCalledTimes(2);
   });
 
   it('shows a blocking loading state during Full Flow generation', () => {
@@ -289,7 +302,7 @@ describe('ARHud', () => {
     );
   });
 
-  it('calls camera handlers from capture controls', () => {
+  it('offers direct or GPT-assisted camera generation after capture', () => {
     const root = document.createElement('div');
     const onStartCamera = vi.fn();
     const onCaptureImage = vi.fn();
@@ -303,17 +316,30 @@ describe('ARHud', () => {
     hud.showCapturedImagePreview('blob:captured-image');
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
     targetInput!.value = ' laptop ';
+    const directGenerateButton = [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Generate 3D',
+    );
+    expect((directGenerateButton as HTMLButtonElement).disabled).toBe(false);
+    directGenerateButton?.click();
+
+    expect(onGenerateModel).toHaveBeenCalledWith('laptop');
+    expect(onSubmitTarget).not.toHaveBeenCalled();
+
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit')?.click();
 
     expect(onStartCamera).toHaveBeenCalledTimes(1);
     expect(onCaptureImage).toHaveBeenCalledTimes(1);
     expect(onSubmitTarget).toHaveBeenCalledWith('laptop');
-    expect(onGenerateModel).not.toHaveBeenCalled();
 
     hud.showExtractedImageReady('blob:extracted-image');
+    const submitButton = [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Submit',
+    );
+    expect(submitButton?.classList.contains('hidden')).toBe(true);
+    expect((submitButton as HTMLButtonElement).disabled).toBe(true);
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate 3D')?.click();
 
-    expect(onGenerateModel).toHaveBeenCalledTimes(1);
+    expect(onGenerateModel).toHaveBeenCalledTimes(2);
   });
 
   it('shows generated model status and enables generation after capture', () => {
@@ -339,8 +365,11 @@ describe('ARHud', () => {
 
     const video = root.querySelector('video.camera-preview');
     const image = root.querySelector('img.camera-preview') as HTMLImageElement | null;
-    const generateButton = [...root.querySelectorAll('button')].find(
+    const submitButton = [...root.querySelectorAll('button')].find(
       (button) => button.textContent === 'Submit',
+    );
+    const generateButton = [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Generate 3D',
     );
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
 
@@ -348,8 +377,8 @@ describe('ARHud', () => {
     expect(image?.classList.contains('hidden')).toBe(false);
     expect(image?.src).toBe('blob:captured-image');
     expect(targetInput?.classList.contains('hidden')).toBe(false);
-    expect(root.textContent).toContain('Image captured. Submit it to GPT before generating a 3D model.');
-    expect((generateButton as HTMLButtonElement).textContent).toBe('Submit');
+    expect(root.textContent).toContain('Image captured. Submit to GPT or generate a 3D model directly.');
+    expect((submitButton as HTMLButtonElement).disabled).toBe(false);
     expect((generateButton as HTMLButtonElement).disabled).toBe(false);
   });
 

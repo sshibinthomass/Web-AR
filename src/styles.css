@@ -334,10 +334,6 @@ canvas {
   background: #5eead4;
 }
 
-.status-panel.full-flow-active .camera-actions button.primary {
-  display: none;
-}
-
 .camera-actions button:disabled {
   color: rgba(248, 250, 252, 0.48);
   background: rgba(5, 10, 14, 0.38);
