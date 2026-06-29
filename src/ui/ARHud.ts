@@ -11,6 +11,7 @@ interface HUDHandlers {
   onModelSelect(modelId: string): void;
   onStartCamera(): void;
   onCaptureImage(): void;
+  onSubmitTarget(targetObject: string): void;
   onGenerateModel(targetObject: string): void;
   onFullFlowCapture(targetObject: string): void;
   onReturnHome(): void;
@@ -46,6 +47,7 @@ export class ARHud {
   private readonly baseModelOptions: ModelOption[];
   private modelReady = false;
   private activeRoute: HudRoute | null = null;
+  private captureReadyForGeneration = false;
 
   constructor(
     root: HTMLElement,
@@ -216,6 +218,7 @@ export class ARHud {
     this.targetObjectInput.value = '';
     this.targetObjectInput.classList.add('hidden');
     this.targetObjectLabel.classList.add('hidden');
+    this.captureReadyForGeneration = false;
     this.generateButton.textContent = 'Generate 3D';
   }
 
@@ -225,8 +228,20 @@ export class ARHud {
     this.cameraPreviewImage.classList.remove('hidden');
     this.targetObjectInput.classList.remove('hidden');
     this.targetObjectLabel.classList.remove('hidden');
+    this.captureReadyForGeneration = false;
+    this.generateButton.textContent = 'Submit';
+    this.updateCameraStatus('Image captured. Submit it to GPT before generating a 3D model.', true);
+  }
+
+  showExtractedImageReady(imageUrl: string): void {
+    this.cameraPreviewVideo.classList.add('hidden');
+    this.cameraPreviewImage.src = imageUrl;
+    this.cameraPreviewImage.classList.remove('hidden');
+    this.targetObjectInput.classList.add('hidden');
+    this.targetObjectLabel.classList.add('hidden');
+    this.captureReadyForGeneration = true;
     this.generateButton.textContent = this.activeRoute === 'full-flow' ? 'Generate and Place' : 'Generate 3D';
-    this.updateCameraStatus('Image captured. Generate a 3D model from this image.', true);
+    this.updateCameraStatus('GPT extraction complete. Generate the 3D model when ready.', true);
   }
 
   updateGeneratedModelSource(modelUrl: string): void {
@@ -400,6 +415,11 @@ export class ARHud {
 
   private handleGenerateClick(): void {
     const targetObject = this.targetObjectInput.value.trim();
+    if (!this.captureReadyForGeneration) {
+      this.handlers.onSubmitTarget(targetObject);
+      return;
+    }
+
     if (this.activeRoute === 'full-flow') {
       this.handlers.onFullFlowCapture(targetObject);
       return;

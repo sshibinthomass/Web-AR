@@ -1,9 +1,54 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  extractImageFor3D,
   generateModelFromImage,
   listGeneratedModels,
   startGeneratedModelJob,
 } from '../../src/services/generatedModelClient';
+
+describe('extractImageFor3D', () => {
+  it('submits the captured image and target object to the Worker extraction endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          image_base64: 'extracted-image-base64',
+          image_mime_type: 'image/png',
+          target_object: 'laptop',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const result = await extractImageFor3D({
+      apiUrl: 'https://worker.example/generate-3d',
+      imageBase64: 'abc123',
+      imageMimeType: 'image/png',
+      targetObject: ' laptop ',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/extract-image',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_base64: 'abc123',
+          image_mime_type: 'image/png',
+          target_object: 'laptop',
+        }),
+      }),
+    );
+    expect(result).toEqual({
+      imageBase64: 'extracted-image-base64',
+      imageMimeType: 'image/png',
+      targetObject: 'laptop',
+    });
+  });
+});
 
 describe('startGeneratedModelJob', () => {
   it('starts a Worker job without polling for the final GLB', async () => {

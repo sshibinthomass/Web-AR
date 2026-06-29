@@ -10,7 +10,7 @@ import { MODEL_OPTIONS } from './models';
 import { captureVideoFrame, startCameraPreview, stopCameraPreview, type CapturedImage } from '../capture/cameraCapture';
 import { createScene, type SceneContext } from '../scene/createScene';
 import { loadGLBModel } from '../scene/loadModel';
-import { generateModelFromImage, listGeneratedModels, startGeneratedModelJob } from '../services/generatedModelClient';
+import { extractImageFor3D, generateModelFromImage, listGeneratedModels, startGeneratedModelJob } from '../services/generatedModelClient';
 import { AppState } from '../state/AppState';
 import { ARHud } from '../ui/ARHud';
 import { screenPointToFloorPoint, type Point2 } from '../utils/math';
@@ -55,6 +55,7 @@ export class WebARApp {
       onModelSelect: (modelId) => void this.loadSelectedModel(modelId),
       onStartCamera: () => void this.startCamera(),
       onCaptureImage: () => void this.captureImage(),
+      onSubmitTarget: (targetObject) => void this.submitCapturedImageToGpt(targetObject),
       onGenerateModel: (targetObject) => void this.generateModel(targetObject),
       onFullFlowCapture: (targetObject) => void this.runFullFlow(targetObject),
       onReturnHome: () => void this.returnHome(),
@@ -203,6 +204,34 @@ export class WebARApp {
     }
   }
 
+  private async submitCapturedImageToGpt(targetObject: string): Promise<void> {
+    if (!this.capturedImage) {
+      this.hud?.updateCameraStatus('Capture an image before submitting it to GPT.', false);
+      return;
+    }
+
+    this.hud?.updateCameraStatus('Submitting image to GPT for object extraction...', false);
+
+    try {
+      const extractedImage = await extractImageFor3D({
+        apiUrl: import.meta.env.VITE_GENERATE_MODEL_API_URL ?? '',
+        imageBase64: this.capturedImage.imageBase64,
+        imageMimeType: this.capturedImage.imageMimeType,
+        targetObject,
+      });
+      const blob = base64ToBlob(extractedImage.imageBase64, extractedImage.imageMimeType);
+      this.capturedImage = {
+        imageBase64: extractedImage.imageBase64,
+        imageMimeType: extractedImage.imageMimeType,
+        blob,
+      };
+      this.setExtractedImagePreview(blob);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'GPT extraction failed.';
+      this.hud?.updateCameraStatus(`GPT extraction failed: ${message}`, true);
+    }
+  }
+
   private async runFullFlow(targetObject: string): Promise<void> {
     if (!this.capturedImage) {
       this.hud?.updateCameraStatus('Capture an image before generating a 3D model.', false);
@@ -267,6 +296,12 @@ export class WebARApp {
     this.clearCapturedImagePreview();
     this.capturedImagePreviewUrl = URL.createObjectURL(blob);
     this.hud?.showCapturedImagePreview(this.capturedImagePreviewUrl);
+  }
+
+  private setExtractedImagePreview(blob: Blob): void {
+    this.clearCapturedImagePreview();
+    this.capturedImagePreviewUrl = URL.createObjectURL(blob);
+    this.hud?.showExtractedImageReady(this.capturedImagePreviewUrl);
   }
 
   private clearCapturedImagePreview(): void {
@@ -537,4 +572,13 @@ export class WebARApp {
 
     return this.sceneContext;
   }
+}
+
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes.buffer], { type: mimeType });
 }

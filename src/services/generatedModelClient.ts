@@ -16,6 +16,12 @@ export interface GeneratedModelResult {
   bytes: number;
 }
 
+export interface ExtractedImageResult {
+  imageBase64: string;
+  imageMimeType: string;
+  targetObject: string | null;
+}
+
 export interface StartGeneratedModelJobResult {
   id: string;
   label: string;
@@ -32,6 +38,12 @@ interface WorkerSuccessResponse {
   model_url: string;
   object_key: string;
   bytes: number;
+}
+
+interface WorkerExtractImageResponse {
+  image_base64: string;
+  image_mime_type: string;
+  target_object: string | null;
 }
 
 interface WorkerErrorResponse {
@@ -87,6 +99,39 @@ export async function startGeneratedModelJob({
     label: body.label ?? body.job_id,
     status: 'running',
     statusUrl: body.status_url,
+  };
+}
+
+export async function extractImageFor3D({
+  apiUrl,
+  imageBase64,
+  imageMimeType,
+  targetObject,
+  fetchImpl = fetch,
+}: GenerateModelInput): Promise<ExtractedImageResult> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const response = await fetchImpl(extractImageUrlFromGenerateUrl(apiUrl), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(createGenerateModelRequestBody(imageBase64, imageMimeType, targetObject)),
+  });
+
+  const body = (await response.json()) as WorkerExtractImageResponse | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Image extraction failed with HTTP ${response.status}.`);
+  }
+
+  if (!('image_base64' in body) || !body.image_base64 || !body.image_mime_type) {
+    throw new Error('Worker response did not include an extracted image.');
+  }
+
+  return {
+    imageBase64: body.image_base64,
+    imageMimeType: body.image_mime_type,
+    targetObject: body.target_object ?? null,
   };
 }
 
@@ -204,6 +249,10 @@ function createGenerateModelRequestBody(
     body.target_object = trimmedTargetObject;
   }
   return body;
+}
+
+function extractImageUrlFromGenerateUrl(apiUrl: string): string {
+  return apiUrl.replace(/\/generate-3d\/?$/, '/extract-image');
 }
 
 function delay(milliseconds: number): Promise<void> {

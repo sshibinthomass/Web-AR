@@ -154,6 +154,10 @@ export async function handleGenerateModelRequest(
     return jsonResponse({ error: 'Only POST requests are supported.' }, 405);
   }
 
+  if (url.pathname !== '/generate-3d' && url.pathname !== '/extract-image') {
+    return jsonResponse({ error: 'Not found.' }, 404);
+  }
+
   const configError = validateEnv(env);
   if (configError) {
     return jsonResponse({ error: configError }, 500);
@@ -169,22 +173,50 @@ export async function handleGenerateModelRequest(
   }
 
   const targetObject = normalizeTargetObject(body.value.target_object);
-  let extractedImageBase64: string;
-  try {
-    extractedImageBase64 = await extractImageFor3D(
-      {
-        imageBase64: body.value.image_base64,
-        imageMimeType: typeof body.value.image_mime_type === 'string' ? body.value.image_mime_type : 'image/png',
-        targetObject,
-      },
-      env,
-      deps,
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'OpenAI image extraction failed.';
-    return jsonResponse({ error: message }, 502);
+
+  if (url.pathname === '/extract-image') {
+    try {
+      const extractedImageBase64 = await extractImageFor3D(
+        {
+          imageBase64: body.value.image_base64,
+          imageMimeType: typeof body.value.image_mime_type === 'string' ? body.value.image_mime_type : 'image/png',
+          targetObject,
+        },
+        env,
+        deps,
+      );
+
+      return jsonResponse({
+        image_base64: extractedImageBase64,
+        image_mime_type: 'image/png',
+        target_object: targetObject,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'OpenAI image extraction failed.';
+      return jsonResponse({ error: message }, 502);
+    }
   }
 
+  return startModalGenerationJob(
+    url,
+    env,
+    deps,
+    {
+      imageBase64: body.value.image_base64,
+      targetObject,
+    },
+  );
+}
+
+async function startModalGenerationJob(
+  url: URL,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  input: {
+    imageBase64: string;
+    targetObject: string | null;
+  },
+): Promise<Response> {
   const modalResponse = await deps.fetch(env.MODAL_IMAGE_TO_3D_START_URL, {
     method: 'POST',
     headers: {
@@ -193,7 +225,7 @@ export async function handleGenerateModelRequest(
       'Modal-Secret': env.MODAL_SECRET,
     },
     body: JSON.stringify({
-      image_base64: extractedImageBase64,
+      image_base64: input.imageBase64,
       ...modalPayloadDefaults,
     }),
   });
@@ -210,11 +242,11 @@ export async function handleGenerateModelRequest(
   const now = deps.now();
   const job: StoredJob = {
     id: modalJob.call_id,
-    label: formatJobLabel(now, targetObject),
+    label: formatJobLabel(now, input.targetObject),
     status: 'running',
     created_at: now.toISOString(),
     updated_at: now.toISOString(),
-    target_object: targetObject ?? undefined,
+    target_object: input.targetObject ?? undefined,
   };
   await saveJob(env, job);
   await addPendingJob(env, job.id);

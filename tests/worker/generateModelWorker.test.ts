@@ -26,6 +26,14 @@ function jsonRequest(body: unknown): Request {
   });
 }
 
+function extractRequest(body: unknown): Request {
+  return new Request('https://worker.example/extract-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 describe('handleGenerateModelRequest', () => {
   it('responds to CORS preflight', async () => {
     const response = await handleGenerateModelRequest(
@@ -104,7 +112,7 @@ describe('handleGenerateModelRequest', () => {
     expect(await response.json()).toEqual({ error: 'image_base64 is required.' });
   });
 
-  it('starts a Modal job with the OpenAI extracted image and target-aware label', async () => {
+  it('extracts an image with OpenAI and returns it to the app', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -112,17 +120,11 @@ describe('handleGenerateModelRequest', () => {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ call_id: 'fc-123' }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
       );
     const env = createEnv();
 
     const response = await handleGenerateModelRequest(
-      jsonRequest({
+      extractRequest({
         image_base64: 'abc123',
         image_mime_type: 'image/jpeg',
         target_object: ' laptop ',
@@ -131,7 +133,7 @@ describe('handleGenerateModelRequest', () => {
       { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') },
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       'https://api.openai.com/v1/images/edits',
@@ -147,9 +149,35 @@ describe('handleGenerateModelRequest', () => {
     expect(openAiBody.get('prompt')).toBe(
       'Extract the laptop from the image. Place the laptop in a frontal-side position suitable for 3D generation, and make the background solid pure white. The final output must contain only a single laptop, in high quality (HQ), extremely sharp, with clear details and studio lighting, optimized for 3D reconstruction.',
     );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      image_base64: 'extracted-image-base64',
+      image_mime_type: 'image/png',
+      target_object: 'laptop',
+    });
+  });
+
+  it('starts a Modal job with the submitted image and target-aware label', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ call_id: 'fc-123' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const env = createEnv();
+
+    const response = await handleGenerateModelRequest(
+      jsonRequest({
+        image_base64: 'extracted-image-base64',
+        image_mime_type: 'image/png',
+        target_object: ' laptop ',
+      }),
+      env,
+      { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') },
+    );
 
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      1,
       'https://modal.example/start',
       expect.objectContaining({
         method: 'POST',
@@ -186,25 +214,17 @@ describe('handleGenerateModelRequest', () => {
     });
   });
 
-  it('uses the main object prompt and label when target object is empty', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ data: [{ b64_json: 'main-object-image-base64' }] }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ call_id: 'fc-123' }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      );
+  it('uses the main object prompt when extracting with empty target object', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: [{ b64_json: 'main-object-image-base64' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
     const env = createEnv();
 
     const response = await handleGenerateModelRequest(
-      jsonRequest({
+      extractRequest({
         image_base64: 'abc123',
         image_mime_type: 'image/jpeg',
         target_object: '   ',
@@ -217,13 +237,9 @@ describe('handleGenerateModelRequest', () => {
     expect(openAiBody.get('prompt')).toBe(
       'Extract the main, most prominent object from the image. Place it in a frontal-side position suitable for 3D generation, and make the background solid pure white. The final output must contain only a single object, in high quality (HQ), extremely sharp, with clear details and studio lighting, optimized for 3D reconstruction.',
     );
-    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
-      'models/generated/jobs/fc-123.json',
-      expect.stringContaining('"label":"Main object - 2026-06-28 12:00:00 UTC"'),
-      { httpMetadata: { contentType: 'application/json' } },
-    );
     expect(await response.json()).toMatchObject({
-      label: 'Main object - 2026-06-28 12:00:00 UTC',
+      image_base64: 'main-object-image-base64',
+      target_object: null,
     });
   });
 
@@ -394,15 +410,7 @@ describe('handleGenerateModelRequest', () => {
       }),
       createEnv(),
       {
-        fetch: vi
-          .fn()
-          .mockResolvedValueOnce(
-            new Response(JSON.stringify({ data: [{ b64_json: 'extracted-image-base64' }] }), {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' },
-            }),
-          )
-          .mockResolvedValueOnce(new Response('Modal exploded', { status: 500 })),
+        fetch: vi.fn().mockResolvedValueOnce(new Response('Modal exploded', { status: 500 })),
         now: () => new Date('2026-06-28T12:00:00Z'),
       },
     );
