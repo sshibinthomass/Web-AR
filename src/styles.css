@@ -35,6 +35,10 @@ canvas {
   height: 100%;
 }
 
+.hidden {
+  display: none !important;
+}
+
 .app-shell {
   position: fixed;
   inset: 0;
@@ -73,6 +77,23 @@ canvas {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
   backdrop-filter: blur(14px);
   pointer-events: auto;
+}
+
+.status-panel.camera-active {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.status-panel.camera-active > .status-label,
+.status-panel.camera-active > .status-message,
+.status-panel.camera-active > .status-source,
+.status-panel.camera-active > .model-picker {
+  display: none;
 }
 
 .status-label {
@@ -128,10 +149,6 @@ canvas {
   border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-.camera-panel.hidden {
-  display: none;
-}
-
 .camera-label {
   margin: 0;
   color: rgba(255, 255, 255, 0.78);
@@ -149,6 +166,46 @@ canvas {
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.38);
   object-fit: cover;
+}
+
+.camera-panel.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+  margin: 0;
+  padding: max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom));
+  border: 0;
+  background: #02070b;
+  pointer-events: auto;
+}
+
+.camera-panel.fullscreen .camera-preview {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  aspect-ratio: auto;
+  border-color: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: #000000;
+}
+
+.camera-panel.fullscreen .camera-status,
+.camera-panel.fullscreen .generated-model-status {
+  padding: 0 2px;
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.camera-panel.fullscreen .camera-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.camera-panel.fullscreen .camera-actions button {
+  min-height: 48px;
+  font-size: 14px;
 }
 
 .camera-status,
@@ -265,7 +322,7 @@ canvas {
   display: flex;
   align-items: center;
   padding: 24px 24px 190px;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .landing-inner {
@@ -286,4 +343,38 @@ canvas {
   color: rgba(255, 255, 255, 0.78);
   font-size: 16px;
   line-height: 1.5;
+}
+
+.mode-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  max-width: 420px;
+  margin-top: 22px;
+}
+
+.mode-picker button {
+  min-height: 54px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #f8fafc;
+  background: rgba(5, 10, 14, 0.78);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(14px);
+  touch-action: manipulation;
+}
+
+.mode-picker button.primary {
+  color: #031b18;
+  background: #5eead4;
+}
+
+@media (max-width: 420px) {
+  .mode-picker {
+    grid-template-columns: 1fr;
+  }
 }

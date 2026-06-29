@@ -249,7 +249,7 @@ export class WebARApp {
     sceneContext.renderer.xr.addEventListener('sessionend', () => {
       this.appState.setMode('loading');
       this.sceneContext?.floorGrid && (this.sceneContext.floorGrid.visible = false);
-      this.hud?.setCameraPanelVisible(true);
+      this.hud?.setCameraPanelVisible(false);
       this.hud?.update(this.appState.mode, 'AR session ended. Start AR again to continue.');
     });
 

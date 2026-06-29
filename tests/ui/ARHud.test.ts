@@ -31,6 +31,65 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
 }
 
 describe('ARHud', () => {
+  it('starts on a first screen with Camera and AR View choices', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+
+    const choiceButtons = [...root.querySelectorAll('.mode-picker button')].map(
+      (button) => button.textContent,
+    );
+    const statusPanel = root.querySelector('.status-panel');
+    const cameraPanel = root.querySelector('.camera-panel');
+    const hudActions = root.querySelector('.hud-actions');
+
+    expect(choiceButtons).toEqual(['Camera', 'AR View']);
+    expect(statusPanel?.classList.contains('hidden')).toBe(true);
+    expect(cameraPanel?.classList.contains('hidden')).toBe(true);
+    expect(hudActions?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(true);
+  });
+
+  it('opens camera from the first screen as a full-screen capture flow', () => {
+    const root = document.createElement('div');
+    const onStartCamera = vi.fn();
+    new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera')?.click();
+
+    const landing = root.querySelector('.landing');
+    const statusPanel = root.querySelector('.status-panel');
+    const cameraPanel = root.querySelector('.camera-panel');
+    const hudActions = root.querySelector('.hud-actions');
+
+    expect(onStartCamera).toHaveBeenCalledTimes(1);
+    expect(landing?.classList.contains('hidden')).toBe(true);
+    expect(statusPanel?.classList.contains('camera-active')).toBe(true);
+    expect(cameraPanel?.classList.contains('fullscreen')).toBe(true);
+    expect(cameraPanel?.classList.contains('hidden')).toBe(false);
+    expect(hudActions?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(true);
+  });
+
+  it('opens AR View with the model dropdown and AR controls while hiding camera capture', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+
+    const landing = root.querySelector('.landing');
+    const statusPanel = root.querySelector('.status-panel');
+    const cameraPanel = root.querySelector('.camera-panel');
+    const hudActions = root.querySelector('.hud-actions');
+
+    expect(landing?.classList.contains('hidden')).toBe(true);
+    expect(statusPanel?.classList.contains('hidden')).toBe(false);
+    expect(statusPanel?.classList.contains('camera-active')).toBe(false);
+    expect(cameraPanel?.classList.contains('hidden')).toBe(true);
+    expect(hudActions?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('select')).toBeInstanceOf(HTMLSelectElement);
+  });
+
   it('enables Place while scanning after a model is ready', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
@@ -45,11 +104,14 @@ describe('ARHud', () => {
     expect((placeButton as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('provides a full-screen gesture surface behind controls', () => {
+  it('provides a gesture surface that is enabled after opening AR View', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
 
-    expect(hud.gestureSurface.className).toBe('gesture-surface');
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+
+    expect(hud.gestureSurface.classList.contains('gesture-surface')).toBe(true);
+    expect(hud.gestureSurface.classList.contains('hidden')).toBe(false);
     expect(hud.overlay.contains(hud.gestureSurface)).toBe(true);
   });
 
@@ -101,9 +163,11 @@ describe('ARHud', () => {
     const root = document.createElement('div');
     new ARHud(root, modelOptions, createHandlers());
 
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera')?.click();
+
     expect(root.textContent).toContain('Camera');
     expect([...root.querySelectorAll('button')].map((button) => button.textContent)).toEqual(
-      expect.arrayContaining(['Start camera', 'Capture', 'Generate 3D']),
+      expect.arrayContaining(['Capture', 'Generate 3D']),
     );
   });
 
@@ -115,10 +179,10 @@ describe('ARHud', () => {
     const hud = new ARHud(root, modelOptions, createHandlers({ onStartCamera, onCaptureImage, onGenerateModel }));
 
     const buttons = [...root.querySelectorAll('button')];
-    buttons.find((button) => button.textContent === 'Start camera')?.click();
-    buttons.find((button) => button.textContent === 'Capture')?.click();
+    buttons.find((button) => button.textContent === 'Camera')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Capture')?.click();
     hud.updateCameraStatus('Image captured. Ready to generate.', true);
-    buttons.find((button) => button.textContent === 'Generate 3D')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate 3D')?.click();
 
     expect(onStartCamera).toHaveBeenCalledTimes(1);
     expect(onCaptureImage).toHaveBeenCalledTimes(1);

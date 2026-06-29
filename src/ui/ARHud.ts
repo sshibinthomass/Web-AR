@@ -20,6 +20,9 @@ export class ARHud {
   readonly arButtonSlot: HTMLElement;
   readonly cameraPreviewVideo: HTMLVideoElement;
 
+  private readonly landing: HTMLElement;
+  private readonly statusPanel: HTMLElement;
+  private readonly hudActions: HTMLElement;
   private readonly statusMessage: HTMLElement;
   private readonly sourceMessage: HTMLElement;
   private readonly cameraPanel: HTMLElement;
@@ -44,33 +47,40 @@ export class ARHud {
     shell.className = 'app-shell';
     root.appendChild(shell);
 
-    const landing = document.createElement('section');
-    landing.className = 'landing';
-    landing.innerHTML = `
+    this.landing = document.createElement('section');
+    this.landing.className = 'landing';
+    this.landing.innerHTML = `
       <div class="landing-inner">
         <h1>WebXR Floor Placement</h1>
-        <p>Open this local app on Android Chrome, scan the floor, place the GLB model, then move, rotate, and scale it in AR.</p>
+        <p>Capture a real object for 3D generation, or open AR to place an existing model.</p>
       </div>
     `;
-    shell.appendChild(landing);
+    const modePicker = document.createElement('div');
+    modePicker.className = 'mode-picker';
+    modePicker.append(
+      this.createButton('Camera', 'primary', () => this.openCameraMode()),
+      this.createButton('AR View', '', () => this.openARMode()),
+    );
+    this.landing.querySelector('.landing-inner')?.appendChild(modePicker);
+    shell.appendChild(this.landing);
 
     this.overlay = document.createElement('div');
     this.overlay.className = 'xr-overlay';
     shell.appendChild(this.overlay);
 
     this.gestureSurface = document.createElement('div');
-    this.gestureSurface.className = 'gesture-surface';
+    this.gestureSurface.className = 'gesture-surface hidden';
     this.overlay.appendChild(this.gestureSurface);
 
-    const statusPanel = document.createElement('section');
-    statusPanel.className = 'status-panel';
-    statusPanel.innerHTML = `
+    this.statusPanel = document.createElement('section');
+    this.statusPanel.className = 'status-panel hidden';
+    this.statusPanel.innerHTML = `
       <p class="status-label">Status</p>
       <p class="status-message">Loading model...</p>
       <p class="status-source">Model source: Detecting...</p>
     `;
-    this.statusMessage = statusPanel.querySelector<HTMLElement>('.status-message')!;
-    this.sourceMessage = statusPanel.querySelector<HTMLElement>('.status-source')!;
+    this.statusMessage = this.statusPanel.querySelector<HTMLElement>('.status-message')!;
+    this.sourceMessage = this.statusPanel.querySelector<HTMLElement>('.status-source')!;
 
     const modelPicker = document.createElement('label');
     modelPicker.className = 'model-picker';
@@ -86,10 +96,10 @@ export class ARHud {
       }
     });
     modelPicker.appendChild(this.modelSelect);
-    statusPanel.appendChild(modelPicker);
+    this.statusPanel.appendChild(modelPicker);
 
     const cameraPanel = document.createElement('section');
-    cameraPanel.className = 'camera-panel';
+    cameraPanel.className = 'camera-panel hidden';
     cameraPanel.innerHTML = `
       <p class="camera-label">Camera</p>
       <video class="camera-preview" muted playsinline></video>
@@ -104,30 +114,29 @@ export class ARHud {
     const cameraActions = document.createElement('div');
     cameraActions.className = 'camera-actions';
     cameraActions.append(
-      this.createButton('Start camera', '', this.handlers.onStartCamera),
       this.createButton('Capture', '', this.handlers.onCaptureImage),
     );
     this.generateButton = this.createButton('Generate 3D', 'primary', this.handlers.onGenerateModel);
     this.generateButton.disabled = true;
     cameraActions.append(this.generateButton);
     cameraPanel.appendChild(cameraActions);
-    statusPanel.appendChild(cameraPanel);
-    this.overlay.appendChild(statusPanel);
+    this.statusPanel.appendChild(cameraPanel);
+    this.overlay.appendChild(this.statusPanel);
 
-    const actions = document.createElement('div');
-    actions.className = 'hud-actions';
-    this.overlay.appendChild(actions);
+    this.hudActions = document.createElement('div');
+    this.hudActions.className = 'hud-actions hidden';
+    this.overlay.appendChild(this.hudActions);
 
     this.arButtonSlot = document.createElement('div');
     this.arButtonSlot.className = 'ar-button-slot';
-    actions.appendChild(this.arButtonSlot);
+    this.hudActions.appendChild(this.arButtonSlot);
 
     this.placeButton = this.createButton('Place', 'primary', this.handlers.onPlace);
     this.editButton = this.createButton('Edit', '', this.handlers.onEdit);
     this.resetScaleButton = this.createButton('Scale 1x', '', this.handlers.onResetScale);
     this.resetButton = this.createButton('Reset', '', this.handlers.onReset);
 
-    actions.append(
+    this.hudActions.append(
       this.placeButton,
       this.editButton,
       this.resetScaleButton,
@@ -185,6 +194,27 @@ export class ARHud {
 
   setCameraPanelVisible(isVisible: boolean): void {
     this.cameraPanel.classList.toggle('hidden', !isVisible);
+  }
+
+  private openCameraMode(): void {
+    this.landing.classList.add('hidden');
+    this.statusPanel.classList.remove('hidden');
+    this.statusPanel.classList.add('camera-active');
+    this.hudActions.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.cameraPanel.classList.remove('hidden');
+    this.cameraPanel.classList.add('fullscreen');
+    this.handlers.onStartCamera();
+  }
+
+  private openARMode(): void {
+    this.landing.classList.add('hidden');
+    this.statusPanel.classList.remove('hidden');
+    this.statusPanel.classList.remove('camera-active');
+    this.hudActions.classList.remove('hidden');
+    this.gestureSurface.classList.remove('hidden');
+    this.cameraPanel.classList.add('hidden');
+    this.cameraPanel.classList.remove('fullscreen');
   }
 
   private createButton(label: string, className: string, onClick: () => void): HTMLButtonElement {
