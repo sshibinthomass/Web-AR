@@ -26,6 +26,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onStartCamera: vi.fn(),
     onCaptureImage: vi.fn(),
     onGenerateModel: vi.fn(),
+    onFullFlowCapture: vi.fn(),
     onReturnHome: vi.fn(),
     ...overrides,
   };
@@ -47,7 +48,7 @@ describe('ARHud', () => {
     const cameraPanel = root.querySelector('.camera-panel');
     const hudActions = root.querySelector('.hud-actions');
 
-    expect(choiceButtons).toEqual(['Camera', 'AR View']);
+    expect(choiceButtons).toEqual(['Camera', 'AR View', 'Full Flow']);
     expect(statusPanel?.classList.contains('hidden')).toBe(true);
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
     expect(hudActions?.classList.contains('hidden')).toBe(true);
@@ -95,6 +96,61 @@ describe('ARHud', () => {
     expect(hudActions?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('select')).toBeInstanceOf(HTMLSelectElement);
+  });
+
+  it('opens Full Flow from the first screen as a capture page', () => {
+    const root = document.createElement('div');
+    const onStartCamera = vi.fn();
+    new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
+
+    expect(window.location.hash).toBe('#/full-flow');
+    expect(onStartCamera).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.camera-panel')?.classList.contains('fullscreen')).toBe(true);
+    expect(root.textContent).toContain('Capture');
+  });
+
+  it('uses a dedicated capture handler in Full Flow', () => {
+    const root = document.createElement('div');
+    const onCaptureImage = vi.fn();
+    const onFullFlowCapture = vi.fn();
+    new ARHud(root, modelOptions, createHandlers({ onCaptureImage, onFullFlowCapture }));
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Capture')?.click();
+
+    expect(onCaptureImage).not.toHaveBeenCalled();
+    expect(onFullFlowCapture).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a blocking loading state during Full Flow generation', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
+    hud.showFullFlowLoading('Building your 3D object in Modal...');
+
+    expect(root.querySelector('.full-flow-loading')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.camera-panel')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(true);
+    expect(root.textContent).toContain('Building your 3D object in Modal...');
+  });
+
+  it('shows placement controls after Full Flow generation returns', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
+    hud.showFullFlowReady('You can place the object now.');
+
+    expect(root.querySelector('.full-flow-loading')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.status-panel')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.camera-panel')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
+    expect(root.textContent).toContain('You can place the object now.');
   });
 
   it('opens the camera page directly from the camera hash route', () => {

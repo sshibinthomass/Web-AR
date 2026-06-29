@@ -12,10 +12,11 @@ interface HUDHandlers {
   onStartCamera(): void;
   onCaptureImage(): void;
   onGenerateModel(): void;
+  onFullFlowCapture(): void;
   onReturnHome(): void;
 }
 
-type HudRoute = 'home' | 'camera' | 'ar';
+type HudRoute = 'home' | 'camera' | 'ar' | 'full-flow';
 
 export class ARHud {
   readonly overlay: HTMLElement;
@@ -29,6 +30,7 @@ export class ARHud {
   private readonly statusMessage: HTMLElement;
   private readonly sourceMessage: HTMLElement;
   private readonly cameraPanel: HTMLElement;
+  private readonly fullFlowLoading: HTMLElement;
   private readonly cameraStatusMessage: HTMLElement;
   private readonly generatedModelMessage: HTMLElement;
   private readonly modelSelect: HTMLSelectElement;
@@ -65,6 +67,7 @@ export class ARHud {
     modePicker.append(
       this.createButton('Camera', 'primary', () => this.navigateTo('camera')),
       this.createButton('AR View', '', () => this.navigateTo('ar')),
+      this.createButton('Full Flow', '', () => this.navigateTo('full-flow')),
     );
     this.landing.querySelector('.landing-inner')?.appendChild(modePicker);
     shell.appendChild(this.landing);
@@ -88,6 +91,14 @@ export class ARHud {
     this.sourceMessage = this.statusPanel.querySelector<HTMLElement>('.status-source')!;
     this.backButton = this.createButton('Back', 'page-back', () => this.navigateTo('home'));
     this.statusPanel.prepend(this.backButton);
+
+    this.fullFlowLoading = document.createElement('section');
+    this.fullFlowLoading.className = 'full-flow-loading hidden';
+    this.fullFlowLoading.innerHTML = `
+      <div class="loading-ring" aria-hidden="true"></div>
+      <p>Building your 3D object in Modal...</p>
+    `;
+    this.statusPanel.appendChild(this.fullFlowLoading);
 
     const modelPicker = document.createElement('label');
     modelPicker.className = 'model-picker';
@@ -121,7 +132,7 @@ export class ARHud {
     const cameraActions = document.createElement('div');
     cameraActions.className = 'camera-actions';
     cameraActions.append(
-      this.createButton('Capture', '', this.handlers.onCaptureImage),
+      this.createButton('Capture', '', () => this.handleCaptureClick()),
     );
     this.generateButton = this.createButton('Generate 3D', 'primary', this.handlers.onGenerateModel);
     this.generateButton.disabled = true;
@@ -206,6 +217,45 @@ export class ARHud {
     this.cameraPanel.classList.toggle('hidden', !isVisible);
   }
 
+  showFullFlowLoading(message: string): void {
+    this.landing.classList.add('hidden');
+    this.statusPanel.classList.remove('hidden');
+    this.statusPanel.classList.add('full-flow-active');
+    this.statusPanel.classList.remove('camera-active');
+    this.cameraPanel.classList.add('hidden');
+    this.hudActions.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.fullFlowLoading.classList.remove('hidden');
+    const messageElement = this.fullFlowLoading.querySelector('p');
+    if (messageElement) {
+      messageElement.textContent = message;
+    }
+  }
+
+  showFullFlowReady(message: string): void {
+    this.landing.classList.add('hidden');
+    this.statusPanel.classList.remove('hidden');
+    this.statusPanel.classList.remove('camera-active');
+    this.statusPanel.classList.remove('full-flow-active');
+    this.cameraPanel.classList.add('hidden');
+    this.cameraPanel.classList.remove('fullscreen');
+    this.fullFlowLoading.classList.add('hidden');
+    this.hudActions.classList.remove('hidden');
+    this.gestureSurface.classList.remove('hidden');
+    this.statusMessage.textContent = message;
+  }
+
+  showFullFlowError(message: string): void {
+    this.fullFlowLoading.classList.add('hidden');
+    this.statusPanel.classList.add('camera-active');
+    this.statusPanel.classList.remove('full-flow-active');
+    this.cameraPanel.classList.remove('hidden');
+    this.cameraPanel.classList.add('fullscreen');
+    this.hudActions.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.updateCameraStatus(message, false);
+  }
+
   private navigateTo(route: HudRoute): void {
     const hash = route === 'home' ? '#/' : `#/${route}`;
     if (window.location.hash !== hash) {
@@ -224,6 +274,8 @@ export class ARHud {
         return 'camera';
       case '#/ar':
         return 'ar';
+      case '#/full-flow':
+        return 'full-flow';
       default:
         return 'home';
     }
@@ -247,6 +299,11 @@ export class ARHud {
       return;
     }
 
+    if (route === 'full-flow') {
+      this.openFullFlowPage();
+      return;
+    }
+
     this.openHomePage(previousRoute);
   }
 
@@ -254,10 +311,12 @@ export class ARHud {
     this.landing.classList.remove('hidden');
     this.statusPanel.classList.add('hidden');
     this.statusPanel.classList.remove('camera-active');
+    this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.add('hidden');
     this.cameraPanel.classList.remove('fullscreen');
+    this.fullFlowLoading.classList.add('hidden');
 
     if (previousRoute !== null && previousRoute !== 'home') {
       this.handlers.onReturnHome();
@@ -268,10 +327,12 @@ export class ARHud {
     this.landing.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active');
+    this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
+    this.fullFlowLoading.classList.add('hidden');
     this.handlers.onStartCamera();
   }
 
@@ -279,10 +340,34 @@ export class ARHud {
     this.landing.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.remove('camera-active');
+    this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.remove('hidden');
     this.gestureSurface.classList.remove('hidden');
     this.cameraPanel.classList.add('hidden');
     this.cameraPanel.classList.remove('fullscreen');
+    this.fullFlowLoading.classList.add('hidden');
+  }
+
+  private openFullFlowPage(): void {
+    this.landing.classList.add('hidden');
+    this.statusPanel.classList.remove('hidden');
+    this.statusPanel.classList.add('camera-active', 'full-flow-active');
+    this.hudActions.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.cameraPanel.classList.remove('hidden');
+    this.cameraPanel.classList.add('fullscreen');
+    this.fullFlowLoading.classList.add('hidden');
+    this.updateCameraStatus('Capture an image to build and place a 3D object.', false);
+    this.handlers.onStartCamera();
+  }
+
+  private handleCaptureClick(): void {
+    if (this.activeRoute === 'full-flow') {
+      this.handlers.onFullFlowCapture();
+      return;
+    }
+
+    this.handlers.onCaptureImage();
   }
 
   private createButton(label: string, className: string, onClick: () => void): HTMLButtonElement {

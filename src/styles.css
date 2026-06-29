@@ -96,6 +96,16 @@ canvas {
   display: none;
 }
 
+.status-panel.full-flow-active {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
 .page-back {
   min-height: 34px;
   margin: 0 0 8px;
@@ -118,6 +128,43 @@ canvas {
   left: 14px;
   z-index: 12;
   margin: 0;
+}
+
+.full-flow-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  gap: 14px;
+  padding: 28px;
+  background: rgba(2, 7, 11, 0.94);
+  text-align: center;
+  pointer-events: auto;
+}
+
+.full-flow-loading p {
+  max-width: 28ch;
+  margin: 0;
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.loading-ring {
+  width: 54px;
+  height: 54px;
+  border: 4px solid rgba(255, 255, 255, 0.18);
+  border-top-color: #5eead4;
+  border-radius: 999px;
+  animation: loading-spin 0.9s linear infinite;
+}
+
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .status-label {
@@ -264,6 +311,10 @@ canvas {
   background: #5eead4;
 }
 
+.status-panel.full-flow-active .camera-actions button.primary {
+  display: none;
+}
+
 .camera-actions button:disabled {
   color: rgba(248, 250, 252, 0.48);
   background: rgba(5, 10, 14, 0.38);
@@ -371,9 +422,9 @@ canvas {
 
 .mode-picker {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  max-width: 420px;
+  max-width: 620px;
   margin-top: 22px;
 }
 
