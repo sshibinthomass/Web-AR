@@ -1,14 +1,13 @@
 import {
-  getAngleBetweenTouches,
   getDistanceBetweenTouches,
   type Point2,
 } from '../utils/math';
 
 interface GestureHandlers {
   onTap(point: Point2): void;
-  onDrag(point: Point2): void;
+  onDrag(point: Point2, startPoint: Point2): void;
   onPinch(multiplier: number): void;
-  onTwist(deltaRadians: number): void;
+  onGestureEnd?(): void;
 }
 
 export class GestureController {
@@ -16,7 +15,6 @@ export class GestureController {
   private startPoint: Point2 | null = null;
   private lastSinglePoint: Point2 | null = null;
   private lastPinchDistance: number | null = null;
-  private lastTwistAngle: number | null = null;
 
   constructor(
     private readonly target: HTMLElement,
@@ -51,7 +49,6 @@ export class GestureController {
       this.startPoint = point;
       this.lastSinglePoint = point;
       this.lastPinchDistance = null;
-      this.lastTwistAngle = null;
       return;
     }
 
@@ -59,7 +56,6 @@ export class GestureController {
       const first = touchToPoint(event.touches[0]);
       const second = touchToPoint(event.touches[1]);
       this.lastPinchDistance = getDistanceBetweenTouches(first, second);
-      this.lastTwistAngle = getAngleBetweenTouches(first, second);
     }
   };
 
@@ -77,7 +73,7 @@ export class GestureController {
     if (event.touches.length === 1) {
       const point = touchToPoint(event.touches[0]);
       this.lastSinglePoint = point;
-      this.handlers.onDrag(point);
+      this.handlers.onDrag(point, this.startPoint ?? point);
       return;
     }
 
@@ -85,18 +81,12 @@ export class GestureController {
       const first = touchToPoint(event.touches[0]);
       const second = touchToPoint(event.touches[1]);
       const distance = getDistanceBetweenTouches(first, second);
-      const angle = getAngleBetweenTouches(first, second);
 
       if (this.lastPinchDistance && this.lastPinchDistance > 0) {
         this.handlers.onPinch(distance / this.lastPinchDistance);
       }
 
-      if (this.lastTwistAngle !== null) {
-        this.handlers.onTwist(angle - this.lastTwistAngle);
-      }
-
       this.lastPinchDistance = distance;
-      this.lastTwistAngle = angle;
     }
   };
 
@@ -132,7 +122,7 @@ export class GestureController {
     this.startPoint = null;
     this.lastSinglePoint = null;
     this.lastPinchDistance = null;
-    this.lastTwistAngle = null;
+    this.handlers.onGestureEnd?.();
   }
 }
 

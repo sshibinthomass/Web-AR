@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { GestureController } from '../interaction/GestureController';
 import { ObjectTransformController } from '../interaction/ObjectTransformController';
+import {
+  classifyPlacementGesture,
+  rotationDeltaFromVerticalDrag,
+  type PlacementGestureZone,
+} from '../interaction/PlacementGestureZone';
 import { MODEL_OPTIONS } from './models';
 import { captureVideoFrame, startCameraPreview, stopCameraPreview, type CapturedImage } from '../capture/cameraCapture';
 import { createScene, type SceneContext } from '../scene/createScene';
@@ -26,6 +31,9 @@ export class WebARApp {
   private cameraStream: MediaStream | null = null;
   private capturedImage: CapturedImage | null = null;
   private capturedImagePreviewUrl: string | null = null;
+  private placementDragMode: PlacementGestureZone | null = null;
+  private placementDragStart: Point2 | null = null;
+  private lastPlacementDragPoint: Point2 | null = null;
   private lastHudMode = this.appState.mode;
   private availableModels = [...MODEL_OPTIONS];
 
@@ -62,9 +70,9 @@ export class WebARApp {
 
     this.gestureController = new GestureController(this.hud.gestureSurface, {
       onTap: (point) => this.handleTap(point),
-      onDrag: (point) => this.handleDrag(point),
+      onDrag: (point, startPoint) => this.handleDrag(point, startPoint),
       onPinch: (multiplier) => this.handlePinch(multiplier),
-      onTwist: (deltaRadians) => this.handleTwist(deltaRadians),
+      onGestureEnd: () => this.resetPlacementDrag(),
     });
     this.gestureController.connect();
 
@@ -352,12 +360,26 @@ export class WebARApp {
     }
   }
 
-  private handleDrag(point: Point2): void {
+  private handleDrag(point: Point2, startPoint: Point2): void {
     if (this.appState.mode !== 'placed' && this.appState.mode !== 'editing') {
+      this.resetPlacementDrag();
       return;
     }
 
     const sceneContext = this.requireScene();
+    const dragMode = this.getPlacementDragMode(startPoint, sceneContext);
+    if (dragMode === 'none') {
+      return;
+    }
+
+    if (dragMode === 'rotate') {
+      const previousPoint = this.lastPlacementDragPoint ?? startPoint;
+      this.transformController.rotateBy(rotationDeltaFromVerticalDrag(previousPoint, point));
+      this.lastPlacementDragPoint = point;
+      this.appState.setMode('editing');
+      return;
+    }
+
     const floorY = this.transformController.floorY;
     if (floorY === null) {
       return;
@@ -369,6 +391,7 @@ export class WebARApp {
     }
 
     this.transformController.moveToFloorPoint(floorPoint);
+    this.lastPlacementDragPoint = point;
     this.appState.setMode('editing');
   }
 
@@ -378,15 +401,6 @@ export class WebARApp {
     }
 
     this.transformController.scaleBy(multiplier);
-    this.appState.setMode('editing');
-  }
-
-  private handleTwist(deltaRadians: number): void {
-    if (this.appState.mode !== 'placed' && this.appState.mode !== 'editing') {
-      return;
-    }
-
-    this.transformController.rotateBy(deltaRadians);
     this.appState.setMode('editing');
   }
 
@@ -406,6 +420,54 @@ export class WebARApp {
     this.appState.setMode('placed');
     this.planeTrackingManager?.hide();
     this.hud?.update(this.appState.mode);
+  }
+
+  private getPlacementDragMode(startPoint: Point2, sceneContext: SceneContext): PlacementGestureZone {
+    if (!this.placementDragStart || this.placementDragStart.x !== startPoint.x || this.placementDragStart.y !== startPoint.y) {
+      const bounds = this.getProjectedPlacementMarkerBounds(sceneContext);
+      this.placementDragStart = startPoint;
+      this.lastPlacementDragPoint = startPoint;
+      this.placementDragMode = bounds ? classifyPlacementGesture(startPoint, bounds) : 'none';
+    }
+
+    return this.placementDragMode ?? 'none';
+  }
+
+  private getProjectedPlacementMarkerBounds(sceneContext: SceneContext): { center: Point2; radiusPx: number } | null {
+    if (!sceneContext.modelRoot.visible || !sceneContext.placementMarker.visible) {
+      return null;
+    }
+
+    const canvas = sceneContext.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+
+    const centerWorld = new THREE.Vector3();
+    sceneContext.placementMarker.getWorldPosition(centerWorld);
+    const radiusWorld = sceneContext.placementMarker.localToWorld(new THREE.Vector3(0.24, 0, 0));
+
+    const center = this.worldToScreenPoint(centerWorld, sceneContext.camera, rect);
+    const radiusPoint = this.worldToScreenPoint(radiusWorld, sceneContext.camera, rect);
+    return {
+      center,
+      radiusPx: Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y),
+    };
+  }
+
+  private worldToScreenPoint(worldPoint: THREE.Vector3, camera: THREE.Camera, rect: DOMRect): Point2 {
+    const projected = worldPoint.clone().project(camera);
+    return {
+      x: rect.left + ((projected.x + 1) / 2) * rect.width,
+      y: rect.top + ((1 - projected.y) / 2) * rect.height,
+    };
+  }
+
+  private resetPlacementDrag(): void {
+    this.placementDragMode = null;
+    this.placementDragStart = null;
+    this.lastPlacementDragPoint = null;
   }
 
   private createEstimatedPlacementMatrix(): THREE.Matrix4 {
