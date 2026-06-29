@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ARHud } from '../../src/ui/ARHud';
 
 const modelOptions = [
@@ -26,11 +26,16 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onStartCamera: vi.fn(),
     onCaptureImage: vi.fn(),
     onGenerateModel: vi.fn(),
+    onReturnHome: vi.fn(),
     ...overrides,
   };
 }
 
 describe('ARHud', () => {
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
   it('starts on a first screen with Camera and AR View choices', () => {
     const root = document.createElement('div');
     new ARHud(root, modelOptions, createHandlers());
@@ -62,6 +67,7 @@ describe('ARHud', () => {
     const hudActions = root.querySelector('.hud-actions');
 
     expect(onStartCamera).toHaveBeenCalledTimes(1);
+    expect(window.location.hash).toBe('#/camera');
     expect(landing?.classList.contains('hidden')).toBe(true);
     expect(statusPanel?.classList.contains('camera-active')).toBe(true);
     expect(cameraPanel?.classList.contains('fullscreen')).toBe(true);
@@ -82,12 +88,52 @@ describe('ARHud', () => {
     const hudActions = root.querySelector('.hud-actions');
 
     expect(landing?.classList.contains('hidden')).toBe(true);
+    expect(window.location.hash).toBe('#/ar');
     expect(statusPanel?.classList.contains('hidden')).toBe(false);
     expect(statusPanel?.classList.contains('camera-active')).toBe(false);
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
     expect(hudActions?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('select')).toBeInstanceOf(HTMLSelectElement);
+  });
+
+  it('opens the camera page directly from the camera hash route', () => {
+    window.history.replaceState(null, '', '/#/camera');
+    const root = document.createElement('div');
+    const onStartCamera = vi.fn();
+
+    new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
+
+    expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.camera-panel')?.classList.contains('fullscreen')).toBe(true);
+    expect(onStartCamera).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the AR View page directly from the ar hash route', () => {
+    window.history.replaceState(null, '', '/#/ar');
+    const root = document.createElement('div');
+
+    new ARHud(root, modelOptions, createHandlers());
+
+    expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.status-panel')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.camera-panel')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
+  });
+
+  it('returns from a sub page to the home page with the Back button', () => {
+    const root = document.createElement('div');
+    const onReturnHome = vi.fn();
+    new ARHud(root, modelOptions, createHandlers({ onReturnHome }));
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Back')?.click();
+
+    expect(window.location.hash).toBe('#/');
+    expect(onReturnHome).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.status-panel')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.camera-panel')?.classList.contains('hidden')).toBe(true);
   });
 
   it('enables Place while scanning after a model is ready', () => {

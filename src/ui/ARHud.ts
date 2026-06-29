@@ -12,7 +12,10 @@ interface HUDHandlers {
   onStartCamera(): void;
   onCaptureImage(): void;
   onGenerateModel(): void;
+  onReturnHome(): void;
 }
+
+type HudRoute = 'home' | 'camera' | 'ar';
 
 export class ARHud {
   readonly overlay: HTMLElement;
@@ -29,6 +32,7 @@ export class ARHud {
   private readonly cameraStatusMessage: HTMLElement;
   private readonly generatedModelMessage: HTMLElement;
   private readonly modelSelect: HTMLSelectElement;
+  private readonly backButton: HTMLButtonElement;
   private readonly placeButton: HTMLButtonElement;
   private readonly editButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
@@ -36,6 +40,7 @@ export class ARHud {
   private readonly generateButton: HTMLButtonElement;
   private readonly baseModelOptions: ModelOption[];
   private modelReady = false;
+  private activeRoute: HudRoute | null = null;
 
   constructor(
     root: HTMLElement,
@@ -58,8 +63,8 @@ export class ARHud {
     const modePicker = document.createElement('div');
     modePicker.className = 'mode-picker';
     modePicker.append(
-      this.createButton('Camera', 'primary', () => this.openCameraMode()),
-      this.createButton('AR View', '', () => this.openARMode()),
+      this.createButton('Camera', 'primary', () => this.navigateTo('camera')),
+      this.createButton('AR View', '', () => this.navigateTo('ar')),
     );
     this.landing.querySelector('.landing-inner')?.appendChild(modePicker);
     shell.appendChild(this.landing);
@@ -81,6 +86,8 @@ export class ARHud {
     `;
     this.statusMessage = this.statusPanel.querySelector<HTMLElement>('.status-message')!;
     this.sourceMessage = this.statusPanel.querySelector<HTMLElement>('.status-source')!;
+    this.backButton = this.createButton('Back', 'page-back', () => this.navigateTo('home'));
+    this.statusPanel.prepend(this.backButton);
 
     const modelPicker = document.createElement('label');
     modelPicker.className = 'model-picker';
@@ -143,7 +150,10 @@ export class ARHud {
       this.resetButton,
     );
 
+    window.addEventListener('hashchange', () => this.applyCurrentRoute());
+
     this.update('loading', 'Loading model...');
+    this.applyCurrentRoute();
   }
 
   attachARButton(button: HTMLElement): void {
@@ -196,7 +206,65 @@ export class ARHud {
     this.cameraPanel.classList.toggle('hidden', !isVisible);
   }
 
-  private openCameraMode(): void {
+  private navigateTo(route: HudRoute): void {
+    const hash = route === 'home' ? '#/' : `#/${route}`;
+    if (window.location.hash !== hash) {
+      window.location.hash = hash;
+    }
+    this.applyRoute(route);
+  }
+
+  private applyCurrentRoute(): void {
+    this.applyRoute(this.routeFromHash(window.location.hash));
+  }
+
+  private routeFromHash(hash: string): HudRoute {
+    switch (hash) {
+      case '#/camera':
+        return 'camera';
+      case '#/ar':
+        return 'ar';
+      default:
+        return 'home';
+    }
+  }
+
+  private applyRoute(route: HudRoute): void {
+    if (this.activeRoute === route) {
+      return;
+    }
+
+    const previousRoute = this.activeRoute;
+    this.activeRoute = route;
+
+    if (route === 'camera') {
+      this.openCameraPage();
+      return;
+    }
+
+    if (route === 'ar') {
+      this.openARPage();
+      return;
+    }
+
+    this.openHomePage(previousRoute);
+  }
+
+  private openHomePage(previousRoute: HudRoute | null): void {
+    this.landing.classList.remove('hidden');
+    this.statusPanel.classList.add('hidden');
+    this.statusPanel.classList.remove('camera-active');
+    this.hudActions.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.cameraPanel.classList.add('hidden');
+    this.cameraPanel.classList.remove('fullscreen');
+
+    if (previousRoute !== null && previousRoute !== 'home') {
+      this.handlers.onReturnHome();
+    }
+  }
+
+  private openCameraPage(): void {
     this.landing.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active');
@@ -207,7 +275,7 @@ export class ARHud {
     this.handlers.onStartCamera();
   }
 
-  private openARMode(): void {
+  private openARPage(): void {
     this.landing.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.remove('camera-active');

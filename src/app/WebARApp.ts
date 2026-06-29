@@ -47,6 +47,7 @@ export class WebARApp {
       onStartCamera: () => void this.startCamera(),
       onCaptureImage: () => void this.captureImage(),
       onGenerateModel: () => void this.generateModel(),
+      onReturnHome: () => void this.returnHome(),
     });
     this.hud.updateModelSource('Cloudflare only');
     void this.refreshGeneratedModels();
@@ -183,6 +184,17 @@ export class WebARApp {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown generation error.';
       this.hud?.updateCameraStatus(`Generation failed: ${message}`, true);
+    }
+  }
+
+  private async returnHome(): Promise<void> {
+    stopCameraPreview(this.cameraStream);
+    this.cameraStream = null;
+    this.capturedImage = null;
+
+    const session = this.sceneContext?.renderer.xr.getSession();
+    if (session) {
+      await session.end().catch(() => undefined);
     }
   }
 
