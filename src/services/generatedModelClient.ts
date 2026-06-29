@@ -4,6 +4,7 @@ export interface GenerateModelInput {
   apiUrl: string;
   imageBase64: string;
   imageMimeType: string;
+  targetObject?: string;
   fetchImpl?: typeof fetch;
   pollIntervalMs?: number;
   maxPolls?: number;
@@ -59,6 +60,7 @@ export async function startGeneratedModelJob({
   apiUrl,
   imageBase64,
   imageMimeType,
+  targetObject,
   fetchImpl = fetch,
 }: GenerateModelInput): Promise<StartGeneratedModelJobResult> {
   if (!apiUrl) {
@@ -68,10 +70,7 @@ export async function startGeneratedModelJob({
   const response = await fetchImpl(apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      image_base64: imageBase64,
-      image_mime_type: imageMimeType,
-    }),
+    body: JSON.stringify(createGenerateModelRequestBody(imageBase64, imageMimeType, targetObject)),
   });
 
   const body = (await response.json()) as WorkerJobResponse | WorkerErrorResponse;
@@ -119,6 +118,7 @@ export async function generateModelFromImage({
   apiUrl,
   imageBase64,
   imageMimeType,
+  targetObject,
   fetchImpl = fetch,
   pollIntervalMs = 5000,
   maxPolls = 180,
@@ -130,10 +130,7 @@ export async function generateModelFromImage({
   const response = await fetchImpl(apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      image_base64: imageBase64,
-      image_mime_type: imageMimeType,
-    }),
+    body: JSON.stringify(createGenerateModelRequestBody(imageBase64, imageMimeType, targetObject)),
   });
 
   const body = (await response.json()) as WorkerSuccessResponse | WorkerErrorResponse;
@@ -191,6 +188,22 @@ function parseGeneratedModelResult(body: WorkerSuccessResponse | WorkerErrorResp
     objectKey: body.object_key,
     bytes: body.bytes,
   };
+}
+
+function createGenerateModelRequestBody(
+  imageBase64: string,
+  imageMimeType: string,
+  targetObject?: string,
+): Record<string, string> {
+  const body: Record<string, string> = {
+    image_base64: imageBase64,
+    image_mime_type: imageMimeType,
+  };
+  const trimmedTargetObject = targetObject?.trim();
+  if (trimmedTargetObject) {
+    body.target_object = trimmedTargetObject;
+  }
+  return body;
 }
 
 function delay(milliseconds: number): Promise<void> {

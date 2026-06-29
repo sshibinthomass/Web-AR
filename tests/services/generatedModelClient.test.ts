@@ -37,6 +37,40 @@ describe('startGeneratedModelJob', () => {
       statusUrl: 'https://worker.example/generate-3d/jobs/fc-123',
     });
   });
+
+  it('sends trimmed target object when starting a Worker job', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          job_id: 'fc-123',
+          status_url: 'https://worker.example/generate-3d/jobs/fc-123',
+        }),
+        {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    await startGeneratedModelJob({
+      apiUrl: 'https://worker.example/generate-3d',
+      imageBase64: 'abc123',
+      imageMimeType: 'image/jpeg',
+      targetObject: ' laptop ',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/generate-3d',
+      expect.objectContaining({
+        body: JSON.stringify({
+          image_base64: 'abc123',
+          image_mime_type: 'image/jpeg',
+          target_object: 'laptop',
+        }),
+      }),
+    );
+  });
 });
 
 describe('listGeneratedModels', () => {
@@ -116,6 +150,7 @@ describe('generateModelFromImage', () => {
       apiUrl: 'https://worker.example/generate-3d',
       imageBase64: 'abc123',
       imageMimeType: 'image/jpeg',
+      targetObject: ' laptop ',
       fetchImpl,
       pollIntervalMs: 0,
     });
@@ -129,6 +164,7 @@ describe('generateModelFromImage', () => {
         body: JSON.stringify({
           image_base64: 'abc123',
           image_mime_type: 'image/jpeg',
+          target_object: 'laptop',
         }),
       }),
     );

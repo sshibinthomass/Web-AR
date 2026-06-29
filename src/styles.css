@@ -239,6 +239,29 @@ canvas {
   object-fit: cover;
 }
 
+.target-object-field {
+  display: grid;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.target-object-field input {
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  font: inherit;
+  font-weight: 500;
+}
+
+.target-object-field input::placeholder {
+  color: rgba(255, 255, 255, 0.46);
+}
+
 .camera-panel.fullscreen {
   position: fixed;
   inset: 0;

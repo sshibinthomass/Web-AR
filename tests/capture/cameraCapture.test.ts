@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  DEFAULT_CAPTURE_IMAGE_MIME_TYPE,
   DEFAULT_CAPTURE_MAX_DIMENSION,
   blobToBase64,
   getCaptureDimensions,
@@ -37,6 +38,7 @@ describe('cameraCapture', () => {
   });
 
   it('downscales large camera frames before upload', () => {
+    expect(DEFAULT_CAPTURE_IMAGE_MIME_TYPE).toBe('image/png');
     expect(DEFAULT_CAPTURE_MAX_DIMENSION).toBe(1536);
     expect(getCaptureDimensions(1920, 1080, DEFAULT_CAPTURE_MAX_DIMENSION)).toEqual({
       width: 1536,
@@ -45,6 +47,10 @@ describe('cameraCapture', () => {
     expect(getCaptureDimensions(640, 480, DEFAULT_CAPTURE_MAX_DIMENSION)).toEqual({
       width: 640,
       height: 480,
+    });
+    expect(getCaptureDimensions(641, 479, DEFAULT_CAPTURE_MAX_DIMENSION)).toEqual({
+      width: 640,
+      height: 464,
     });
   });
 

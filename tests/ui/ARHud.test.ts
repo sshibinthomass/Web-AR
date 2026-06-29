@@ -112,17 +112,25 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Capture');
   });
 
-  it('uses a dedicated capture handler in Full Flow', () => {
+  it('captures before running Full Flow generation with target text', () => {
     const root = document.createElement('div');
     const onCaptureImage = vi.fn();
     const onFullFlowCapture = vi.fn();
-    new ARHud(root, modelOptions, createHandlers({ onCaptureImage, onFullFlowCapture }));
+    const hud = new ARHud(root, modelOptions, createHandlers({ onCaptureImage, onFullFlowCapture }));
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Capture')?.click();
 
-    expect(onCaptureImage).not.toHaveBeenCalled();
-    expect(onFullFlowCapture).toHaveBeenCalledTimes(1);
+    expect(onCaptureImage).toHaveBeenCalledTimes(1);
+    expect(onFullFlowCapture).not.toHaveBeenCalled();
+
+    hud.showCapturedImagePreview('blob:captured-image');
+    const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
+    expect(targetInput?.classList.contains('hidden')).toBe(false);
+    targetInput!.value = ' laptop ';
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate and Place')?.click();
+
+    expect(onFullFlowCapture).toHaveBeenCalledWith('laptop');
   });
 
   it('shows a blocking loading state during Full Flow generation', () => {
@@ -284,11 +292,13 @@ describe('ARHud', () => {
     buttons.find((button) => button.textContent === 'Camera')?.click();
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Capture')?.click();
     hud.updateCameraStatus('Image captured. Ready to generate.', true);
+    const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
+    targetInput!.value = ' laptop ';
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate 3D')?.click();
 
     expect(onStartCamera).toHaveBeenCalledTimes(1);
     expect(onCaptureImage).toHaveBeenCalledTimes(1);
-    expect(onGenerateModel).toHaveBeenCalledTimes(1);
+    expect(onGenerateModel).toHaveBeenCalledWith('laptop');
   });
 
   it('shows generated model status and enables generation after capture', () => {
@@ -317,12 +327,25 @@ describe('ARHud', () => {
     const generateButton = [...root.querySelectorAll('button')].find(
       (button) => button.textContent === 'Generate 3D',
     );
+    const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
 
     expect(video?.classList.contains('hidden')).toBe(true);
     expect(image?.classList.contains('hidden')).toBe(false);
     expect(image?.src).toBe('blob:captured-image');
+    expect(targetInput?.classList.contains('hidden')).toBe(false);
     expect(root.textContent).toContain('Image captured. Generate a 3D model from this image.');
     expect((generateButton as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('hides the optional target input before capture', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera')?.click();
+
+    const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
+    expect(targetInput).toBeInstanceOf(HTMLInputElement);
+    expect(targetInput?.classList.contains('hidden')).toBe(true);
   });
 
   it('refreshes generated datetime models in the dropdown without losing built-in models', () => {

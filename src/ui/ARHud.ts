@@ -11,8 +11,8 @@ interface HUDHandlers {
   onModelSelect(modelId: string): void;
   onStartCamera(): void;
   onCaptureImage(): void;
-  onGenerateModel(): void;
-  onFullFlowCapture(): void;
+  onGenerateModel(targetObject: string): void;
+  onFullFlowCapture(targetObject: string): void;
   onReturnHome(): void;
 }
 
@@ -34,6 +34,8 @@ export class ARHud {
   private readonly fullFlowLoading: HTMLElement;
   private readonly cameraStatusMessage: HTMLElement;
   private readonly generatedModelMessage: HTMLElement;
+  private readonly targetObjectLabel: HTMLElement;
+  private readonly targetObjectInput: HTMLInputElement;
   private readonly modelSelect: HTMLSelectElement;
   private readonly backButton: HTMLButtonElement;
   private readonly placeButton: HTMLButtonElement;
@@ -123,6 +125,10 @@ export class ARHud {
       <p class="camera-label">Camera</p>
       <video class="camera-preview" muted playsinline></video>
       <img class="camera-preview hidden" alt="Captured image preview">
+      <label class="target-object-field hidden">
+        <span>Object to extract</span>
+        <input name="targetObject" type="text" autocomplete="off" placeholder="Optional, e.g. laptop">
+      </label>
       <p class="camera-status">Start the camera, capture an image, then generate a 3D model.</p>
       <p class="generated-model-status">Generated model: None yet</p>
     `;
@@ -131,13 +137,15 @@ export class ARHud {
     this.cameraPanel = cameraPanel;
     this.cameraStatusMessage = cameraPanel.querySelector<HTMLElement>('.camera-status')!;
     this.generatedModelMessage = cameraPanel.querySelector<HTMLElement>('.generated-model-status')!;
+    this.targetObjectLabel = cameraPanel.querySelector<HTMLElement>('.target-object-field')!;
+    this.targetObjectInput = cameraPanel.querySelector<HTMLInputElement>('input[name="targetObject"]')!;
 
     const cameraActions = document.createElement('div');
     cameraActions.className = 'camera-actions';
     cameraActions.append(
       this.createButton('Capture', '', () => this.handleCaptureClick()),
     );
-    this.generateButton = this.createButton('Generate 3D', 'primary', this.handlers.onGenerateModel);
+    this.generateButton = this.createButton('Generate 3D', 'primary', () => this.handleGenerateClick());
     this.generateButton.disabled = true;
     cameraActions.append(this.generateButton);
     cameraPanel.appendChild(cameraActions);
@@ -205,12 +213,19 @@ export class ARHud {
     this.cameraPreviewImage.classList.add('hidden');
     this.cameraPreviewImage.removeAttribute('src');
     this.cameraPreviewVideo.classList.remove('hidden');
+    this.targetObjectInput.value = '';
+    this.targetObjectInput.classList.add('hidden');
+    this.targetObjectLabel.classList.add('hidden');
+    this.generateButton.textContent = 'Generate 3D';
   }
 
   showCapturedImagePreview(imageUrl: string): void {
     this.cameraPreviewVideo.classList.add('hidden');
     this.cameraPreviewImage.src = imageUrl;
     this.cameraPreviewImage.classList.remove('hidden');
+    this.targetObjectInput.classList.remove('hidden');
+    this.targetObjectLabel.classList.remove('hidden');
+    this.generateButton.textContent = this.activeRoute === 'full-flow' ? 'Generate and Place' : 'Generate 3D';
     this.updateCameraStatus('Image captured. Generate a 3D model from this image.', true);
   }
 
@@ -380,12 +395,17 @@ export class ARHud {
   }
 
   private handleCaptureClick(): void {
+    this.handlers.onCaptureImage();
+  }
+
+  private handleGenerateClick(): void {
+    const targetObject = this.targetObjectInput.value.trim();
     if (this.activeRoute === 'full-flow') {
-      this.handlers.onFullFlowCapture();
+      this.handlers.onFullFlowCapture(targetObject);
       return;
     }
 
-    this.handlers.onCaptureImage();
+    this.handlers.onGenerateModel(targetObject);
   }
 
   private createButton(label: string, className: string, onClick: () => void): HTMLButtonElement {

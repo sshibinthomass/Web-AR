@@ -55,8 +55,8 @@ export class WebARApp {
       onModelSelect: (modelId) => void this.loadSelectedModel(modelId),
       onStartCamera: () => void this.startCamera(),
       onCaptureImage: () => void this.captureImage(),
-      onGenerateModel: () => void this.generateModel(),
-      onFullFlowCapture: () => void this.runFullFlow(),
+      onGenerateModel: (targetObject) => void this.generateModel(targetObject),
+      onFullFlowCapture: (targetObject) => void this.runFullFlow(targetObject),
       onReturnHome: () => void this.returnHome(),
     });
     this.hud.updateModelSource('Cloudflare only');
@@ -174,7 +174,7 @@ export class WebARApp {
     }
   }
 
-  private async generateModel(): Promise<void> {
+  private async generateModel(targetObject: string): Promise<void> {
     if (!this.capturedImage) {
       this.hud?.updateCameraStatus('Capture an image before generating a 3D model.', false);
       return;
@@ -187,6 +187,7 @@ export class WebARApp {
         apiUrl: import.meta.env.VITE_GENERATE_MODEL_API_URL ?? '',
         imageBase64: this.capturedImage.imageBase64,
         imageMimeType: this.capturedImage.imageMimeType,
+        targetObject,
       });
       this.capturedImage = null;
       this.clearCapturedImagePreview();
@@ -202,22 +203,23 @@ export class WebARApp {
     }
   }
 
-  private async runFullFlow(): Promise<void> {
-    const preview = this.hud?.cameraPreviewVideo;
-    if (!preview) {
+  private async runFullFlow(targetObject: string): Promise<void> {
+    if (!this.capturedImage) {
+      this.hud?.updateCameraStatus('Capture an image before generating a 3D model.', false);
       return;
     }
 
     try {
-      const capturedImage = await captureVideoFrame(preview);
-      stopCameraPreview(this.cameraStream);
-      this.cameraStream = null;
+      const capturedImage = this.capturedImage;
+      this.capturedImage = null;
+      this.clearCapturedImagePreview();
       this.hud?.showFullFlowLoading('Building your 3D object in Modal. Keep this page open.');
 
       const generatedModel = await generateModelFromImage({
         apiUrl: import.meta.env.VITE_GENERATE_MODEL_API_URL ?? '',
         imageBase64: capturedImage.imageBase64,
         imageMimeType: capturedImage.imageMimeType,
+        targetObject,
       });
 
       await this.loadModelFromUrl(generatedModel.modelUrl, 'Generated object', {

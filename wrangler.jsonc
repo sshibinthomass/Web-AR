@@ -9,9 +9,9 @@
     "crons": ["*/1 * * * *"]
   },
   "vars": {
-    "MODAL_IMAGE_TO_3D_URL": "https://sshibinthomass--image-to-3d-imageto3d-generate-api.modal.run",
-    "MODAL_IMAGE_TO_3D_START_URL": "https://sshibinthomass--image-to-3d-imageto3d-start-api.modal.run",
-    "MODAL_IMAGE_TO_3D_RESULT_URL": "https://sshibinthomass--image-to-3d-imageto3d-result-api.modal.run",
+    "MODAL_IMAGE_TO_3D_URL": "https://sshibinthomass--trellis-2-4b-fast-trellis2fastmodel-gene-1cf4f3.modal.run",
+    "MODAL_IMAGE_TO_3D_START_URL": "https://sshibinthomass--trellis-2-4b-fast-trellis2fastmodel-start-api.modal.run",
+    "MODAL_IMAGE_TO_3D_RESULT_URL": "https://sshibinthomass--trellis-2-4b-fast-trellis2fastmodel-result-api.modal.run",
     "PUBLIC_MODEL_ORIGIN": "https://web-ar-generate-model.sshibinthomass.workers.dev"
   },
   "r2_buckets": [

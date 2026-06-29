@@ -18,6 +18,7 @@ export interface WorkerEnv {
   MODAL_IMAGE_TO_3D_URL: string;
   MODAL_IMAGE_TO_3D_START_URL: string;
   MODAL_IMAGE_TO_3D_RESULT_URL: string;
+  OPENAI_API_KEY: string;
   PUBLIC_MODEL_ORIGIN?: string;
   MODEL_BUCKET: ModelBucket;
 }
@@ -39,6 +40,7 @@ interface GenerateModelDeps {
 interface GenerateModelRequestBody {
   image_base64?: unknown;
   image_mime_type?: unknown;
+  target_object?: unknown;
 }
 
 interface StoredJob {
@@ -50,6 +52,7 @@ interface StoredJob {
   completed_at?: string;
   failed_at?: string;
   error?: string;
+  target_object?: string;
   model_url?: string;
   object_key?: string;
   bytes?: number;
@@ -165,6 +168,23 @@ export async function handleGenerateModelRequest(
     return jsonResponse({ error: 'image_base64 is required.' }, 400);
   }
 
+  const targetObject = normalizeTargetObject(body.value.target_object);
+  let extractedImageBase64: string;
+  try {
+    extractedImageBase64 = await extractImageFor3D(
+      {
+        imageBase64: body.value.image_base64,
+        imageMimeType: typeof body.value.image_mime_type === 'string' ? body.value.image_mime_type : 'image/png',
+        targetObject,
+      },
+      env,
+      deps,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'OpenAI image extraction failed.';
+    return jsonResponse({ error: message }, 502);
+  }
+
   const modalResponse = await deps.fetch(env.MODAL_IMAGE_TO_3D_START_URL, {
     method: 'POST',
     headers: {
@@ -173,7 +193,7 @@ export async function handleGenerateModelRequest(
       'Modal-Secret': env.MODAL_SECRET,
     },
     body: JSON.stringify({
-      image_base64: body.value.image_base64,
+      image_base64: extractedImageBase64,
       ...modalPayloadDefaults,
     }),
   });
@@ -190,10 +210,11 @@ export async function handleGenerateModelRequest(
   const now = deps.now();
   const job: StoredJob = {
     id: modalJob.call_id,
-    label: formatDisplayTimestamp(now),
+    label: formatJobLabel(now, targetObject),
     status: 'running',
     created_at: now.toISOString(),
     updated_at: now.toISOString(),
+    target_object: targetObject ?? undefined,
   };
   await saveJob(env, job);
   await addPendingJob(env, job.id);
@@ -340,6 +361,10 @@ function validateEnv(env: WorkerEnv): string | null {
     return 'Modal credentials are not configured.';
   }
 
+  if (!env.OPENAI_API_KEY) {
+    return 'OpenAI API key is not configured.';
+  }
+
   if (!env.MODAL_IMAGE_TO_3D_URL) {
     return 'Modal endpoint URL is not configured.';
   }
@@ -353,6 +378,67 @@ function validateEnv(env: WorkerEnv): string | null {
   }
 
   return null;
+}
+
+async function extractImageFor3D(
+  input: {
+    imageBase64: string;
+    imageMimeType: string;
+    targetObject: string | null;
+  },
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<string> {
+  const formData = new FormData();
+  formData.append('image', new Blob([base64ToArrayBuffer(input.imageBase64)], { type: input.imageMimeType }), 'input.png');
+  formData.append('model', 'gpt-image-2-2026-04-21');
+  formData.append('prompt', buildOpenAiExtractionPrompt(input.targetObject));
+  formData.append('n', '1');
+
+  const response = await deps.fetch('https://api.openai.com/v1/images/edits', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI image extraction failed: ${await response.text()}`);
+  }
+
+  const body = (await response.json()) as { data?: Array<{ b64_json?: unknown; url?: unknown }> };
+  const image = body.data?.[0];
+  if (typeof image?.b64_json === 'string' && image.b64_json) {
+    return image.b64_json;
+  }
+
+  if (typeof image?.url === 'string' && image.url) {
+    const imageResponse = await deps.fetch(image.url);
+    if (!imageResponse.ok) {
+      throw new Error(`OpenAI image extraction failed: could not download edited image (${imageResponse.status}).`);
+    }
+    return arrayBufferToBase64(await imageResponse.arrayBuffer());
+  }
+
+  throw new Error('OpenAI image extraction failed: no image data returned.');
+}
+
+function buildOpenAiExtractionPrompt(targetObject: string | null): string {
+  if (targetObject) {
+    return `Extract the ${targetObject} from the image. Place the ${targetObject} in a frontal-side position suitable for 3D generation, and make the background solid pure white. The final output must contain only a single ${targetObject}, in high quality (HQ), extremely sharp, with clear details and studio lighting, optimized for 3D reconstruction.`;
+  }
+
+  return 'Extract the main, most prominent object from the image. Place it in a frontal-side position suitable for 3D generation, and make the background solid pure white. The final output must contain only a single object, in high quality (HQ), extremely sharp, with clear details and studio lighting, optimized for 3D reconstruction.';
+}
+
+function normalizeTargetObject(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 async function readJsonBody(
@@ -529,6 +615,30 @@ function formatDisplayTimestamp(date: Date): string {
   )}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} UTC`;
 }
 
+function formatJobLabel(date: Date, targetObject: string | null): string {
+  const objectLabel = targetObject ?? 'Main object';
+  return `${objectLabel} - ${formatDisplayTimestamp(date)}`;
+}
+
 function safeObjectKeyPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80);
+}
+
+function base64ToArrayBuffer(value: string): ArrayBuffer {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes.buffer;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+  return btoa(binary);
 }

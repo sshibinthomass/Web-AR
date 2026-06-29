@@ -9,6 +9,7 @@ export interface CapturedImage {
 }
 
 export const DEFAULT_CAPTURE_MAX_DIMENSION = 1536;
+export const DEFAULT_CAPTURE_IMAGE_MIME_TYPE = 'image/png';
 
 export async function startCameraPreview(
   video: HTMLVideoElement,
@@ -36,7 +37,7 @@ export function stopCameraPreview(stream: MediaStream | null): void {
 
 export async function captureVideoFrame(
   video: HTMLVideoElement,
-  imageMimeType = 'image/jpeg',
+  imageMimeType = DEFAULT_CAPTURE_IMAGE_MIME_TYPE,
   quality = 0.9,
   maxDimension = DEFAULT_CAPTURE_MAX_DIMENSION,
 ): Promise<CapturedImage> {
@@ -88,16 +89,20 @@ export function getCaptureDimensions(
   const largestDimension = Math.max(sourceWidth, sourceHeight);
   if (largestDimension <= maxDimension) {
     return {
-      width: sourceWidth,
-      height: sourceHeight,
+      width: roundDownToMultipleOf16(sourceWidth),
+      height: roundDownToMultipleOf16(sourceHeight),
     };
   }
 
   const scale = maxDimension / largestDimension;
   return {
-    width: Math.round(sourceWidth * scale),
-    height: Math.round(sourceHeight * scale),
+    width: roundDownToMultipleOf16(Math.round(sourceWidth * scale)),
+    height: roundDownToMultipleOf16(Math.round(sourceHeight * scale)),
   };
+}
+
+function roundDownToMultipleOf16(value: number): number {
+  return Math.max(16, value - (value % 16));
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
