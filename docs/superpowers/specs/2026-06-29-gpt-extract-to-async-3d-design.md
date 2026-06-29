@@ -18,24 +18,28 @@ Camera page:
 
 1. User opens Camera.
 2. Camera starts fullscreen.
-3. User may enter a target object, such as `laptop`. This field is optional.
-4. User captures an image.
-5. Camera stops and the still image is shown.
-6. User clicks Generate 3D.
-7. Worker starts an async generation job.
-8. The page reports that generation is running in the background.
-9. When complete, the generated model appears in the AR View dropdown.
+3. User captures an image.
+4. Camera stops and the still image is shown.
+5. The app shows an optional target object text input, such as `laptop`.
+6. User may leave the target object empty to extract the main object.
+7. User clicks Generate 3D.
+8. Worker starts an async generation job.
+9. The page reports that generation is running in the background.
+10. When complete, the generated model appears in the AR View dropdown.
 
 Full Flow page:
 
 1. User opens Full Flow.
 2. Camera starts fullscreen.
-3. User may enter a target object, such as `laptop`. This field is optional.
-4. User captures an image.
-5. Worker starts the async extraction and 3D generation job.
-6. The browser polls the Worker status endpoint and keeps showing loading until the GLB is ready or an error occurs.
-7. When complete, the app loads the generated GLB and shows: `You can place the object now.`
-8. User starts AR and places the generated model.
+3. User captures an image.
+4. Camera stops and the still image is shown.
+5. The app shows an optional target object text input, such as `laptop`.
+6. User may leave the target object empty to extract the main object.
+7. User clicks Generate and Place.
+8. Worker starts the async extraction and 3D generation job.
+9. The browser polls the Worker status endpoint and keeps showing loading until the GLB is ready or an error occurs.
+10. When complete, the app loads the generated GLB and shows: `You can place the object now.`
+11. User starts AR and places the generated model.
 
 AR View page:
 
@@ -67,7 +71,7 @@ The optional target object is trimmed. Empty or whitespace-only text uses the ma
 Browser responsibilities:
 
 - Capture the image.
-- Collect optional target object text.
+- After capture, show the still image and collect optional target object text.
 - Send `image_base64`, `image_mime_type`, and optional `target_object` to the Worker.
 - For Camera, start the job and refresh the generated model dropdown later.
 - For Full Flow, poll the job until complete, load the returned GLB, and allow placement.
@@ -189,7 +193,7 @@ Browser client tests:
 
 HUD tests:
 
-- Camera and Full Flow pages render an optional target object input.
+- Camera and Full Flow pages render the optional target object input after capture.
 - The input can be empty.
 - Generation handlers receive the trimmed target object.
 
