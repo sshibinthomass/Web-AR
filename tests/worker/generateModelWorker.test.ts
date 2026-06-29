@@ -8,6 +8,9 @@ function createEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
     MODAL_IMAGE_TO_3D_URL: 'https://modal.example/generate',
     MODAL_IMAGE_TO_3D_START_URL: 'https://modal.example/start',
     MODAL_IMAGE_TO_3D_RESULT_URL: 'https://modal.example/result',
+    MODAL_OPENAI_TO_3D_URL: 'https://modal.example/openai-generate',
+    MODAL_OPENAI_TO_3D_START_URL: 'https://modal.example/openai-start',
+    MODAL_OPENAI_TO_3D_RESULT_URL: 'https://modal.example/openai-result',
     OPENAI_API_KEY: 'openai-key',
     PUBLIC_MODEL_ORIGIN: 'https://web-ar-model-assets.pages.dev',
     MODEL_BUCKET: {
@@ -28,6 +31,14 @@ function jsonRequest(body: unknown): Request {
 
 function extractRequest(body: unknown): Request {
   return new Request('https://worker.example/extract-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+function directOpenAiTo3DRequest(body: unknown): Request {
+  return new Request('https://worker.example/generate-3d/openai', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -243,6 +254,59 @@ describe('handleGenerateModelRequest', () => {
     });
   });
 
+  it('starts a direct OpenAI-to-3D Modal job in the background', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ call_id: 'openai-123' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const env = createEnv();
+
+    const response = await handleGenerateModelRequest(
+      directOpenAiTo3DRequest({
+        image_base64: 'captured-image-base64',
+        image_mime_type: 'image/jpeg',
+        target_object: ' laptop ',
+      }),
+      env,
+      { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') },
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://modal.example/openai-start',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Modal-Key': 'modal-key',
+          'Modal-Secret': 'modal-secret',
+        },
+        body: JSON.stringify({
+          image_base64: 'captured-image-base64',
+          prompt: 'laptop',
+          seed: 42,
+          pipeline_type: '512',
+          decimation_target: 300000,
+          texture_size: 1024,
+        }),
+      }),
+    );
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/jobs/openai-123.json',
+      expect.stringContaining('"pipeline":"openai-to-3d"'),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({
+      job_id: 'openai-123',
+      label: 'laptop - 2026-06-28 12:00:00 UTC',
+      status: 'running',
+      status_url: 'https://worker.example/generate-3d/jobs/openai-123',
+    });
+  });
+
   it('polls a running Modal job', async () => {
     const response = await handleGenerateModelRequest(
       new Request('https://worker.example/generate-3d/jobs/fc-123'),
@@ -288,6 +352,48 @@ describe('handleGenerateModelRequest', () => {
       object_key: 'models/generated/capture-20260628-120000-fc-123.glb',
       bytes: 4,
     });
+  });
+
+  it('polls stored OpenAI-to-3D jobs from the matching Modal result endpoint', async () => {
+    const storedObjects = new Map<string, string>();
+    storedObjects.set(
+      'models/generated/jobs/openai-123.json',
+      JSON.stringify({
+        id: 'openai-123',
+        label: 'laptop - 2026-06-28 12:00:00 UTC',
+        status: 'running',
+        pipeline: 'openai-to-3d',
+        created_at: '2026-06-28T12:00:00.000Z',
+        updated_at: '2026-06-28T12:00:00.000Z',
+      }),
+    );
+    const env = createEnv({
+      MODEL_BUCKET: {
+        get: vi.fn((key: string) => {
+          const value = storedObjects.get(key);
+          return Promise.resolve(value ? { body: value, httpMetadata: { contentType: 'application/json' } } : null);
+        }),
+        put: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([0x67, 0x6c, 0x54, 0x46]).buffer, {
+        status: 200,
+        headers: { 'Content-Type': 'model/gltf-binary' },
+      }),
+    );
+
+    const response = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/jobs/openai-123'),
+      env,
+      { fetch: fetchMock, now: () => new Date('2026-06-28T12:05:00Z') },
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://modal.example/openai-result?call_id=openai-123',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(response.status).toBe(200);
   });
 
   it('uses a Worker runtime fetch wrapper instead of passing fetch as a method', async () => {

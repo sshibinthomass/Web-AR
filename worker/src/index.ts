@@ -18,6 +18,9 @@ export interface WorkerEnv {
   MODAL_IMAGE_TO_3D_URL: string;
   MODAL_IMAGE_TO_3D_START_URL: string;
   MODAL_IMAGE_TO_3D_RESULT_URL: string;
+  MODAL_OPENAI_TO_3D_URL: string;
+  MODAL_OPENAI_TO_3D_START_URL: string;
+  MODAL_OPENAI_TO_3D_RESULT_URL: string;
   OPENAI_API_KEY: string;
   PUBLIC_MODEL_ORIGIN?: string;
   MODEL_BUCKET: ModelBucket;
@@ -43,6 +46,8 @@ interface GenerateModelRequestBody {
   target_object?: unknown;
 }
 
+type GenerationPipeline = 'trellis' | 'openai-to-3d';
+
 interface StoredJob {
   id: string;
   label: string;
@@ -53,6 +58,7 @@ interface StoredJob {
   failed_at?: string;
   error?: string;
   target_object?: string;
+  pipeline?: GenerationPipeline;
   model_url?: string;
   object_key?: string;
   bytes?: number;
@@ -90,6 +96,13 @@ const modalPayloadDefaults = {
   seed: 42,
   pipeline_type: '512',
   decimation_target: 100000,
+  texture_size: 1024,
+};
+
+const openAiTo3DModalPayloadDefaults = {
+  seed: 42,
+  pipeline_type: '512',
+  decimation_target: 300000,
   texture_size: 1024,
 };
 
@@ -154,7 +167,7 @@ export async function handleGenerateModelRequest(
     return jsonResponse({ error: 'Only POST requests are supported.' }, 405);
   }
 
-  if (url.pathname !== '/generate-3d' && url.pathname !== '/extract-image') {
+  if (url.pathname !== '/generate-3d' && url.pathname !== '/generate-3d/openai' && url.pathname !== '/extract-image') {
     return jsonResponse({ error: 'Not found.' }, 404);
   }
 
@@ -204,6 +217,7 @@ export async function handleGenerateModelRequest(
     {
       imageBase64: body.value.image_base64,
       targetObject,
+      pipeline: url.pathname === '/generate-3d/openai' ? 'openai-to-3d' : 'trellis',
     },
   );
 }
@@ -215,19 +229,26 @@ async function startModalGenerationJob(
   input: {
     imageBase64: string;
     targetObject: string | null;
+    pipeline: GenerationPipeline;
   },
 ): Promise<Response> {
-  const modalResponse = await deps.fetch(env.MODAL_IMAGE_TO_3D_START_URL, {
+  const modalConfig = modalConfigForPipeline(env, input.pipeline);
+  const payload: Record<string, unknown> = {
+    image_base64: input.imageBase64,
+  };
+  if (input.pipeline === 'openai-to-3d' && input.targetObject) {
+    payload.prompt = input.targetObject;
+  }
+  Object.assign(payload, modalConfig.payloadDefaults);
+
+  const modalResponse = await deps.fetch(modalConfig.startUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Modal-Key': env.MODAL_KEY,
       'Modal-Secret': env.MODAL_SECRET,
     },
-    body: JSON.stringify({
-      image_base64: input.imageBase64,
-      ...modalPayloadDefaults,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!modalResponse.ok) {
@@ -247,6 +268,7 @@ async function startModalGenerationJob(
     created_at: now.toISOString(),
     updated_at: now.toISOString(),
     target_object: input.targetObject ?? undefined,
+    pipeline: input.pipeline,
   };
   await saveJob(env, job);
   await addPendingJob(env, job.id);
@@ -318,8 +340,6 @@ async function processModalJob(
   jobId: string,
   requestOrigin?: string,
 ): Promise<ProcessJobResult> {
-  const resultUrl = new URL(env.MODAL_IMAGE_TO_3D_RESULT_URL);
-  resultUrl.searchParams.set('call_id', jobId);
   const now = deps.now();
   const existingJob = await readJob(env, jobId);
   const job =
@@ -330,7 +350,10 @@ async function processModalJob(
       status: 'running',
       created_at: now.toISOString(),
       updated_at: now.toISOString(),
+      pipeline: 'trellis',
     } satisfies StoredJob);
+  const resultUrl = new URL(modalConfigForPipeline(env, job.pipeline ?? 'trellis').resultUrl);
+  resultUrl.searchParams.set('call_id', jobId);
 
   const modalResponse = await deps.fetch(resultUrl.toString(), {
     method: 'GET',
@@ -405,11 +428,34 @@ function validateEnv(env: WorkerEnv): string | null {
     return 'Modal async endpoint URLs are not configured.';
   }
 
+  if (!env.MODAL_OPENAI_TO_3D_START_URL || !env.MODAL_OPENAI_TO_3D_RESULT_URL) {
+    return 'Modal OpenAI-to-3D async endpoint URLs are not configured.';
+  }
+
   if (!env.MODEL_BUCKET) {
     return 'Model bucket binding is not configured.';
   }
 
   return null;
+}
+
+function modalConfigForPipeline(
+  env: WorkerEnv,
+  pipeline: GenerationPipeline,
+): { startUrl: string; resultUrl: string; payloadDefaults: typeof modalPayloadDefaults } {
+  if (pipeline === 'openai-to-3d') {
+    return {
+      startUrl: env.MODAL_OPENAI_TO_3D_START_URL,
+      resultUrl: env.MODAL_OPENAI_TO_3D_RESULT_URL,
+      payloadDefaults: openAiTo3DModalPayloadDefaults,
+    };
+  }
+
+  return {
+    startUrl: env.MODAL_IMAGE_TO_3D_START_URL,
+    resultUrl: env.MODAL_IMAGE_TO_3D_RESULT_URL,
+    payloadDefaults: modalPayloadDefaults,
+  };
 }
 
 async function extractImageFor3D(

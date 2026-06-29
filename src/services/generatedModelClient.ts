@@ -5,10 +5,13 @@ export interface GenerateModelInput {
   imageBase64: string;
   imageMimeType: string;
   targetObject?: string;
+  generationPipeline?: GenerationPipeline;
   fetchImpl?: typeof fetch;
   pollIntervalMs?: number;
   maxPolls?: number;
 }
+
+export type GenerationPipeline = 'trellis' | 'openai-to-3d';
 
 export interface GeneratedModelResult {
   modelUrl: string;
@@ -73,13 +76,14 @@ export async function startGeneratedModelJob({
   imageBase64,
   imageMimeType,
   targetObject,
+  generationPipeline = 'trellis',
   fetchImpl = fetch,
 }: GenerateModelInput): Promise<StartGeneratedModelJobResult> {
   if (!apiUrl) {
     throw new Error('Worker API URL is not configured.');
   }
 
-  const response = await fetchImpl(apiUrl, {
+  const response = await fetchImpl(generateModelUrlForPipeline(apiUrl, generationPipeline), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(createGenerateModelRequestBody(imageBase64, imageMimeType, targetObject)),
@@ -164,6 +168,7 @@ export async function generateModelFromImage({
   imageBase64,
   imageMimeType,
   targetObject,
+  generationPipeline = 'trellis',
   fetchImpl = fetch,
   pollIntervalMs = 5000,
   maxPolls = 180,
@@ -172,7 +177,7 @@ export async function generateModelFromImage({
     throw new Error('Worker API URL is not configured.');
   }
 
-  const response = await fetchImpl(apiUrl, {
+  const response = await fetchImpl(generateModelUrlForPipeline(apiUrl, generationPipeline), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(createGenerateModelRequestBody(imageBase64, imageMimeType, targetObject)),
@@ -253,6 +258,14 @@ function createGenerateModelRequestBody(
 
 function extractImageUrlFromGenerateUrl(apiUrl: string): string {
   return apiUrl.replace(/\/generate-3d\/?$/, '/extract-image');
+}
+
+function generateModelUrlForPipeline(apiUrl: string, generationPipeline: GenerationPipeline): string {
+  if (generationPipeline === 'openai-to-3d') {
+    return apiUrl.replace(/\/+$/, '').replace(/\/generate-3d$/, '/generate-3d/openai');
+  }
+
+  return apiUrl;
 }
 
 function delay(milliseconds: number): Promise<void> {

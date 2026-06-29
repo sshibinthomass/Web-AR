@@ -116,6 +116,41 @@ describe('startGeneratedModelJob', () => {
       }),
     );
   });
+
+  it('uses the direct OpenAI-to-3D Worker endpoint when requested', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          job_id: 'openai-123',
+          status_url: 'https://worker.example/generate-3d/jobs/openai-123',
+        }),
+        {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    await startGeneratedModelJob({
+      apiUrl: 'https://worker.example/generate-3d',
+      imageBase64: 'captured-image-base64',
+      imageMimeType: 'image/jpeg',
+      targetObject: ' laptop ',
+      generationPipeline: 'openai-to-3d',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/generate-3d/openai',
+      expect.objectContaining({
+        body: JSON.stringify({
+          image_base64: 'captured-image-base64',
+          image_mime_type: 'image/jpeg',
+          target_object: 'laptop',
+        }),
+      }),
+    );
+  });
 });
 
 describe('listGeneratedModels', () => {
@@ -220,6 +255,53 @@ describe('generateModelFromImage', () => {
       objectKey: 'models/generated/capture.glb',
       bytes: 4,
     });
+  });
+
+  it('polls a direct OpenAI-to-3D full-flow job from the direct Worker endpoint', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            job_id: 'openai-123',
+            status_url: 'https://worker.example/generate-3d/jobs/openai-123',
+          }),
+          {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            model_url: 'https://assets.example/models/generated/openai.glb',
+            object_key: 'models/generated/openai.glb',
+            bytes: 4,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      );
+
+    await generateModelFromImage({
+      apiUrl: 'https://worker.example/generate-3d',
+      imageBase64: 'captured-image-base64',
+      imageMimeType: 'image/jpeg',
+      targetObject: ' laptop ',
+      generationPipeline: 'openai-to-3d',
+      fetchImpl,
+      pollIntervalMs: 0,
+    });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'https://worker.example/generate-3d/openai',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, 'https://worker.example/generate-3d/jobs/openai-123');
   });
 
   it('throws the Worker error message when generation fails', async () => {

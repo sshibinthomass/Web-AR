@@ -10,7 +10,13 @@ import { MODEL_OPTIONS } from './models';
 import { captureVideoFrame, startCameraPreview, stopCameraPreview, type CapturedImage } from '../capture/cameraCapture';
 import { createScene, type SceneContext } from '../scene/createScene';
 import { loadGLBModel } from '../scene/loadModel';
-import { extractImageFor3D, generateModelFromImage, listGeneratedModels, startGeneratedModelJob } from '../services/generatedModelClient';
+import {
+  extractImageFor3D,
+  generateModelFromImage,
+  listGeneratedModels,
+  startGeneratedModelJob,
+  type GenerationPipeline,
+} from '../services/generatedModelClient';
 import { AppState } from '../state/AppState';
 import { ARHud } from '../ui/ARHud';
 import { screenPointToFloorPoint, type Point2 } from '../utils/math';
@@ -30,6 +36,7 @@ export class WebARApp {
   private readonly clock = new THREE.Clock();
   private cameraStream: MediaStream | null = null;
   private capturedImage: CapturedImage | null = null;
+  private capturedImageGenerationPipeline: GenerationPipeline = 'openai-to-3d';
   private capturedImagePreviewUrl: string | null = null;
   private placementDragMode: PlacementGestureZone | null = null;
   private placementDragStart: Point2 | null = null;
@@ -166,6 +173,7 @@ export class WebARApp {
 
     try {
       this.capturedImage = await captureVideoFrame(preview);
+      this.capturedImageGenerationPipeline = 'openai-to-3d';
       stopCameraPreview(this.cameraStream);
       this.cameraStream = null;
       this.setCapturedImagePreview(this.capturedImage.blob);
@@ -189,8 +197,10 @@ export class WebARApp {
         imageBase64: this.capturedImage.imageBase64,
         imageMimeType: this.capturedImage.imageMimeType,
         targetObject,
+        generationPipeline: this.capturedImageGenerationPipeline,
       });
       this.capturedImage = null;
+      this.capturedImageGenerationPipeline = 'openai-to-3d';
       this.clearCapturedImagePreview();
       this.hud?.updateGeneratedModelSource(`${job.label} (generating in background)`);
       this.hud?.updateCameraStatus(
@@ -225,6 +235,7 @@ export class WebARApp {
         imageMimeType: extractedImage.imageMimeType,
         blob,
       };
+      this.capturedImageGenerationPipeline = 'trellis';
       this.setExtractedImagePreview(blob);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'GPT extraction failed.';
@@ -240,7 +251,9 @@ export class WebARApp {
 
     try {
       const capturedImage = this.capturedImage;
+      const generationPipeline = this.capturedImageGenerationPipeline;
       this.capturedImage = null;
+      this.capturedImageGenerationPipeline = 'openai-to-3d';
       this.clearCapturedImagePreview();
       this.hud?.showFullFlowLoading('Building your 3D object in Modal. Keep this page open.');
 
@@ -249,6 +262,7 @@ export class WebARApp {
         imageBase64: capturedImage.imageBase64,
         imageMimeType: capturedImage.imageMimeType,
         targetObject,
+        generationPipeline,
       });
 
       await this.loadModelFromUrl(generatedModel.modelUrl, 'Generated object', {
@@ -269,6 +283,7 @@ export class WebARApp {
     stopCameraPreview(this.cameraStream);
     this.cameraStream = null;
     this.capturedImage = null;
+    this.capturedImageGenerationPipeline = 'openai-to-3d';
     this.clearCapturedImagePreview();
 
     const session = this.sceneContext?.renderer.xr.getSession();
