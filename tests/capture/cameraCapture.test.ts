@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { blobToBase64, getCaptureDimensions, startCameraPreview, stopCameraPreview } from '../../src/capture/cameraCapture';
+import {
+  DEFAULT_CAPTURE_MAX_DIMENSION,
+  blobToBase64,
+  getCaptureDimensions,
+  startCameraPreview,
+  stopCameraPreview,
+} from '../../src/capture/cameraCapture';
 
 describe('cameraCapture', () => {
   it('converts a Blob to base64 without the data URL prefix', async () => {
@@ -8,7 +14,7 @@ describe('cameraCapture', () => {
     await expect(blobToBase64(blob)).resolves.toBe('aGVsbG8=');
   });
 
-  it('requests the rear camera and attaches the stream to the preview video', async () => {
+  it('requests an HD rear camera stream and attaches it to the preview video', async () => {
     const stream = { getTracks: () => [] } as unknown as MediaStream;
     const getUserMedia = vi.fn().mockResolvedValue(stream);
     const video = document.createElement('video');
@@ -21,6 +27,8 @@ describe('cameraCapture', () => {
     expect(getUserMedia).toHaveBeenCalledWith({
       video: {
         facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
       },
       audio: false,
     });
@@ -29,11 +37,12 @@ describe('cameraCapture', () => {
   });
 
   it('downscales large camera frames before upload', () => {
-    expect(getCaptureDimensions(1920, 1080, 768)).toEqual({
-      width: 768,
-      height: 432,
+    expect(DEFAULT_CAPTURE_MAX_DIMENSION).toBe(1536);
+    expect(getCaptureDimensions(1920, 1080, DEFAULT_CAPTURE_MAX_DIMENSION)).toEqual({
+      width: 1536,
+      height: 864,
     });
-    expect(getCaptureDimensions(640, 480, 768)).toEqual({
+    expect(getCaptureDimensions(640, 480, DEFAULT_CAPTURE_MAX_DIMENSION)).toEqual({
       width: 640,
       height: 480,
     });

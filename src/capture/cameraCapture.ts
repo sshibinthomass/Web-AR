@@ -8,6 +8,8 @@ export interface CapturedImage {
   blob: Blob;
 }
 
+export const DEFAULT_CAPTURE_MAX_DIMENSION = 1536;
+
 export async function startCameraPreview(
   video: HTMLVideoElement,
   provider: MediaDevicesProvider = navigator,
@@ -15,6 +17,8 @@ export async function startCameraPreview(
   const stream = await provider.mediaDevices.getUserMedia({
     video: {
       facingMode: { ideal: 'environment' },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
     },
     audio: false,
   });
@@ -34,7 +38,7 @@ export async function captureVideoFrame(
   video: HTMLVideoElement,
   imageMimeType = 'image/jpeg',
   quality = 0.9,
-  maxDimension = 768,
+  maxDimension = DEFAULT_CAPTURE_MAX_DIMENSION,
 ): Promise<CapturedImage> {
   const sourceWidth = video.videoWidth || video.clientWidth;
   const sourceHeight = video.videoHeight || video.clientHeight;
