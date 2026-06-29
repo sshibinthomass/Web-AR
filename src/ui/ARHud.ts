@@ -23,6 +23,7 @@ export class ARHud {
   readonly gestureSurface: HTMLElement;
   readonly arButtonSlot: HTMLElement;
   readonly cameraPreviewVideo: HTMLVideoElement;
+  readonly cameraPreviewImage: HTMLImageElement;
 
   private readonly landing: HTMLElement;
   private readonly statusPanel: HTMLElement;
@@ -121,10 +122,12 @@ export class ARHud {
     cameraPanel.innerHTML = `
       <p class="camera-label">Camera</p>
       <video class="camera-preview" muted playsinline></video>
+      <img class="camera-preview hidden" alt="Captured image preview">
       <p class="camera-status">Start the camera, capture an image, then generate a 3D model.</p>
       <p class="generated-model-status">Generated model: None yet</p>
     `;
     this.cameraPreviewVideo = cameraPanel.querySelector<HTMLVideoElement>('.camera-preview')!;
+    this.cameraPreviewImage = cameraPanel.querySelector<HTMLImageElement>('img.camera-preview')!;
     this.cameraPanel = cameraPanel;
     this.cameraStatusMessage = cameraPanel.querySelector<HTMLElement>('.camera-status')!;
     this.generatedModelMessage = cameraPanel.querySelector<HTMLElement>('.generated-model-status')!;
@@ -196,6 +199,19 @@ export class ARHud {
   updateCameraStatus(message: string, canGenerate: boolean): void {
     this.cameraStatusMessage.textContent = message;
     this.generateButton.disabled = !canGenerate;
+  }
+
+  showLiveCameraPreview(): void {
+    this.cameraPreviewImage.classList.add('hidden');
+    this.cameraPreviewImage.removeAttribute('src');
+    this.cameraPreviewVideo.classList.remove('hidden');
+  }
+
+  showCapturedImagePreview(imageUrl: string): void {
+    this.cameraPreviewVideo.classList.add('hidden');
+    this.cameraPreviewImage.src = imageUrl;
+    this.cameraPreviewImage.classList.remove('hidden');
+    this.updateCameraStatus('Image captured. Generate a 3D model from this image.', true);
   }
 
   updateGeneratedModelSource(modelUrl: string): void {
@@ -333,6 +349,7 @@ export class ARHud {
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
     this.fullFlowLoading.classList.add('hidden');
+    this.showLiveCameraPreview();
     this.handlers.onStartCamera();
   }
 
@@ -357,6 +374,7 @@ export class ARHud {
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
     this.fullFlowLoading.classList.add('hidden');
+    this.showLiveCameraPreview();
     this.updateCameraStatus('Capture an image to build and place a 3D object.', false);
     this.handlers.onStartCamera();
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { blobToBase64, getCaptureDimensions, startCameraPreview } from '../../src/capture/cameraCapture';
+import { blobToBase64, getCaptureDimensions, startCameraPreview, stopCameraPreview } from '../../src/capture/cameraCapture';
 
 describe('cameraCapture', () => {
   it('converts a Blob to base64 without the data URL prefix', async () => {
@@ -37,5 +37,18 @@ describe('cameraCapture', () => {
       width: 640,
       height: 480,
     });
+  });
+
+  it('stops every track in the active camera stream', () => {
+    const firstTrack = { stop: vi.fn() };
+    const secondTrack = { stop: vi.fn() };
+    const stream = {
+      getTracks: () => [firstTrack, secondTrack],
+    } as unknown as MediaStream;
+
+    stopCameraPreview(stream);
+
+    expect(firstTrack.stop).toHaveBeenCalledTimes(1);
+    expect(secondTrack.stop).toHaveBeenCalledTimes(1);
   });
 });

@@ -25,6 +25,7 @@ export class WebARApp {
   private readonly clock = new THREE.Clock();
   private cameraStream: MediaStream | null = null;
   private capturedImage: CapturedImage | null = null;
+  private capturedImagePreviewUrl: string | null = null;
   private lastHudMode = this.appState.mode;
   private availableModels = [...MODEL_OPTIONS];
 
@@ -138,6 +139,8 @@ export class WebARApp {
 
     try {
       stopCameraPreview(this.cameraStream);
+      this.clearCapturedImagePreview();
+      this.hud?.showLiveCameraPreview();
       this.cameraStream = await startCameraPreview(preview);
       this.hud?.updateCameraStatus('Camera ready. Capture an image to generate a 3D model.', false);
     } catch (error) {
@@ -154,7 +157,9 @@ export class WebARApp {
 
     try {
       this.capturedImage = await captureVideoFrame(preview);
-      this.hud?.updateCameraStatus('Image captured. Ready to generate.', true);
+      stopCameraPreview(this.cameraStream);
+      this.cameraStream = null;
+      this.setCapturedImagePreview(this.capturedImage.blob);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not capture image.';
       this.hud?.updateCameraStatus(`Capture failed: ${message}`, false);
@@ -176,6 +181,7 @@ export class WebARApp {
         imageMimeType: this.capturedImage.imageMimeType,
       });
       this.capturedImage = null;
+      this.clearCapturedImagePreview();
       this.hud?.updateGeneratedModelSource(`${job.label} (generating in background)`);
       this.hud?.updateCameraStatus(
         `Generation started: ${job.label}. You can close the app; it will appear in the Model dropdown when ready.`,
@@ -224,6 +230,7 @@ export class WebARApp {
     stopCameraPreview(this.cameraStream);
     this.cameraStream = null;
     this.capturedImage = null;
+    this.clearCapturedImagePreview();
 
     const session = this.sceneContext?.renderer.xr.getSession();
     if (session) {
@@ -243,6 +250,19 @@ export class WebARApp {
       this.hud?.updateGeneratedModels(generatedModels);
     } catch (error) {
       console.warn('Could not refresh generated models.', error);
+    }
+  }
+
+  private setCapturedImagePreview(blob: Blob): void {
+    this.clearCapturedImagePreview();
+    this.capturedImagePreviewUrl = URL.createObjectURL(blob);
+    this.hud?.showCapturedImagePreview(this.capturedImagePreviewUrl);
+  }
+
+  private clearCapturedImagePreview(): void {
+    if (this.capturedImagePreviewUrl) {
+      URL.revokeObjectURL(this.capturedImagePreviewUrl);
+      this.capturedImagePreviewUrl = null;
     }
   }
 

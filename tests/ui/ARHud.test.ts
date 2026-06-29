@@ -306,6 +306,25 @@ describe('ARHud', () => {
     expect((generateButton as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('shows a captured still image and hides the live camera before generation', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    hud.showCapturedImagePreview('blob:captured-image');
+
+    const video = root.querySelector('video.camera-preview');
+    const image = root.querySelector('img.camera-preview') as HTMLImageElement | null;
+    const generateButton = [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Generate 3D',
+    );
+
+    expect(video?.classList.contains('hidden')).toBe(true);
+    expect(image?.classList.contains('hidden')).toBe(false);
+    expect(image?.src).toBe('blob:captured-image');
+    expect(root.textContent).toContain('Image captured. Generate a 3D model from this image.');
+    expect((generateButton as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('refreshes generated datetime models in the dropdown without losing built-in models', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
