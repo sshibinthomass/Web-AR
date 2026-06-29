@@ -12,10 +12,21 @@ describe('PlacementGestureZone', () => {
         {
           center: { x: 100, y: 100 },
           radiusPx: 80,
-          ringTolerancePx: 12,
         },
       ),
     ).toBe('move');
+  });
+
+  it('leaves a dead zone between move and rotate gestures', () => {
+    expect(
+      classifyPlacementGesture(
+        { x: 160, y: 100 },
+        {
+          center: { x: 100, y: 100 },
+          radiusPx: 80,
+        },
+      ),
+    ).toBe('none');
   });
 
   it('classifies touches on the placement circle line as rotate gestures', () => {
@@ -25,7 +36,6 @@ describe('PlacementGestureZone', () => {
         {
           center: { x: 100, y: 100 },
           radiusPx: 80,
-          ringTolerancePx: 12,
         },
       ),
     ).toBe('rotate');
@@ -38,7 +48,6 @@ describe('PlacementGestureZone', () => {
         {
           center: { x: 100, y: 100 },
           radiusPx: 80,
-          ringTolerancePx: 12,
         },
       ),
     ).toBe('none');

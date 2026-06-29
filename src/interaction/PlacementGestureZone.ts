@@ -5,24 +5,32 @@ export type PlacementGestureZone = 'move' | 'rotate' | 'none';
 export interface PlacementGestureBounds {
   center: Point2;
   radiusPx: number;
-  ringTolerancePx?: number;
+  moveRadiusRatio?: number;
+  rotateInnerRadiusRatio?: number;
+  rotateOuterRadiusRatio?: number;
 }
 
 export function classifyPlacementGesture(
   point: Point2,
-  { center, radiusPx, ringTolerancePx = 18 }: PlacementGestureBounds,
+  {
+    center,
+    radiusPx,
+    moveRadiusRatio = 0.55,
+    rotateInnerRadiusRatio = 0.82,
+    rotateOuterRadiusRatio = 1.25,
+  }: PlacementGestureBounds,
 ): PlacementGestureZone {
   if (radiusPx <= 0) {
     return 'none';
   }
 
   const distanceFromCenter = Math.hypot(point.x - center.x, point.y - center.y);
-  if (Math.abs(distanceFromCenter - radiusPx) <= ringTolerancePx) {
-    return 'rotate';
+  if (distanceFromCenter <= radiusPx * moveRadiusRatio) {
+    return 'move';
   }
 
-  if (distanceFromCenter < radiusPx - ringTolerancePx) {
-    return 'move';
+  if (distanceFromCenter >= radiusPx * rotateInnerRadiusRatio && distanceFromCenter <= radiusPx * rotateOuterRadiusRatio) {
+    return 'rotate';
   }
 
   return 'none';
