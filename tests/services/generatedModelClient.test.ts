@@ -194,6 +194,36 @@ describe('listGeneratedModels', () => {
       },
     ]);
   });
+
+  it('sends the bearer token when starting a protected Worker job', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          job_id: 'fc-123',
+          status_url: 'https://worker.example/generate-3d/jobs/fc-123',
+        }),
+        {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    await startGeneratedModelJob({
+      apiUrl: 'https://worker.example/generate-3d',
+      imageBase64: 'abc123',
+      imageMimeType: 'image/jpeg',
+      authToken: 'signed-token',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/generate-3d',
+      expect.objectContaining({
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer signed-token' },
+      }),
+    );
+  });
 });
 
 describe('storeUploadedModel', () => {
@@ -242,6 +272,41 @@ describe('storeUploadedModel', () => {
       url: 'https://assets.example/models/generated/uploads/upload-20260704-120000-living-room-chair.glb',
       source: 'uploaded',
     });
+  });
+
+  it('sends the bearer token when storing an uploaded model', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'upload-20260704-120000-living-room-chair',
+          label: 'Living Room Chair',
+          model_url: 'https://assets.example/model.glb',
+          object_key: 'models/generated/uploads/model.glb',
+          source: 'uploaded',
+        }),
+        {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+    const file = new File([new Uint8Array([0x67, 0x6c, 0x54, 0x46])], 'Living Room Chair.glb', {
+      type: 'model/gltf-binary',
+    });
+
+    await storeUploadedModel({
+      apiUrl: 'https://worker.example/generate-3d',
+      file,
+      authToken: 'signed-token',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/generate-3d/models/upload',
+      expect.objectContaining({
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer signed-token' },
+      }),
+    );
   });
 });
 
@@ -437,6 +502,56 @@ describe('generateModelFromImage', () => {
       modelUrl: 'https://assets.example/models/generated/capture.glb',
       objectKey: 'models/generated/capture.glb',
       bytes: 4,
+    });
+  });
+
+  it('uses the bearer token for full-flow generation and status polling', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            job_id: 'fc-123',
+            status_url: 'https://worker.example/generate-3d/jobs/fc-123',
+          }),
+          {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            model_url: 'https://assets.example/models/generated/capture.glb',
+            object_key: 'models/generated/capture.glb',
+            bytes: 4,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      );
+
+    await generateModelFromImage({
+      apiUrl: 'https://worker.example/generate-3d',
+      imageBase64: 'abc123',
+      imageMimeType: 'image/jpeg',
+      authToken: 'signed-token',
+      fetchImpl,
+      pollIntervalMs: 0,
+    });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'https://worker.example/generate-3d',
+      expect.objectContaining({
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer signed-token' },
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, 'https://worker.example/generate-3d/jobs/fc-123', {
+      headers: { Authorization: 'Bearer signed-token' },
     });
   });
 

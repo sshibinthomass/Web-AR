@@ -29,6 +29,18 @@ import {
   updateGeneratedModelThumbnail as updateGeneratedModelThumbnailRequest,
   type GenerationPipeline,
 } from '../services/generatedModelClient';
+import {
+  approveAccount as approveAccountRequest,
+  clearAuthToken,
+  getCurrentUser,
+  listAccounts,
+  loadAuthToken,
+  login as loginRequest,
+  removeAccount as removeAccountRequest,
+  saveAuthToken,
+  signup as signupRequest,
+  type AuthUser,
+} from '../services/authClient';
 import { AppState } from '../state/AppState';
 import { ARHud } from '../ui/ARHud';
 import { screenPointToFloorPoint, type Point2 } from '../utils/math';
@@ -60,6 +72,8 @@ export class WebARApp {
   private uploadedModelOptions: ModelOption[] = [];
   private pendingUploadModelFile: File | null = null;
   private modelPreviewViewer: ModelPreviewViewer | null = null;
+  private authToken: string | null = null;
+  private currentUser: AuthUser | null = null;
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -92,8 +106,18 @@ export class WebARApp {
       onCloseModelPreview: () => this.closeModelPreview(),
       onUpdateModelThumbnail: (modelId, file) => void this.updateModelThumbnail(modelId, file),
       onReturnHome: () => void this.returnHome(),
+      onLogin: (email, password) => void this.login(email, password),
+      onSignup: (email, password, name) => void this.signup(email, password, name),
+      onLogout: () => void this.logout(),
+      onApproveAccount: (email) => void this.approveAccount(email),
+      onRemoveAccount: (email) => void this.removeAccount(email),
+      onRefreshAdminAccounts: () => void this.refreshAdminAccounts(),
     });
     this.hud.updateModelSource('Cloudflare only');
+    this.authToken = loadAuthToken();
+    if (this.authToken) {
+      void this.restoreSession();
+    }
     void this.refreshGeneratedModels();
     window.setInterval(() => {
       void this.refreshGeneratedModels();
@@ -117,6 +141,132 @@ export class WebARApp {
     sceneContext.scene.add(controller);
 
     sceneContext.renderer.setAnimationLoop((time, frame) => this.render(time, frame));
+  }
+
+  private async restoreSession(): Promise<void> {
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    if (!this.authToken) {
+      return;
+    }
+
+    try {
+      const user = await getCurrentUser({ apiUrl, token: this.authToken });
+      if (!user) {
+        this.logout();
+        return;
+      }
+      this.currentUser = user;
+      this.hud?.updateAuthState(user);
+    } catch (error) {
+      console.warn('Could not restore auth session.', error);
+      this.logout();
+    }
+  }
+
+  private async login(email: string, password: string): Promise<void> {
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    this.hud?.showAuthMessage('Signing in...');
+
+    try {
+      const session = await loginRequest({ apiUrl, email, password });
+      if (!session.token) {
+        this.hud?.showAuthMessage('Account is waiting for admin approval.', false);
+        return;
+      }
+      this.authToken = session.token;
+      this.currentUser = session.user;
+      saveAuthToken(session.token);
+      this.hud?.updateAuthState(session.user);
+      this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
+      window.location.hash = '#/';
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Login failed.';
+      this.hud?.showAuthMessage(message, true);
+    }
+  }
+
+  private async signup(email: string, password: string, name: string): Promise<void> {
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    this.hud?.showAuthMessage('Creating account...');
+
+    try {
+      const session = await signupRequest({ apiUrl, email, password, name });
+      if (!session.token) {
+        this.hud?.showAuthMessage('Account created. Waiting for admin approval.');
+        return;
+      }
+      this.authToken = session.token;
+      this.currentUser = session.user;
+      saveAuthToken(session.token);
+      this.hud?.updateAuthState(session.user);
+      this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
+      window.location.hash = '#/';
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Account creation failed.';
+      this.hud?.showAuthMessage(message, true);
+    }
+  }
+
+  private logout(): void {
+    this.authToken = null;
+    this.currentUser = null;
+    clearAuthToken();
+    this.hud?.updateAuthState(null);
+    window.location.hash = '#/';
+  }
+
+  private async refreshAdminAccounts(): Promise<void> {
+    if (!this.authToken || this.currentUser?.role !== 'admin') {
+      return;
+    }
+
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    try {
+      this.hud?.updateAdminAccounts(await listAccounts({ apiUrl, token: this.authToken }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load accounts.';
+      this.hud?.showAuthMessage(message, true);
+    }
+  }
+
+  private async approveAccount(email: string): Promise<void> {
+    if (!this.authToken) {
+      return;
+    }
+
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    try {
+      await approveAccountRequest({ apiUrl, email, token: this.authToken });
+      await this.refreshAdminAccounts();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not approve account.';
+      this.hud?.showAuthMessage(message, true);
+    }
+  }
+
+  private async removeAccount(email: string): Promise<void> {
+    if (!this.authToken) {
+      return;
+    }
+
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    try {
+      await removeAccountRequest({ apiUrl, email, token: this.authToken });
+      await this.refreshAdminAccounts();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not remove account.';
+      this.hud?.showAuthMessage(message, true);
+    }
+  }
+
+  private requireAuthToken(message: string): string | null {
+    if (this.authToken) {
+      return this.authToken;
+    }
+
+    this.hud?.showAuthMessage(message, true);
+    window.location.hash = '#/login';
+    return null;
   }
 
   private async loadSelectedModel(modelId: string): Promise<void> {
@@ -212,6 +362,11 @@ export class WebARApp {
   }
 
   private async generateModel(targetObject: string): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to generate 3D models.');
+    if (!authToken) {
+      return;
+    }
+
     if (!this.capturedImage) {
       this.hud?.updateCameraStatus('Capture an image before generating a 3D model.', false);
       return;
@@ -226,6 +381,7 @@ export class WebARApp {
         imageMimeType: this.capturedImage.imageMimeType,
         targetObject,
         generationPipeline: this.capturedImageGenerationPipeline,
+        authToken,
       });
       this.capturedImage = null;
       this.capturedImageGenerationPipeline = 'openai-to-3d';
@@ -243,6 +399,11 @@ export class WebARApp {
   }
 
   private async submitCapturedImageToGpt(targetObject: string): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to submit images.');
+    if (!authToken) {
+      return;
+    }
+
     if (!this.capturedImage) {
       this.hud?.updateCameraStatus('Capture an image before submitting it to GPT.', false);
       return;
@@ -256,6 +417,7 @@ export class WebARApp {
         imageBase64: this.capturedImage.imageBase64,
         imageMimeType: this.capturedImage.imageMimeType,
         targetObject,
+        authToken,
       });
       const blob = base64ToBlob(extractedImage.imageBase64, extractedImage.imageMimeType);
       this.capturedImage = {
@@ -272,6 +434,11 @@ export class WebARApp {
   }
 
   private async runFullFlow(targetObject: string): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to use Full Flow.');
+    if (!authToken) {
+      return;
+    }
+
     if (!this.capturedImage) {
       this.hud?.updateCameraStatus('Capture an image before generating a 3D model.', false);
       return;
@@ -291,6 +458,7 @@ export class WebARApp {
         imageMimeType: capturedImage.imageMimeType,
         targetObject,
         generationPipeline,
+        authToken,
       });
 
       await this.loadModelFromUrl(generatedModel.modelUrl, 'Generated object', {
@@ -299,7 +467,11 @@ export class WebARApp {
         sourceMessage: 'Generated by Modal',
       });
 
-      this.hud?.showFullFlowReady('You can place the object now. Start AR, scan the floor, then tap Place.');
+      this.hud?.showFullFlowReady('Generated object is ready. Scan the floor, then tap Place.', {
+        id: 'full-flow-generated-object',
+        label: 'Generated object',
+        url: generatedModel.modelUrl,
+      });
       void this.refreshGeneratedModels();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Full Flow failed.';
@@ -349,6 +521,11 @@ export class WebARApp {
   }
 
   private async storeUploadedModel(): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to upload models.');
+    if (!authToken) {
+      return;
+    }
+
     if (!this.pendingUploadModelFile) {
       this.hud?.updateUploadModelStatus('Choose a .glb model before storing.', false);
       return;
@@ -361,6 +538,7 @@ export class WebARApp {
       const storedModel = await storeUploadedModelRequest({
         apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
         file,
+        authToken,
       });
       this.pendingUploadModelFile = null;
       this.generatedModelOptions = [
@@ -435,12 +613,17 @@ export class WebARApp {
   }
 
   private async renameGeneratedModel(modelId: string, label: string): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to rename models.');
+    if (!authToken) {
+      return;
+    }
+
     const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
 
     this.hud?.updateModelManagerStatus('Renaming model...');
 
     try {
-      await renameGeneratedModelRequest({ apiUrl, modelId, label });
+      await renameGeneratedModelRequest({ apiUrl, modelId, label, authToken });
       await this.refreshGeneratedModels();
       this.hud?.updateModelManagerStatus('Model renamed.');
     } catch (error) {
@@ -450,12 +633,17 @@ export class WebARApp {
   }
 
   private async deleteGeneratedModel(modelId: string): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to delete models.');
+    if (!authToken) {
+      return;
+    }
+
     const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
 
     this.hud?.updateModelManagerStatus('Deleting model...');
 
     try {
-      await deleteGeneratedModelRequest({ apiUrl, modelId });
+      await deleteGeneratedModelRequest({ apiUrl, modelId, authToken });
       await this.refreshGeneratedModels();
       this.hud?.updateModelManagerStatus('Model deleted.');
     } catch (error) {
@@ -465,6 +653,11 @@ export class WebARApp {
   }
 
   private async updateModelThumbnail(modelId: string, file: File): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to update thumbnails.');
+    if (!authToken) {
+      return;
+    }
+
     const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
 
     this.hud?.updateModelManagerStatus('Compressing thumbnail...');
@@ -472,7 +665,7 @@ export class WebARApp {
     try {
       const thumbnail = await compressThumbnailImage(file);
       this.hud?.updateModelManagerStatus('Uploading compressed thumbnail...');
-      const updatedModel = await updateGeneratedModelThumbnailRequest({ apiUrl, modelId, thumbnail });
+      const updatedModel = await updateGeneratedModelThumbnailRequest({ apiUrl, modelId, thumbnail, authToken });
       this.generatedModelOptions = this.generatedModelOptions.map((model) =>
         model.id === updatedModel.id ? updatedModel : model,
       );

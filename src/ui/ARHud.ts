@@ -1,5 +1,6 @@
 import type { AppMode } from '../state/AppState';
 import type { ModelOption } from '../app/models';
+import type { AuthUser } from '../services/authClient';
 
 interface HUDHandlers {
   onPlace(): void;
@@ -24,9 +25,15 @@ interface HUDHandlers {
   onCloseModelPreview(): void;
   onUpdateModelThumbnail(modelId: string, file: File): void;
   onReturnHome(): void;
+  onLogin(email: string, password: string): void;
+  onSignup(email: string, password: string, name: string): void;
+  onLogout(): void;
+  onApproveAccount(email: string): void;
+  onRemoveAccount(email: string): void;
+  onRefreshAdminAccounts(): void;
 }
 
-type HudRoute = 'home' | 'camera' | 'upload' | 'upload-model' | 'ar' | 'full-flow' | 'models';
+type HudRoute = 'home' | 'camera' | 'upload' | 'upload-model' | 'ar' | 'full-flow' | 'models' | 'login' | 'admin';
 
 export class ARHud {
   readonly overlay: HTMLElement;
@@ -37,6 +44,19 @@ export class ARHud {
   readonly modelPreviewViewport: HTMLElement;
 
   private readonly landing: HTMLElement;
+  private readonly authActions: HTMLElement;
+  private readonly authIdentity: HTMLElement;
+  private readonly loginButton: HTMLButtonElement;
+  private readonly logoutButton: HTMLButtonElement;
+  private readonly adminButton: HTMLButtonElement;
+  private readonly authPanel: HTMLElement;
+  private readonly authMessage: HTMLElement;
+  private readonly authEmailInput: HTMLInputElement;
+  private readonly authPasswordInput: HTMLInputElement;
+  private readonly authNameInput: HTMLInputElement;
+  private readonly adminDashboard: HTMLElement;
+  private readonly adminAccountList: HTMLElement;
+  private readonly adminDashboardMessage: HTMLElement;
   private readonly statusPanel: HTMLElement;
   private readonly hudActions: HTMLElement;
   private readonly statusMessage: HTMLElement;
@@ -75,9 +95,12 @@ export class ARHud {
   private readonly baseModelOptions: ModelOption[];
   private generatedModelOptions: ModelOption[] = [];
   private uploadedModelOptions: ModelOption[] = [];
+  private fullFlowModelOption: ModelOption | null = null;
   private arPlacementStarted = false;
   private modelReady = false;
   private activeRoute: HudRoute | null = null;
+  private currentUser: AuthUser | null = null;
+  private adminAccounts: AuthUser[] = [];
 
   constructor(
     root: HTMLElement,
@@ -107,8 +130,71 @@ export class ARHud {
       this.createButton('Full Flow', '', () => this.navigateTo('full-flow')),
       this.createButton('Models', '', () => this.navigateTo('models')),
     );
-    this.landing.querySelector('.landing-inner')?.appendChild(modePicker);
+    this.authActions = document.createElement('div');
+    this.authActions.className = 'auth-actions';
+    this.authIdentity = document.createElement('p');
+    this.authIdentity.className = 'auth-identity';
+    this.loginButton = this.createButton('Login', '', () => this.navigateTo('login'));
+    this.adminButton = this.createButton('Admin', '', () => this.navigateTo('admin'));
+    this.logoutButton = this.createButton('Logout', '', this.handlers.onLogout);
+    this.adminButton.classList.add('hidden');
+    this.logoutButton.classList.add('hidden');
+    this.authActions.append(this.authIdentity, this.loginButton, this.adminButton, this.logoutButton);
+    this.landing.querySelector('.landing-inner')?.append(modePicker, this.authActions);
     shell.appendChild(this.landing);
+
+    this.authPanel = document.createElement('section');
+    this.authPanel.className = 'auth-panel hidden';
+    this.authPanel.innerHTML = `
+      <div class="auth-panel-inner">
+        <button class="page-back" type="button">Back</button>
+        <div class="auth-panel-header">
+          <h2>Login</h2>
+          <p class="auth-message">Sign in with an approved account, or create one for admin approval.</p>
+        </div>
+        <label>
+          <span>Email</span>
+          <input name="authEmail" type="email" autocomplete="email">
+        </label>
+        <label>
+          <span>Password</span>
+          <input name="authPassword" type="password" autocomplete="current-password">
+        </label>
+        <label>
+          <span>Name</span>
+          <input name="authName" type="text" autocomplete="name">
+        </label>
+        <div class="auth-form-actions"></div>
+      </div>
+    `;
+    this.authMessage = this.authPanel.querySelector<HTMLElement>('.auth-message')!;
+    this.authEmailInput = this.authPanel.querySelector<HTMLInputElement>('input[name="authEmail"]')!;
+    this.authPasswordInput = this.authPanel.querySelector<HTMLInputElement>('input[name="authPassword"]')!;
+    this.authNameInput = this.authPanel.querySelector<HTMLInputElement>('input[name="authName"]')!;
+    this.authPanel.querySelector<HTMLButtonElement>('.page-back')?.addEventListener('click', () => this.navigateTo('home'));
+    this.authPanel.querySelector<HTMLElement>('.auth-form-actions')?.append(
+      this.createButton('Sign in', 'primary', () => this.handleLoginClick()),
+      this.createButton('Create account', '', () => this.handleSignupClick()),
+    );
+    shell.appendChild(this.authPanel);
+
+    this.adminDashboard = document.createElement('section');
+    this.adminDashboard.className = 'admin-dashboard hidden';
+    this.adminDashboard.innerHTML = `
+      <div class="admin-dashboard-inner">
+        <button class="page-back" type="button">Back</button>
+        <div class="admin-dashboard-header">
+          <h2>Admin</h2>
+          <p>Approve pending accounts or remove users.</p>
+        </div>
+        <div class="admin-account-list"></div>
+        <p class="admin-dashboard-message">Accounts load from Cloudflare storage.</p>
+      </div>
+    `;
+    this.adminDashboard.querySelector<HTMLButtonElement>('.page-back')?.addEventListener('click', () => this.navigateTo('home'));
+    this.adminAccountList = this.adminDashboard.querySelector<HTMLElement>('.admin-account-list')!;
+    this.adminDashboardMessage = this.adminDashboard.querySelector<HTMLElement>('.admin-dashboard-message')!;
+    shell.appendChild(this.adminDashboard);
 
     this.modelManager = document.createElement('section');
     this.modelManager.className = 'model-manager hidden';
@@ -300,6 +386,7 @@ export class ARHud {
     );
     this.renderModelRail();
     this.renderARModelPicker();
+    this.renderAuthControls();
 
     window.addEventListener('hashchange', () => this.applyCurrentRoute());
 
@@ -311,6 +398,27 @@ export class ARHud {
     this.arButtonSlot.replaceChildren(button);
     this.arButtonSlot.classList.add('hidden');
     this.arButtonSlot.setAttribute('aria-hidden', 'true');
+  }
+
+  updateAuthState(user: AuthUser | null): void {
+    this.currentUser = user?.status === 'active' ? user : null;
+    this.renderAuthControls();
+    if (this.activeRoute && this.routeRequiresAuth(this.activeRoute) && !this.isLoggedIn()) {
+      this.redirectToLogin(this.loginMessageForRoute(this.activeRoute));
+    }
+    if (this.activeRoute === 'admin' && !this.isAdmin()) {
+      this.redirectToLogin('Admin access is required.');
+    }
+  }
+
+  showAuthMessage(message: string, isError = false): void {
+    this.authMessage.textContent = message;
+    this.authMessage.classList.toggle('is-error', isError);
+  }
+
+  updateAdminAccounts(users: AuthUser[]): void {
+    this.adminAccounts = [...users];
+    this.renderAdminAccounts();
   }
 
   update(mode: AppMode, customMessage?: string): void {
@@ -558,11 +666,19 @@ export class ARHud {
     }
   }
 
-  showFullFlowReady(message: string): void {
+  showFullFlowReady(message: string, modelOption?: ModelOption): void {
+    if (window.location.hash !== '#/ar') {
+      window.location.hash = '#/ar';
+    }
+    this.activeRoute = 'ar';
     this.arPlacementStarted = true;
-    this.navigateTo('ar');
+    this.openARPage();
+    if (modelOption) {
+      this.fullFlowModelOption = modelOption;
+      this.renderModelSelect();
+      this.updateSelectedModel(modelOption.id);
+    }
     this.statusMessage.textContent = message;
-    this.startAttachedARCamera();
   }
 
   showFullFlowError(message: string): void {
@@ -591,6 +707,45 @@ export class ARHud {
     this.applyRoute(this.routeFromHash(window.location.hash));
   }
 
+  private routeRequiresAuth(route: HudRoute): boolean {
+    return route === 'camera' || route === 'upload' || route === 'upload-model' || route === 'full-flow';
+  }
+
+  private isLoggedIn(): boolean {
+    return Boolean(this.currentUser);
+  }
+
+  private isAdmin(): boolean {
+    return this.currentUser?.role === 'admin';
+  }
+
+  private redirectToLogin(message: string): void {
+    if (window.location.hash !== '#/login') {
+      window.location.hash = '#/login';
+    }
+    const previousRoute = this.activeRoute;
+    this.activeRoute = 'login';
+    this.openAuthPage(message);
+    if (previousRoute && previousRoute !== 'home' && previousRoute !== 'login') {
+      this.handlers.onReturnHome();
+    }
+  }
+
+  private loginMessageForRoute(route: HudRoute): string {
+    switch (route) {
+      case 'camera':
+        return 'Sign in to use Camera.';
+      case 'upload':
+        return 'Sign in to use Upload Image.';
+      case 'upload-model':
+        return 'Sign in to use Upload Model.';
+      case 'full-flow':
+        return 'Sign in to use Full Flow.';
+      default:
+        return 'Sign in with an approved account.';
+    }
+  }
+
   private routeFromHash(hash: string): HudRoute {
     switch (hash) {
       case '#/camera':
@@ -605,12 +760,26 @@ export class ARHud {
         return 'full-flow';
       case '#/models':
         return 'models';
+      case '#/login':
+        return 'login';
+      case '#/admin':
+        return 'admin';
       default:
         return 'home';
     }
   }
 
   private applyRoute(route: HudRoute): void {
+    if (this.routeRequiresAuth(route) && !this.isLoggedIn()) {
+      this.redirectToLogin(this.loginMessageForRoute(route));
+      return;
+    }
+
+    if (route === 'admin' && !this.isAdmin()) {
+      this.redirectToLogin('Admin access is required.');
+      return;
+    }
+
     if (this.activeRoute === route) {
       return;
     }
@@ -648,13 +817,26 @@ export class ARHud {
       return;
     }
 
+    if (route === 'login') {
+      this.openAuthPage();
+      return;
+    }
+
+    if (route === 'admin') {
+      this.openAdminDashboardPage();
+      return;
+    }
+
     this.openHomePage(previousRoute);
   }
 
   private openHomePage(previousRoute: HudRoute | null): void {
     this.closeModelPreviewIfOpen();
+    this.clearFullFlowModelOption();
     this.arPlacementStarted = false;
     this.landing.classList.remove('hidden');
+    this.authPanel.classList.add('hidden');
+    this.adminDashboard.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.add('hidden');
     this.statusPanel.classList.remove('camera-active');
@@ -675,8 +857,11 @@ export class ARHud {
 
   private openCameraPage(): void {
     this.closeModelPreviewIfOpen();
+    this.clearFullFlowModelOption();
     this.arPlacementStarted = false;
     this.landing.classList.add('hidden');
+    this.authPanel.classList.add('hidden');
+    this.adminDashboard.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active');
@@ -696,6 +881,8 @@ export class ARHud {
   private openARPage(): void {
     this.closeModelPreviewIfOpen();
     this.landing.classList.add('hidden');
+    this.authPanel.classList.add('hidden');
+    this.adminDashboard.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.remove('camera-active');
@@ -713,8 +900,11 @@ export class ARHud {
 
   private openFullFlowPage(): void {
     this.closeModelPreviewIfOpen();
+    this.clearFullFlowModelOption();
     this.arPlacementStarted = false;
     this.landing.classList.add('hidden');
+    this.authPanel.classList.add('hidden');
+    this.adminDashboard.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active', 'full-flow-active');
@@ -733,8 +923,11 @@ export class ARHud {
 
   private openUploadPage(): void {
     this.closeModelPreviewIfOpen();
+    this.clearFullFlowModelOption();
     this.arPlacementStarted = false;
     this.landing.classList.add('hidden');
+    this.authPanel.classList.add('hidden');
+    this.adminDashboard.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active');
@@ -752,8 +945,11 @@ export class ARHud {
 
   private openUploadModelPage(): void {
     this.closeModelPreviewIfOpen();
+    this.clearFullFlowModelOption();
     this.arPlacementStarted = false;
     this.landing.classList.add('hidden');
+    this.authPanel.classList.add('hidden');
+    this.adminDashboard.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active');
@@ -770,8 +966,11 @@ export class ARHud {
   }
 
   private openModelManagerPage(): void {
+    this.clearFullFlowModelOption();
     this.arPlacementStarted = false;
     this.landing.classList.add('hidden');
+    this.authPanel.classList.add('hidden');
+    this.adminDashboard.classList.add('hidden');
     this.modelManager.classList.remove('hidden');
     this.statusPanel.classList.add('hidden');
     this.statusPanel.classList.remove('camera-active');
@@ -787,8 +986,65 @@ export class ARHud {
     this.renderModelManagerList();
   }
 
+  private openAuthPage(message = 'Sign in with an approved account, or create one for admin approval.'): void {
+    this.closeModelPreviewIfOpen();
+    this.clearFullFlowModelOption();
+    this.arPlacementStarted = false;
+    this.landing.classList.add('hidden');
+    this.modelManager.classList.add('hidden');
+    this.adminDashboard.classList.add('hidden');
+    this.authPanel.classList.remove('hidden');
+    this.statusPanel.classList.add('hidden');
+    this.statusPanel.classList.remove('camera-active');
+    this.statusPanel.classList.remove('ar-picker-active');
+    this.statusPanel.classList.remove('full-flow-active');
+    this.hudActions.classList.add('hidden');
+    this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.cameraPanel.classList.add('hidden');
+    this.cameraPanel.classList.remove('fullscreen');
+    this.fullFlowLoading.classList.add('hidden');
+    this.showAuthMessage(message, false);
+  }
+
+  private openAdminDashboardPage(): void {
+    this.closeModelPreviewIfOpen();
+    this.clearFullFlowModelOption();
+    this.arPlacementStarted = false;
+    this.landing.classList.add('hidden');
+    this.modelManager.classList.add('hidden');
+    this.authPanel.classList.add('hidden');
+    this.adminDashboard.classList.remove('hidden');
+    this.statusPanel.classList.add('hidden');
+    this.statusPanel.classList.remove('camera-active');
+    this.statusPanel.classList.remove('ar-picker-active');
+    this.statusPanel.classList.remove('full-flow-active');
+    this.hudActions.classList.add('hidden');
+    this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.cameraPanel.classList.add('hidden');
+    this.cameraPanel.classList.remove('fullscreen');
+    this.fullFlowLoading.classList.add('hidden');
+    this.renderAdminAccounts();
+    this.handlers.onRefreshAdminAccounts();
+  }
+
   private handleCaptureClick(): void {
     this.handlers.onCaptureImage();
+  }
+
+  private handleLoginClick(): void {
+    this.handlers.onLogin(this.authEmailInput.value.trim().toLowerCase(), this.authPasswordInput.value);
+  }
+
+  private handleSignupClick(): void {
+    this.handlers.onSignup(
+      this.authEmailInput.value.trim().toLowerCase(),
+      this.authPasswordInput.value,
+      this.authNameInput.value.trim(),
+    );
   }
 
   private handleSubmitClick(): void {
@@ -798,6 +1054,9 @@ export class ARHud {
   private handleGenerateClick(): void {
     const targetObject = this.targetObjectInput.value.trim();
     if (this.activeRoute === 'full-flow') {
+      this.navigateTo('ar');
+      this.statusMessage.textContent = 'Opening AR camera and building your 3D object...';
+      this.startAttachedARCamera();
       this.handlers.onFullFlowCapture(targetObject);
       return;
     }
@@ -808,7 +1067,7 @@ export class ARHud {
   private renderModelSelect(): void {
     const selectedModelId = this.modelSelect.value;
     this.modelSelect.replaceChildren(new Option('Select model', '', true, !selectedModelId));
-    this.allModelOptions().forEach((model) => {
+    this.selectableModelOptions().forEach((model) => {
       this.modelSelect.append(new Option(model.label, model.id));
     });
     if ([...this.modelSelect.options].some((option) => option.value === selectedModelId)) {
@@ -824,6 +1083,14 @@ export class ARHud {
     return [...this.baseModelOptions, ...this.generatedModelOptions, ...this.uploadedModelOptions];
   }
 
+  private selectableModelOptions(): ModelOption[] {
+    const models = this.allModelOptions();
+    if (!this.fullFlowModelOption || models.some((model) => model.id === this.fullFlowModelOption?.id)) {
+      return models;
+    }
+
+    return [...models, this.fullFlowModelOption];
+  }
 
   private renderModelManagerList(): void {
     this.modelList.replaceChildren();
@@ -921,11 +1188,63 @@ export class ARHud {
     });
   }
 
+  private renderAuthControls(): void {
+    if (!this.currentUser) {
+      this.authIdentity.textContent = 'Guest access';
+      this.loginButton.classList.remove('hidden');
+      this.logoutButton.classList.add('hidden');
+      this.adminButton.classList.add('hidden');
+      return;
+    }
+
+    this.authIdentity.textContent = `${this.currentUser.email} (${this.currentUser.role})`;
+    this.loginButton.classList.add('hidden');
+    this.logoutButton.classList.remove('hidden');
+    this.adminButton.classList.toggle('hidden', this.currentUser.role !== 'admin');
+  }
+
+  private renderAdminAccounts(): void {
+    this.adminAccountList.replaceChildren();
+    if (this.adminAccounts.length === 0) {
+      this.adminDashboardMessage.textContent = 'No accounts loaded yet.';
+      return;
+    }
+
+    this.adminDashboardMessage.textContent = 'Account changes take effect immediately.';
+    this.adminAccounts.forEach((account) => {
+      const row = document.createElement('article');
+      row.className = `admin-account-row is-${account.status}`;
+
+      const details = document.createElement('div');
+      details.className = 'admin-account-details';
+      const email = document.createElement('p');
+      email.className = 'admin-account-email';
+      email.textContent = account.email;
+      const meta = document.createElement('p');
+      meta.className = 'admin-account-meta';
+      const statusLabel = account.status === 'pending' ? 'Pending' : 'Active';
+      meta.textContent = `${statusLabel} · ${account.role}${account.name ? ` · ${account.name}` : ''}`;
+      details.append(email, meta);
+
+      const actions = document.createElement('div');
+      actions.className = 'admin-account-actions';
+      if (account.status === 'pending') {
+        actions.append(this.createButton('Approve', 'primary', () => this.handlers.onApproveAccount(account.email)));
+      }
+      if (account.email !== this.currentUser?.email) {
+        actions.append(this.createButton('Remove', 'danger', () => this.handlers.onRemoveAccount(account.email)));
+      }
+
+      row.append(details, actions);
+      this.adminAccountList.appendChild(row);
+    });
+  }
+
   private renderModelRail(): void {
     const selectedModelId = this.modelSelect.value;
     this.modelRail.replaceChildren();
 
-    this.allModelOptions().forEach((model) => {
+    this.selectableModelOptions().forEach((model) => {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'model-rail-item';
@@ -964,7 +1283,7 @@ export class ARHud {
     const selectedModelId = this.modelSelect.value;
     this.arModelList.replaceChildren();
 
-    this.allModelOptions().forEach((model) => {
+    this.selectableModelOptions().forEach((model) => {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'ar-model-card';
@@ -1133,6 +1452,14 @@ export class ARHud {
     }
   }
 
+  private clearFullFlowModelOption(): void {
+    if (!this.fullFlowModelOption) {
+      return;
+    }
+
+    this.fullFlowModelOption = null;
+    this.renderModelSelect();
+  }
 
   private isModelManagerControl(target: EventTarget | null): boolean {
     return target instanceof HTMLElement && Boolean(target.closest('button, input, select, textarea, a, label'));
@@ -1144,6 +1471,10 @@ export class ARHud {
 
   private startAttachedARCamera(): void {
     const arControl = this.arButtonSlot.querySelector<HTMLElement>('button, a');
+    if (arControl?.textContent?.trim().toUpperCase().includes('STOP')) {
+      return;
+    }
+
     arControl?.click();
   }
 

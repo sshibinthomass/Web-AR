@@ -696,6 +696,172 @@ canvas {
   background: #5eead4;
 }
 
+.auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  max-width: 620px;
+  margin-top: 14px;
+}
+
+.auth-identity {
+  flex: 1 1 180px;
+  min-width: 0;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.auth-actions button,
+.auth-form-actions button,
+.admin-account-actions button {
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: #f8fafc;
+  background: rgba(5, 10, 14, 0.78);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  touch-action: manipulation;
+}
+
+.auth-actions button.primary,
+.auth-form-actions button.primary,
+.admin-account-actions button.primary {
+  color: #031b18;
+  background: #5eead4;
+}
+
+.admin-account-actions button.danger {
+  border-color: rgba(248, 113, 113, 0.52);
+  color: #fee2e2;
+  background: rgba(127, 29, 29, 0.44);
+}
+
+.auth-panel,
+.admin-dashboard {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  overflow-y: auto;
+  padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom));
+  background: rgba(2, 7, 11, 0.94);
+  pointer-events: auto;
+}
+
+.auth-panel-inner,
+.admin-dashboard-inner {
+  display: grid;
+  gap: 12px;
+  width: min(560px, 100%);
+  margin: 0 auto;
+}
+
+.auth-panel-header,
+.admin-dashboard-header {
+  margin: 18px 0 4px;
+}
+
+.auth-panel-header h2,
+.admin-dashboard-header h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.auth-message,
+.admin-dashboard-header p,
+.admin-dashboard-message {
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.auth-message.is-error {
+  color: #fecaca;
+}
+
+.auth-panel label {
+  display: grid;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.auth-panel input {
+  min-height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  font: inherit;
+  font-size: 14px;
+}
+
+.auth-form-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-account-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-account-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 72px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(5, 10, 14, 0.78);
+}
+
+.admin-account-row.is-pending {
+  border-color: rgba(251, 191, 36, 0.38);
+}
+
+.admin-account-details {
+  min-width: 0;
+}
+
+.admin-account-email {
+  margin: 0;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.admin-account-meta {
+  margin: 5px 0 0;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.admin-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .model-manager {
   position: fixed;
   inset: 0;

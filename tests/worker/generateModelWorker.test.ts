@@ -3,6 +3,8 @@ import worker, { handleGenerateModelRequest, handleScheduledPendingJobs, type Wo
 
 function createEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
   return {
+    AUTH_SECRET: 'unit-test-auth-secret',
+    ADMIN_EMAIL: 'sshibinthomass@gmail.com',
     MODAL_KEY: 'modal-key',
     MODAL_SECRET: 'modal-secret',
     MODAL_IMAGE_TO_3D_URL: 'https://modal.example/generate',
@@ -13,12 +15,40 @@ function createEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
     MODAL_OPENAI_TO_3D_RESULT_URL: 'https://modal.example/openai-result',
     OPENAI_API_KEY: 'openai-key',
     PUBLIC_MODEL_ORIGIN: 'https://web-ar-model-assets.pages.dev',
-    MODEL_BUCKET: {
-      get: vi.fn().mockResolvedValue(null),
-      put: vi.fn().mockResolvedValue(undefined),
-    },
+    MODEL_BUCKET: createMemoryBucket().bucket,
     ...overrides,
   };
+}
+
+function createMemoryBucket(initialObjects: Record<string, string | ArrayBuffer> = {}) {
+  const objects = new Map<string, string | ArrayBuffer>(Object.entries(initialObjects));
+  const bucket = {
+    get: vi.fn((key: string) => {
+      const value = objects.get(key);
+      if (!value) {
+        return Promise.resolve(null);
+      }
+
+      return Promise.resolve({
+        body: value,
+        httpMetadata: { contentType: typeof value === 'string' ? 'application/json' : 'application/octet-stream' },
+        text: () => Promise.resolve(typeof value === 'string' ? value : new TextDecoder().decode(value)),
+        arrayBuffer: () => Promise.resolve(typeof value === 'string' ? new TextEncoder().encode(value).buffer : value),
+      });
+    }),
+    put: vi.fn((key: string, value: ArrayBuffer | ReadableStream | string) => {
+      if (typeof value === 'string' || value instanceof ArrayBuffer) {
+        objects.set(key, value);
+      }
+      return Promise.resolve(undefined);
+    }),
+    delete: vi.fn((key: string) => {
+      objects.delete(key);
+      return Promise.resolve(undefined);
+    }),
+  };
+
+  return { bucket, objects };
 }
 
 function jsonRequest(body: unknown): Request {
@@ -45,7 +75,233 @@ function directOpenAiTo3DRequest(body: unknown): Request {
   });
 }
 
+async function createAdminToken(
+  env: WorkerEnv,
+  deps: { fetch: typeof fetch; now: () => Date } = {
+    fetch: vi.fn(),
+    now: () => new Date('2026-07-04T12:00:00Z'),
+  },
+): Promise<string> {
+  const response = await handleGenerateModelRequest(
+    new Request('https://worker.example/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'sshibinthomass@gmail.com', password: 'admin-password-123' }),
+    }),
+    env,
+    deps,
+  );
+  const body = (await response.json()) as { token?: string };
+  if (!body.token) {
+    throw new Error('Admin token was not returned.');
+  }
+  return body.token;
+}
+
+function withAuth(request: Request, token: string): Request {
+  const headers = new Headers(request.headers);
+  headers.set('Authorization', `Bearer ${token}`);
+  return new Request(request, { headers });
+}
+
 describe('handleGenerateModelRequest', () => {
+  it('creates the requested admin account as active and returns a reusable session', async () => {
+    const { bucket } = createMemoryBucket();
+    const env = createEnv({ MODEL_BUCKET: bucket });
+
+    const signupResponse = await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: ' sshibinthomass@gmail.com ',
+          password: 'admin-password-123',
+          name: 'Shibin',
+        }),
+      }),
+      env,
+      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') },
+    );
+
+    expect(signupResponse.status).toBe(201);
+    const signupBody = (await signupResponse.json()) as {
+      token?: string;
+      user?: { email: string; role: string; status: string; name: string };
+    };
+    expect(signupBody.user).toEqual({
+      email: 'sshibinthomass@gmail.com',
+      name: 'Shibin',
+      role: 'admin',
+      status: 'active',
+    });
+    expect(signupBody.token).toEqual(expect.any(String));
+
+    const sessionResponse = await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/session', {
+        headers: { Authorization: `Bearer ${signupBody.token}` },
+      }),
+      env,
+      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:01:00Z') },
+    );
+
+    expect(sessionResponse.status).toBe(200);
+    expect(await sessionResponse.json()).toEqual({
+      user: {
+        email: 'sshibinthomass@gmail.com',
+        name: 'Shibin',
+        role: 'admin',
+        status: 'active',
+      },
+    });
+  });
+
+  it('keeps new user accounts pending until the admin approves them and allows removal', async () => {
+    const { bucket } = createMemoryBucket();
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') };
+
+    const adminSignup = await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'sshibinthomass@gmail.com', password: 'admin-password-123' }),
+      }),
+      env,
+      deps,
+    );
+    const adminToken = ((await adminSignup.json()) as { token: string }).token;
+
+    const userSignup = await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'maker@example.com', password: 'maker-password-123', name: 'Maker' }),
+      }),
+      env,
+      deps,
+    );
+
+    expect(userSignup.status).toBe(201);
+    expect(await userSignup.json()).toEqual({
+      user: {
+        email: 'maker@example.com',
+        name: 'Maker',
+        role: 'user',
+        status: 'pending',
+      },
+    });
+
+    const pendingLogin = await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'maker@example.com', password: 'maker-password-123' }),
+      }),
+      env,
+      deps,
+    );
+
+    expect(pendingLogin.status).toBe(403);
+    expect(await pendingLogin.json()).toEqual({ error: 'Account pending admin approval.' });
+
+    const listResponse = await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/users', {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      }),
+      env,
+      deps,
+    );
+
+    expect(listResponse.status).toBe(200);
+    expect(await listResponse.json()).toEqual({
+      users: [
+        expect.objectContaining({ email: 'sshibinthomass@gmail.com', role: 'admin', status: 'active' }),
+        expect.objectContaining({ email: 'maker@example.com', role: 'user', status: 'pending' }),
+      ],
+    });
+
+    const approveResponse = await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/users/maker%40example.com', {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: 'active' }),
+      }),
+      env,
+      deps,
+    );
+
+    expect(approveResponse.status).toBe(200);
+    expect(await approveResponse.json()).toEqual({
+      user: expect.objectContaining({ email: 'maker@example.com', role: 'user', status: 'active' }),
+    });
+
+    const approvedLogin = await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'maker@example.com', password: 'maker-password-123' }),
+      }),
+      env,
+      deps,
+    );
+
+    expect(approvedLogin.status).toBe(200);
+    expect(await approvedLogin.json()).toMatchObject({
+      token: expect.any(String),
+      user: { email: 'maker@example.com', name: 'Maker', role: 'user', status: 'active' },
+    });
+
+    const removeResponse = await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/users/maker%40example.com', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${adminToken}` },
+      }),
+      env,
+      deps,
+    );
+
+    expect(removeResponse.status).toBe(200);
+    expect(await removeResponse.json()).toEqual({ deleted: true, email: 'maker@example.com' });
+  });
+
+  it('requires an approved session for generation and upload writes while leaving model reads public', async () => {
+    const { bucket } = createMemoryBucket({
+      'models/generated/index.json': JSON.stringify({ models: [] }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') };
+
+    const generateResponse = await handleGenerateModelRequest(
+      jsonRequest({ image_base64: 'aW1hZ2U=', image_mime_type: 'image/png' }),
+      env,
+      deps,
+    );
+    const uploadResponse = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/models/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_name: 'chair.glb', model_base64: 'Z2xURg==' }),
+      }),
+      env,
+      deps,
+    );
+    const publicModelsResponse = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/models'),
+      env,
+      deps,
+    );
+
+    expect(generateResponse.status).toBe(401);
+    expect(await generateResponse.json()).toEqual({ error: 'Login required.' });
+    expect(uploadResponse.status).toBe(401);
+    expect(await uploadResponse.json()).toEqual({ error: 'Login required.' });
+    expect(publicModelsResponse.status).toBe(200);
+    expect(await publicModelsResponse.json()).toEqual({ models: [] });
+  });
+
   it('responds to CORS preflight', async () => {
     const response = await handleGenerateModelRequest(
       new Request('https://worker.example/generate-3d', {
@@ -96,15 +352,18 @@ describe('handleGenerateModelRequest', () => {
 
   it('uses the Worker origin for completed job model URLs when no public origin is configured', async () => {
     const glbBytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46]).buffer;
+    const env = createEnv({
+      PUBLIC_MODEL_ORIGIN: '',
+    });
+    const deps = {
+      fetch: vi.fn().mockResolvedValue(new Response(glbBytes, { status: 200 })),
+      now: () => new Date('2026-06-28T12:00:00Z'),
+    };
+    const token = await createAdminToken(env, deps);
     const response = await handleGenerateModelRequest(
-      new Request('https://worker.example/generate-3d/jobs/fc-123'),
-      createEnv({
-        PUBLIC_MODEL_ORIGIN: '',
-      }),
-      {
-        fetch: vi.fn().mockResolvedValue(new Response(glbBytes, { status: 200 })),
-        now: () => new Date('2026-06-28T12:00:00Z'),
-      },
+      withAuth(new Request('https://worker.example/generate-3d/jobs/fc-123'), token),
+      env,
+      deps,
     );
 
     expect(await response.json()).toMatchObject({
@@ -113,10 +372,13 @@ describe('handleGenerateModelRequest', () => {
   });
 
   it('requires image_base64', async () => {
+    const env = createEnv();
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-06-28T12:00:00Z') };
+    const token = await createAdminToken(env, deps);
     const response = await handleGenerateModelRequest(
-      jsonRequest({ image_mime_type: 'image/jpeg' }),
-      createEnv(),
-      { fetch: vi.fn(), now: () => new Date('2026-06-28T12:00:00Z') },
+      withAuth(jsonRequest({ image_mime_type: 'image/jpeg' }), token),
+      env,
+      deps,
     );
 
     expect(response.status).toBe(400);
@@ -131,17 +393,19 @@ describe('handleGenerateModelRequest', () => {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
-      );
+    );
     const env = createEnv();
+    const deps = { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') };
+    const token = await createAdminToken(env, deps);
 
     const response = await handleGenerateModelRequest(
-      extractRequest({
+      withAuth(extractRequest({
         image_base64: 'abc123',
         image_mime_type: 'image/jpeg',
         target_object: ' laptop ',
-      }),
+      }), token),
       env,
-      { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') },
+      deps,
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -176,15 +440,17 @@ describe('handleGenerateModelRequest', () => {
       }),
     );
     const env = createEnv();
+    const deps = { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') };
+    const token = await createAdminToken(env, deps);
 
     const response = await handleGenerateModelRequest(
-      jsonRequest({
+      withAuth(jsonRequest({
         image_base64: 'aW1hZ2U=',
         image_mime_type: 'image/png',
         target_object: ' laptop ',
-      }),
+      }), token),
       env,
-      { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') },
+      deps,
     );
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -245,15 +511,17 @@ describe('handleGenerateModelRequest', () => {
       }),
     );
     const env = createEnv();
+    const deps = { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') };
+    const token = await createAdminToken(env, deps);
 
     const response = await handleGenerateModelRequest(
-      extractRequest({
+      withAuth(extractRequest({
         image_base64: 'abc123',
         image_mime_type: 'image/jpeg',
         target_object: '   ',
-      }),
+      }), token),
       env,
-      { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') },
+      deps,
     );
 
     const openAiBody = fetchMock.mock.calls[0][1]?.body as FormData;
@@ -274,15 +542,17 @@ describe('handleGenerateModelRequest', () => {
       }),
     );
     const env = createEnv();
+    const deps = { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') };
+    const token = await createAdminToken(env, deps);
 
     const response = await handleGenerateModelRequest(
-      directOpenAiTo3DRequest({
+      withAuth(directOpenAiTo3DRequest({
         image_base64: 'captured-image-base64',
         image_mime_type: 'image/jpeg',
         target_object: ' laptop ',
-      }),
+      }), token),
       env,
-      { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') },
+      deps,
     );
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -320,13 +590,16 @@ describe('handleGenerateModelRequest', () => {
   });
 
   it('polls a running Modal job', async () => {
+    const env = createEnv();
+    const deps = {
+      fetch: vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'running' }), { status: 202 })),
+      now: () => new Date('2026-06-28T12:00:00Z'),
+    };
+    const token = await createAdminToken(env, deps);
     const response = await handleGenerateModelRequest(
-      new Request('https://worker.example/generate-3d/jobs/fc-123'),
-      createEnv(),
-      {
-        fetch: vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'running' }), { status: 202 })),
-        now: () => new Date('2026-06-28T12:00:00Z'),
-      },
+      withAuth(new Request('https://worker.example/generate-3d/jobs/fc-123'), token),
+      env,
+      deps,
     );
 
     expect(response.status).toBe(202);
@@ -336,18 +609,20 @@ describe('handleGenerateModelRequest', () => {
   it('stores completed Modal job GLB bytes and returns the public URL', async () => {
     const glbBytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46]).buffer;
     const env = createEnv();
+    const deps = {
+      fetch: vi.fn().mockResolvedValue(
+        new Response(glbBytes, {
+          status: 200,
+          headers: { 'Content-Type': 'model/gltf-binary' },
+        }),
+      ),
+      now: () => new Date('2026-06-28T12:00:00Z'),
+    };
+    const token = await createAdminToken(env, deps);
     const response = await handleGenerateModelRequest(
-      new Request('https://worker.example/generate-3d/jobs/fc-123'),
+      withAuth(new Request('https://worker.example/generate-3d/jobs/fc-123'), token),
       env,
-      {
-        fetch: vi.fn().mockResolvedValue(
-          new Response(glbBytes, {
-            status: 200,
-            headers: { 'Content-Type': 'model/gltf-binary' },
-          }),
-        ),
-        now: () => new Date('2026-06-28T12:00:00Z'),
-      },
+      deps,
     );
 
     expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
@@ -385,7 +660,12 @@ describe('handleGenerateModelRequest', () => {
           const value = storedObjects.get(key);
           return Promise.resolve(value ? { body: value, httpMetadata: { contentType: 'application/json' } } : null);
         }),
-        put: vi.fn().mockResolvedValue(undefined),
+        put: vi.fn((key: string, value: ArrayBuffer | ReadableStream | string) => {
+          if (typeof value === 'string') {
+            storedObjects.set(key, value);
+          }
+          return Promise.resolve(undefined);
+        }),
       },
     });
     const fetchMock = vi.fn().mockResolvedValue(
@@ -395,10 +675,12 @@ describe('handleGenerateModelRequest', () => {
       }),
     );
 
+    const deps = { fetch: fetchMock, now: () => new Date('2026-06-28T12:05:00Z') };
+    const token = await createAdminToken(env, deps);
     const response = await handleGenerateModelRequest(
-      new Request('https://worker.example/generate-3d/jobs/openai-123'),
+      withAuth(new Request('https://worker.example/generate-3d/jobs/openai-123'), token),
       env,
-      { fetch: fetchMock, now: () => new Date('2026-06-28T12:05:00Z') },
+      deps,
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -487,9 +769,11 @@ describe('handleGenerateModelRequest', () => {
         }),
       },
     });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') };
+    const token = await createAdminToken(env, deps);
 
     const response = await handleGenerateModelRequest(
-      new Request('https://worker.example/generate-3d/models/upload', {
+      withAuth(new Request('https://worker.example/generate-3d/models/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -498,9 +782,9 @@ describe('handleGenerateModelRequest', () => {
           model_mime_type: 'model/gltf-binary',
           model_base64: 'Z2xURg==',
         }),
-      }),
+      }), token),
       env,
-      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') },
+      deps,
     );
 
     const objectKey = 'models/generated/uploads/upload-20260704-120000-living-room-chair.glb';
@@ -575,15 +859,17 @@ describe('handleGenerateModelRequest', () => {
         }),
       },
     });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-04T12:30:00Z') };
+    const token = await createAdminToken(env, deps);
 
     const response = await handleGenerateModelRequest(
-      new Request('https://worker.example/generate-3d/models/fc-123', {
+      withAuth(new Request('https://worker.example/generate-3d/models/fc-123', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ label: '  Living room chair  ' }),
-      }),
+      }), token),
       env,
-      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:30:00Z') },
+      deps,
     );
 
     expect(response.status).toBe(200);
@@ -656,18 +942,20 @@ describe('handleGenerateModelRequest', () => {
         delete: deleteMock,
       },
     });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-04T12:30:00Z') };
+    const token = await createAdminToken(env, deps);
 
     const response = await handleGenerateModelRequest(
-      new Request('https://worker.example/generate-3d/models/fc-123', {
+      withAuth(new Request('https://worker.example/generate-3d/models/fc-123', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           preview_base64: 'dGh1bWI=',
           preview_mime_type: 'image/webp',
         }),
-      }),
+      }), token),
       env,
-      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:30:00Z') },
+      deps,
     );
 
     const thumbnailKey = 'models/generated/previews/thumbnail-20260704-123000-fc-123.webp';
@@ -737,13 +1025,15 @@ describe('handleGenerateModelRequest', () => {
         delete: deleteMock,
       },
     });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-04T12:30:00Z') };
+    const token = await createAdminToken(env, deps);
 
     const response = await handleGenerateModelRequest(
-      new Request('https://worker.example/generate-3d/models/fc-123', {
+      withAuth(new Request('https://worker.example/generate-3d/models/fc-123', {
         method: 'DELETE',
-      }),
+      }), token),
       env,
-      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:30:00Z') },
+      deps,
     );
 
     expect(response.status).toBe(200);
@@ -818,16 +1108,19 @@ describe('handleGenerateModelRequest', () => {
   });
 
   it('returns a gateway error when Modal fails', async () => {
+    const env = createEnv();
+    const deps = {
+      fetch: vi.fn().mockResolvedValueOnce(new Response('Modal exploded', { status: 500 })),
+      now: () => new Date('2026-06-28T12:00:00Z'),
+    };
+    const token = await createAdminToken(env, deps);
     const response = await handleGenerateModelRequest(
-      jsonRequest({
+      withAuth(jsonRequest({
         image_base64: 'abc123',
         image_mime_type: 'image/jpeg',
-      }),
-      createEnv(),
-      {
-        fetch: vi.fn().mockResolvedValueOnce(new Response('Modal exploded', { status: 500 })),
-        now: () => new Date('2026-06-28T12:00:00Z'),
-      },
+      }), token),
+      env,
+      deps,
     );
 
     expect(response.status).toBe(502);

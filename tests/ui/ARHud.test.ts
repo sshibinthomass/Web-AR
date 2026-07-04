@@ -38,9 +38,27 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onCloseModelPreview: vi.fn(),
     onUpdateModelThumbnail: vi.fn(),
     onReturnHome: vi.fn(),
+    onLogin: vi.fn(),
+    onSignup: vi.fn(),
+    onLogout: vi.fn(),
+    onApproveAccount: vi.fn(),
+    onRemoveAccount: vi.fn(),
+    onRefreshAdminAccounts: vi.fn(),
     ...overrides,
   };
 }
+
+const activeUser = {
+  email: 'maker@example.com',
+  role: 'user' as const,
+  status: 'active' as const,
+};
+
+const adminUser = {
+  email: 'sshibinthomass@gmail.com',
+  role: 'admin' as const,
+  status: 'active' as const,
+};
 
 describe('ARHud', () => {
   beforeEach(() => {
@@ -65,10 +83,81 @@ describe('ARHud', () => {
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(true);
   });
 
-  it('opens camera from the first screen as a full-screen capture flow', () => {
+  it('prompts guests to sign in for protected actions while leaving AR View and Models public', () => {
     const root = document.createElement('div');
     const onStartCamera = vi.fn();
     new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera')?.click();
+
+    expect(onStartCamera).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('#/login');
+    expect(root.textContent).toContain('Sign in to use Camera.');
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+
+    expect(window.location.hash).toBe('#/ar');
+    expect(root.querySelector('.ar-model-picker')?.classList.contains('hidden')).toBe(false);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
+
+    expect(window.location.hash).toBe('#/models');
+    expect(root.querySelector('.model-manager')?.classList.contains('hidden')).toBe(false);
+  });
+
+  it('submits login and account creation from the auth screen', () => {
+    const root = document.createElement('div');
+    const onLogin = vi.fn();
+    const onSignup = vi.fn();
+    new ARHud(root, modelOptions, createHandlers({ onLogin, onSignup }));
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Login')?.click();
+    root.querySelector<HTMLInputElement>('input[name="authEmail"]')!.value = ' maker@example.com ';
+    root.querySelector<HTMLInputElement>('input[name="authPassword"]')!.value = 'maker-password-123';
+    root.querySelector<HTMLInputElement>('input[name="authName"]')!.value = ' Maker ';
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Sign in')?.click();
+
+    expect(onLogin).toHaveBeenCalledWith('maker@example.com', 'maker-password-123');
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Create account')?.click();
+
+    expect(onSignup).toHaveBeenCalledWith('maker@example.com', 'maker-password-123', 'Maker');
+  });
+
+  it('shows admin account management for the admin user', () => {
+    const root = document.createElement('div');
+    const onRefreshAdminAccounts = vi.fn();
+    const onApproveAccount = vi.fn();
+    const onRemoveAccount = vi.fn();
+    const hud = new ARHud(
+      root,
+      modelOptions,
+      createHandlers({ onRefreshAdminAccounts, onApproveAccount, onRemoveAccount }),
+    );
+
+    hud.updateAuthState(adminUser);
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Admin')?.click();
+    hud.updateAdminAccounts([
+      adminUser,
+      { email: 'maker@example.com', name: 'Maker', role: 'user', status: 'pending' },
+    ]);
+
+    expect(onRefreshAdminAccounts).toHaveBeenCalledTimes(1);
+    expect(root.textContent).toContain('maker@example.com');
+    expect(root.textContent).toContain('Pending');
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Approve')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Remove')?.click();
+
+    expect(onApproveAccount).toHaveBeenCalledWith('maker@example.com');
+    expect(onRemoveAccount).toHaveBeenCalledWith('maker@example.com');
+  });
+
+  it('opens camera from the first screen as a full-screen capture flow', () => {
+    const root = document.createElement('div');
+    const onStartCamera = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
+    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera')?.click();
 
@@ -110,7 +199,6 @@ describe('ARHud', () => {
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
     expect(hudActions?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(true);
-    expect(root.querySelector('select')).toBeInstanceOf(HTMLSelectElement);
     expect(modelPicker?.classList.contains('hidden')).toBe(true);
     expect(arModelPicker?.classList.contains('hidden')).toBe(false);
     expect(modelRail?.classList.contains('hidden')).toBe(true);
@@ -159,7 +247,8 @@ describe('ARHud', () => {
   it('opens Full Flow from the first screen as a capture page', () => {
     const root = document.createElement('div');
     const onStartCamera = vi.fn();
-    new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
+    const hud = new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
+    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
 
@@ -173,7 +262,8 @@ describe('ARHud', () => {
   it('opens upload image from the first screen without starting the camera', () => {
     const root = document.createElement('div');
     const onStartCamera = vi.fn();
-    new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
+    const hud = new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
+    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Upload Image')?.click();
 
@@ -202,6 +292,7 @@ describe('ARHud', () => {
     const onUploadModel = vi.fn();
     const onStoreUploadedModel = vi.fn();
     const hud = new ARHud(root, modelOptions, createHandlers({ onStartCamera, onUploadModel, onStoreUploadedModel }));
+    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Upload Model')?.click();
     const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept=".glb,model/gltf-binary"]')!;
@@ -265,6 +356,7 @@ describe('ARHud', () => {
     ]);
     expect(root.textContent).toContain('Built-in');
   });
+
   it('opens a non-AR 3D preview when a model row is clicked', () => {
     const root = document.createElement('div');
     const onPreviewModel = vi.fn();
@@ -289,6 +381,7 @@ describe('ARHud', () => {
 
     expect(onCloseModelPreview).toHaveBeenCalledTimes(1);
   });
+
   it('shows persisted uploaded models in the full-page AR picker and post-placement rail', () => {
     const root = document.createElement('div');
     const onModelSelect = vi.fn();
@@ -360,6 +453,7 @@ describe('ARHud', () => {
         id: 'generated-fc-123',
         label: 'chair - 2026-07-04 12:00:00 UTC',
         url: 'https://assets.example/generated-chair.glb',
+        previewUrl: 'https://assets.example/previews/generated-chair.png',
       },
     ]);
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
@@ -412,12 +506,18 @@ describe('ARHud', () => {
     expect(root.querySelector('.status-panel')?.classList.contains('hidden')).toBe(true);
   });
 
-  it('offers direct or GPT-assisted Full Flow generation after capture', () => {
+  it('starts AR from the direct Full Flow generate tap after capture', () => {
     const root = document.createElement('div');
     const onCaptureImage = vi.fn();
     const onSubmitTarget = vi.fn();
     const onFullFlowCapture = vi.fn();
     const hud = new ARHud(root, modelOptions, createHandlers({ onCaptureImage, onSubmitTarget, onFullFlowCapture }));
+    hud.updateAuthState(activeUser);
+    const startArCamera = vi.fn();
+    const arButton = document.createElement('button');
+    arButton.textContent = 'Start AR';
+    arButton.addEventListener('click', startArCamera);
+    hud.attachARButton(arButton);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Capture')?.click();
@@ -435,8 +535,28 @@ describe('ARHud', () => {
     expect((directGenerateButton as HTMLButtonElement).disabled).toBe(false);
     directGenerateButton?.click();
 
+    expect(window.location.hash).toBe('#/ar');
+    expect(startArCamera).toHaveBeenCalledTimes(1);
     expect(onFullFlowCapture).toHaveBeenCalledWith('laptop');
     expect(onSubmitTarget).not.toHaveBeenCalled();
+  });
+
+  it('starts AR from the GPT-assisted Full Flow generate tap after extraction', () => {
+    const root = document.createElement('div');
+    const onSubmitTarget = vi.fn();
+    const onFullFlowCapture = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onSubmitTarget, onFullFlowCapture }));
+    hud.updateAuthState(activeUser);
+    const startArCamera = vi.fn();
+    const arButton = document.createElement('button');
+    arButton.textContent = 'Start AR';
+    arButton.addEventListener('click', startArCamera);
+    hud.attachARButton(arButton);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
+    hud.showCapturedImagePreview('blob:captured-image');
+    const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
+    targetInput!.value = ' laptop ';
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit')?.click();
 
@@ -450,12 +570,15 @@ describe('ARHud', () => {
     expect((submitButton as HTMLButtonElement).disabled).toBe(true);
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate and Place')?.click();
 
-    expect(onFullFlowCapture).toHaveBeenCalledTimes(2);
+    expect(window.location.hash).toBe('#/ar');
+    expect(startArCamera).toHaveBeenCalledTimes(1);
+    expect(onFullFlowCapture).toHaveBeenCalledWith('laptop');
   });
 
   it('shows a blocking loading state during Full Flow generation', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
     hud.showFullFlowLoading('Building your 3D object in Modal...');
@@ -469,6 +592,7 @@ describe('ARHud', () => {
   it('shows placement controls after Full Flow generation returns', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
     hud.showFullFlowReady('You can place the object now.');
@@ -481,33 +605,39 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('You can place the object now.');
   });
 
-  it('opens the AR camera automatically after Full Flow generation returns', () => {
+  it('selects the generated object after Full Flow generation returns without toggling AR', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
     const startArCamera = vi.fn();
     const arButton = document.createElement('button');
     arButton.textContent = 'Start AR';
     arButton.addEventListener('click', startArCamera);
     hud.attachARButton(arButton);
-    expect(root.querySelector('.ar-button-slot')?.classList.contains('hidden')).toBe(true);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
-    hud.showFullFlowReady('You can place the object now.');
+    hud.showFullFlowReady('You can place the object now.', {
+      id: 'full-flow-generated-object',
+      label: 'Generated object',
+      url: 'https://assets.example/generated-object.glb',
+    });
 
     expect(window.location.hash).toBe('#/ar');
-    expect(startArCamera).toHaveBeenCalledTimes(1);
+    expect(root.querySelector<HTMLSelectElement>('select')?.value).toBe('full-flow-generated-object');
+    expect(root.querySelector('.model-rail-item.is-selected')?.textContent).toContain('Generated object');
+    expect(startArCamera).not.toHaveBeenCalled();
   });
 
-  it('opens the camera page directly from the camera hash route', () => {
+  it('prompts for login when opening the camera hash route as a guest', () => {
     window.history.replaceState(null, '', '/#/camera');
     const root = document.createElement('div');
     const onStartCamera = vi.fn();
 
     new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
 
-    expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
-    expect(root.querySelector('.camera-panel')?.classList.contains('fullscreen')).toBe(true);
-    expect(onStartCamera).toHaveBeenCalledTimes(1);
+    expect(window.location.hash).toBe('#/login');
+    expect(root.textContent).toContain('Sign in to use Camera.');
+    expect(onStartCamera).not.toHaveBeenCalled();
   });
 
   it('opens the AR View page directly from the ar hash route', () => {
@@ -527,7 +657,8 @@ describe('ARHud', () => {
   it('returns from a sub page to the home page with the Back button', () => {
     const root = document.createElement('div');
     const onReturnHome = vi.fn();
-    new ARHud(root, modelOptions, createHandlers({ onReturnHome }));
+    const hud = new ARHud(root, modelOptions, createHandlers({ onReturnHome }));
+    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera')?.click();
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Back')?.click();
@@ -542,6 +673,7 @@ describe('ARHud', () => {
   it('enables Place while scanning after a model is ready', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
 
     hud.updateModelReady(true);
     hud.update('scanning');
@@ -556,6 +688,7 @@ describe('ARHud', () => {
   it('collapses AR status to only the Back button after an object is placed', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
     hud.update('placed');
@@ -572,6 +705,7 @@ describe('ARHud', () => {
   it('provides a gesture surface after opening AR placement controls', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
     root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="trellis-fast-output"]')?.click();
@@ -605,11 +739,8 @@ describe('ARHud', () => {
     new ARHud(root, modelOptions, createHandlers());
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
-    const select = root.querySelector('select');
     const modelCards = [...root.querySelectorAll<HTMLButtonElement>('.ar-model-card')];
 
-    expect(select).toBeInstanceOf(HTMLSelectElement);
-    expect((select as HTMLSelectElement).value).toBe('');
     expect(root.querySelector('.ar-model-card.is-selected')).toBeNull();
     expect(modelCards.map((button) => button.dataset.modelId)).toEqual(['trellis-fast-output', 'img4-output']);
     expect(root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.disabled).toBe(true);
@@ -636,7 +767,8 @@ describe('ARHud', () => {
 
   it('renders camera capture controls', () => {
     const root = document.createElement('div');
-    new ARHud(root, modelOptions, createHandlers());
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera')?.click();
 
@@ -653,6 +785,7 @@ describe('ARHud', () => {
     const onSubmitTarget = vi.fn();
     const onGenerateModel = vi.fn();
     const hud = new ARHud(root, modelOptions, createHandlers({ onStartCamera, onCaptureImage, onSubmitTarget, onGenerateModel }));
+    hud.updateAuthState(activeUser);
 
     const buttons = [...root.querySelectorAll('button')];
     buttons.find((button) => button.textContent === 'Camera')?.click();
@@ -692,6 +825,7 @@ describe('ARHud', () => {
     const onSubmitTarget = vi.fn();
     const onGenerateModel = vi.fn();
     const hud = new ARHud(root, modelOptions, createHandlers({ onUploadImage, onSubmitTarget, onGenerateModel }));
+    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Upload Image')?.click();
     const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept="image/*"]')!;
@@ -763,7 +897,8 @@ describe('ARHud', () => {
 
   it('hides the optional target input before capture', () => {
     const root = document.createElement('div');
-    new ARHud(root, modelOptions, createHandlers());
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera')?.click();
 

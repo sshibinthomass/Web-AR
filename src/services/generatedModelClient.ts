@@ -7,6 +7,7 @@ export interface GenerateModelInput {
   imageMimeType: string;
   targetObject?: string;
   generationPipeline?: GenerationPipeline;
+  authToken?: string | null;
   fetchImpl?: typeof fetch;
   pollIntervalMs?: number;
   maxPolls?: number;
@@ -42,6 +43,7 @@ interface RenameGeneratedModelInput {
   apiUrl: string;
   modelId: string;
   label: string;
+  authToken?: string | null;
   fetchImpl?: typeof fetch;
 }
 
@@ -49,18 +51,21 @@ interface UpdateGeneratedModelThumbnailInput {
   apiUrl: string;
   modelId: string;
   thumbnail: CompressedThumbnail;
+  authToken?: string | null;
   fetchImpl?: typeof fetch;
 }
 
 interface DeleteGeneratedModelInput {
   apiUrl: string;
   modelId: string;
+  authToken?: string | null;
   fetchImpl?: typeof fetch;
 }
 
 interface StoreUploadedModelInput {
   apiUrl: string;
   file: File;
+  authToken?: string | null;
   fetchImpl?: typeof fetch;
 }
 
@@ -106,6 +111,7 @@ export async function startGeneratedModelJob({
   imageMimeType,
   targetObject,
   generationPipeline = 'trellis',
+  authToken,
   fetchImpl = fetch,
 }: GenerateModelInput): Promise<StartGeneratedModelJobResult> {
   if (!apiUrl) {
@@ -114,7 +120,7 @@ export async function startGeneratedModelJob({
 
   const response = await fetchImpl(generateModelUrlForPipeline(apiUrl, generationPipeline), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonHeaders(authToken),
     body: JSON.stringify(createGenerateModelRequestBody(imageBase64, imageMimeType, targetObject)),
   });
 
@@ -140,6 +146,7 @@ export async function extractImageFor3D({
   imageBase64,
   imageMimeType,
   targetObject,
+  authToken,
   fetchImpl = fetch,
 }: GenerateModelInput): Promise<ExtractedImageResult> {
   if (!apiUrl) {
@@ -148,7 +155,7 @@ export async function extractImageFor3D({
 
   const response = await fetchImpl(extractImageUrlFromGenerateUrl(apiUrl), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonHeaders(authToken),
     body: JSON.stringify(createGenerateModelRequestBody(imageBase64, imageMimeType, targetObject)),
   });
 
@@ -192,6 +199,7 @@ export async function renameGeneratedModel({
   apiUrl,
   modelId,
   label,
+  authToken,
   fetchImpl = fetch,
 }: RenameGeneratedModelInput): Promise<ModelOption> {
   if (!apiUrl) {
@@ -205,7 +213,7 @@ export async function renameGeneratedModel({
 
   const response = await fetchImpl(generatedModelItemUrl(apiUrl, modelId), {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonHeaders(authToken),
     body: JSON.stringify({ label: trimmedLabel }),
   });
   const body = (await response.json()) as WorkerGeneratedModelEntry | WorkerErrorResponse;
@@ -224,6 +232,7 @@ export async function updateGeneratedModelThumbnail({
   apiUrl,
   modelId,
   thumbnail,
+  authToken,
   fetchImpl = fetch,
 }: UpdateGeneratedModelThumbnailInput): Promise<ModelOption> {
   if (!apiUrl) {
@@ -236,7 +245,7 @@ export async function updateGeneratedModelThumbnail({
 
   const response = await fetchImpl(generatedModelItemUrl(apiUrl, modelId), {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonHeaders(authToken),
     body: JSON.stringify({
       preview_base64: thumbnail.base64,
       preview_mime_type: thumbnail.mimeType,
@@ -257,6 +266,7 @@ export async function updateGeneratedModelThumbnail({
 export async function storeUploadedModel({
   apiUrl,
   file,
+  authToken,
   fetchImpl = fetch,
 }: StoreUploadedModelInput): Promise<ModelOption> {
   if (!apiUrl) {
@@ -269,7 +279,7 @@ export async function storeUploadedModel({
 
   const response = await fetchImpl(`${apiUrl.replace(/\/+$/, '')}/models/upload`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonHeaders(authToken),
     body: JSON.stringify({
       file_name: file.name,
       label: uploadedModelLabel(file.name),
@@ -292,6 +302,7 @@ export async function storeUploadedModel({
 export async function deleteGeneratedModel({
   apiUrl,
   modelId,
+  authToken,
   fetchImpl = fetch,
 }: DeleteGeneratedModelInput): Promise<void> {
   if (!apiUrl) {
@@ -300,6 +311,7 @@ export async function deleteGeneratedModel({
 
   const response = await fetchImpl(generatedModelItemUrl(apiUrl, modelId), {
     method: 'DELETE',
+    headers: authHeaders(authToken),
   });
   const body = (await response.json()) as { deleted?: boolean } | WorkerErrorResponse;
   if (!response.ok) {
@@ -313,6 +325,7 @@ export async function generateModelFromImage({
   imageMimeType,
   targetObject,
   generationPipeline = 'trellis',
+  authToken,
   fetchImpl = fetch,
   pollIntervalMs = 5000,
   maxPolls = 180,
@@ -323,7 +336,7 @@ export async function generateModelFromImage({
 
   const response = await fetchImpl(generateModelUrlForPipeline(apiUrl, generationPipeline), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonHeaders(authToken),
     body: JSON.stringify(createGenerateModelRequestBody(imageBase64, imageMimeType, targetObject)),
   });
 
@@ -338,7 +351,7 @@ export async function generateModelFromImage({
       throw new Error('Worker response did not include a job status URL.');
     }
 
-    return pollGeneratedModel(job.status_url, fetchImpl, pollIntervalMs, maxPolls);
+    return pollGeneratedModel(job.status_url, fetchImpl, pollIntervalMs, maxPolls, authToken);
   }
 
   return parseGeneratedModelResult(body);
@@ -349,13 +362,16 @@ async function pollGeneratedModel(
   fetchImpl: typeof fetch,
   pollIntervalMs: number,
   maxPolls: number,
+  authToken?: string | null,
 ): Promise<GeneratedModelResult> {
   for (let attempt = 0; attempt < maxPolls; attempt += 1) {
     if (attempt > 0 && pollIntervalMs > 0) {
       await delay(pollIntervalMs);
     }
 
-    const response = await fetchImpl(statusUrl);
+    const response = authToken
+      ? await fetchImpl(statusUrl, { headers: authHeaders(authToken) })
+      : await fetchImpl(statusUrl);
     const body = (await response.json()) as WorkerSuccessResponse | WorkerErrorResponse;
 
     if (response.status === 202) {
@@ -398,6 +414,17 @@ function createGenerateModelRequestBody(
     body.target_object = trimmedTargetObject;
   }
   return body;
+}
+
+function jsonHeaders(authToken?: string | null): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    ...authHeaders(authToken),
+  };
+}
+
+function authHeaders(authToken?: string | null): Record<string, string> {
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {};
 }
 
 function extractImageUrlFromGenerateUrl(apiUrl: string): string {

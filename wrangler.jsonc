@@ -9,6 +9,7 @@
     "crons": ["*/1 * * * *"]
   },
   "vars": {
+    "ADMIN_EMAIL": "sshibinthomass@gmail.com",
     "MODAL_IMAGE_TO_3D_URL": "https://sshibinthomass--trellis-2-4b-fast-trellis2fastmodel-gene-1cf4f3.modal.run",
     "MODAL_IMAGE_TO_3D_START_URL": "https://sshibinthomass--trellis-2-4b-fast-trellis2fastmodel-start-api.modal.run",
     "MODAL_IMAGE_TO_3D_RESULT_URL": "https://sshibinthomass--trellis-2-4b-fast-trellis2fastmodel-result-api.modal.run",

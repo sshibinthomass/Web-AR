@@ -14,6 +14,8 @@ export interface ModelBucket {
 }
 
 export interface WorkerEnv {
+  AUTH_SECRET: string;
+  ADMIN_EMAIL?: string;
   MODAL_KEY: string;
   MODAL_SECRET: string;
   MODAL_IMAGE_TO_3D_URL: string;
@@ -60,7 +62,40 @@ interface ModelPatchRequestBody {
   preview_mime_type?: unknown;
 }
 
+interface AuthRequestBody {
+  email?: unknown;
+  password?: unknown;
+  name?: unknown;
+  status?: unknown;
+}
+
 type GenerationPipeline = 'trellis' | 'openai-to-3d';
+type AuthRole = 'admin' | 'user';
+type AccountStatus = 'active' | 'pending';
+
+interface StoredUser {
+  email: string;
+  name?: string;
+  role: AuthRole;
+  status: AccountStatus;
+  password_hash: string;
+  password_salt: string;
+  created_at: string;
+  updated_at: string;
+  approved_at?: string;
+  approved_by?: string;
+}
+
+interface UsersIndex {
+  users: StoredUser[];
+}
+
+interface SessionPayload {
+  sub: string;
+  role: AuthRole;
+  iat: number;
+  exp: number;
+}
 
 interface StoredJob {
   id: string;
@@ -128,11 +163,15 @@ const openAiTo3DModalPayloadDefaults = {
 const generatedModelsIndexKey = 'models/generated/index.json';
 const pendingJobsIndexKey = 'models/generated/jobs/index.json';
 const jobKeyPrefix = 'models/generated/jobs/';
+const usersIndexKey = 'auth/users/index.json';
+const defaultAdminEmail = 'sshibinthomass@gmail.com';
+const passwordHashIterations = 120_000;
+const sessionLifetimeSeconds = 60 * 60 * 24 * 7;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
 export default {
@@ -166,6 +205,10 @@ export async function handleGenerateModelRequest(
     });
   }
 
+  if (url.pathname.startsWith('/auth/')) {
+    return handleAuthRequest(request, env, deps, url);
+  }
+
   if (request.method === 'GET' && url.pathname.startsWith('/models/generated/')) {
     return serveGeneratedModel(url.pathname.slice(1), env);
   }
@@ -178,15 +221,27 @@ export async function handleGenerateModelRequest(
   }
 
   if (request.method === 'POST' && url.pathname === '/generate-3d/models/upload') {
+    const auth = await requireApprovedUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
     return handleUploadedModelRequest(request, env, deps, url);
   }
 
   if (url.pathname.startsWith('/generate-3d/models/')) {
+    const auth = await requireApprovedUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
     const modelId = decodeURIComponent(url.pathname.replace('/generate-3d/models/', ''));
     return handleGeneratedModelManagementRequest(request, env, deps, modelId, url);
   }
 
   if (request.method === 'GET' && url.pathname.startsWith('/generate-3d/jobs/')) {
+    const auth = await requireApprovedUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
     const jobId = decodeURIComponent(url.pathname.replace('/generate-3d/jobs/', ''));
     return pollModalJob(request, env, deps, jobId);
   }
@@ -197,6 +252,11 @@ export async function handleGenerateModelRequest(
 
   if (url.pathname !== '/generate-3d' && url.pathname !== '/generate-3d/openai' && url.pathname !== '/extract-image') {
     return jsonResponse({ error: 'Not found.' }, 404);
+  }
+
+  const auth = await requireApprovedUser(request, env, deps);
+  if (auth instanceof Response) {
+    return auth;
   }
 
   const configError = validateEnv(env);
@@ -322,6 +382,208 @@ async function startModalGenerationJob(
     },
     202,
   );
+}
+
+async function handleAuthRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  url: URL,
+): Promise<Response> {
+  if (!env.MODEL_BUCKET) {
+    return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
+  }
+
+  if (!env.AUTH_SECRET) {
+    return jsonResponse({ error: 'Auth secret is not configured.' }, 500);
+  }
+
+  if (request.method === 'POST' && url.pathname === '/auth/signup') {
+    return handleSignupRequest(request, env, deps);
+  }
+
+  if (request.method === 'POST' && url.pathname === '/auth/login') {
+    return handleLoginRequest(request, env, deps);
+  }
+
+  if (request.method === 'GET' && url.pathname === '/auth/session') {
+    const auth = await requireApprovedUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
+
+    return jsonResponse({ user: toPublicUser(auth.user) });
+  }
+
+  if (request.method === 'POST' && url.pathname === '/auth/logout') {
+    return jsonResponse({ ok: true });
+  }
+
+  if (request.method === 'GET' && url.pathname === '/auth/users') {
+    const auth = await requireAdminUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
+
+    const index = await readUsersIndex(env);
+    return jsonResponse({ users: index.users.map(toPublicUser) });
+  }
+
+  if (url.pathname.startsWith('/auth/users/')) {
+    const auth = await requireAdminUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
+
+    const email = normalizeEmail(decodeURIComponent(url.pathname.replace('/auth/users/', '')));
+    if (!email) {
+      return jsonResponse({ error: 'Valid email is required.' }, 400);
+    }
+
+    if (request.method === 'PATCH') {
+      return handleAccountUpdateRequest(request, env, deps, email, auth.user);
+    }
+
+    if (request.method === 'DELETE') {
+      return handleAccountRemovalRequest(env, email, auth.user);
+    }
+  }
+
+  return jsonResponse({ error: 'Not found.' }, 404);
+}
+
+async function handleSignupRequest(request: Request, env: WorkerEnv, deps: GenerateModelDeps): Promise<Response> {
+  const body = await readJsonBody<AuthRequestBody>(request);
+  if (!body.ok) {
+    return jsonResponse({ error: body.error }, 400);
+  }
+
+  const email = normalizeEmail(body.value.email);
+  const password = normalizePassword(body.value.password);
+  const name = normalizeDisplayName(body.value.name);
+  if (!email) {
+    return jsonResponse({ error: 'Valid email is required.' }, 400);
+  }
+  if (!password) {
+    return jsonResponse({ error: 'Password must be at least 8 characters.' }, 400);
+  }
+
+  const index = await readUsersIndex(env);
+  if (index.users.some((user) => user.email === email)) {
+    return jsonResponse({ error: 'Account already exists.' }, 409);
+  }
+
+  const now = deps.now();
+  const isAdmin = email === getAdminEmail(env);
+  const salt = randomBase64UrlBytes(16);
+  const user: StoredUser = {
+    email,
+    name: name ?? undefined,
+    role: isAdmin ? 'admin' : 'user',
+    status: isAdmin ? 'active' : 'pending',
+    password_hash: await hashPassword(password, salt),
+    password_salt: salt,
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+    approved_at: isAdmin ? now.toISOString() : undefined,
+    approved_by: isAdmin ? email : undefined,
+  };
+
+  await writeUsersIndex(env, { users: [...index.users, user] });
+
+  if (user.status !== 'active') {
+    return jsonResponse({ user: toPublicUser(user) }, 201);
+  }
+
+  return jsonResponse(
+    {
+      user: toPublicUser(user),
+      token: await createSessionToken(user, env, now),
+    },
+    201,
+  );
+}
+
+async function handleLoginRequest(request: Request, env: WorkerEnv, deps: GenerateModelDeps): Promise<Response> {
+  const body = await readJsonBody<AuthRequestBody>(request);
+  if (!body.ok) {
+    return jsonResponse({ error: body.error }, 400);
+  }
+
+  const email = normalizeEmail(body.value.email);
+  const password = normalizePassword(body.value.password);
+  if (!email || !password) {
+    return jsonResponse({ error: 'Invalid email or password.' }, 401);
+  }
+
+  const index = await readUsersIndex(env);
+  const user = index.users.find((entry) => entry.email === email);
+  if (!user || !(await verifyPassword(password, user.password_salt, user.password_hash))) {
+    return jsonResponse({ error: 'Invalid email or password.' }, 401);
+  }
+
+  if (user.status !== 'active') {
+    return jsonResponse({ error: 'Account pending admin approval.' }, 403);
+  }
+
+  return jsonResponse({
+    user: toPublicUser(user),
+    token: await createSessionToken(user, env, deps.now()),
+  });
+}
+
+async function handleAccountUpdateRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  email: string,
+  adminUser: StoredUser,
+): Promise<Response> {
+  const body = await readJsonBody<AuthRequestBody>(request);
+  if (!body.ok) {
+    return jsonResponse({ error: body.error }, 400);
+  }
+
+  if (body.value.status !== 'active' && body.value.status !== 'pending') {
+    return jsonResponse({ error: 'status must be active or pending.' }, 400);
+  }
+
+  const index = await readUsersIndex(env);
+  const userIndex = index.users.findIndex((user) => user.email === email);
+  if (userIndex === -1) {
+    return jsonResponse({ error: 'Account not found.' }, 404);
+  }
+
+  const now = deps.now();
+  const existingUser = index.users[userIndex];
+  const nextUser: StoredUser = {
+    ...existingUser,
+    role: existingUser.email === getAdminEmail(env) ? 'admin' : existingUser.role,
+    status: body.value.status,
+    updated_at: now.toISOString(),
+    approved_at: body.value.status === 'active' ? existingUser.approved_at ?? now.toISOString() : undefined,
+    approved_by: body.value.status === 'active' ? existingUser.approved_by ?? adminUser.email : undefined,
+  };
+  const users = [...index.users];
+  users[userIndex] = nextUser;
+  await writeUsersIndex(env, { users });
+
+  return jsonResponse({ user: toPublicUser(nextUser) });
+}
+
+async function handleAccountRemovalRequest(env: WorkerEnv, email: string, adminUser: StoredUser): Promise<Response> {
+  if (email === adminUser.email) {
+    return jsonResponse({ error: 'Admins cannot remove their own account.' }, 400);
+  }
+
+  const index = await readUsersIndex(env);
+  const nextUsers = index.users.filter((user) => user.email !== email);
+  if (nextUsers.length === index.users.length) {
+    return jsonResponse({ error: 'Account not found.' }, 404);
+  }
+
+  await writeUsersIndex(env, { users: nextUsers });
+  return jsonResponse({ deleted: true, email });
 }
 
 async function handleUploadedModelRequest(
@@ -751,6 +1013,100 @@ function normalizeModelLabel(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
+function normalizeEmail(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const email = value.trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+}
+
+function normalizePassword(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length < 8) {
+    return null;
+  }
+
+  return value;
+}
+
+function normalizeDisplayName(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const name = value.trim();
+  return name ? name.slice(0, 120) : null;
+}
+
+function getAdminEmail(env: WorkerEnv): string {
+  return normalizeEmail(env.ADMIN_EMAIL) ?? defaultAdminEmail;
+}
+
+function toPublicUser(user: StoredUser): { email: string; name?: string; role: AuthRole; status: AccountStatus } {
+  return {
+    email: user.email,
+    ...(user.name ? { name: user.name } : {}),
+    role: user.role,
+    status: user.status,
+  };
+}
+
+async function requireApprovedUser(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<{ user: StoredUser } | Response> {
+  if (!env.AUTH_SECRET) {
+    return jsonResponse({ error: 'Auth secret is not configured.' }, 500);
+  }
+
+  const token = readBearerToken(request);
+  if (!token) {
+    return jsonResponse({ error: 'Login required.' }, 401);
+  }
+
+  const payload = await verifySessionToken(token, env, deps.now());
+  if (!payload) {
+    return jsonResponse({ error: 'Login required.' }, 401);
+  }
+
+  const index = await readUsersIndex(env);
+  const user = index.users.find((entry) => entry.email === payload.sub);
+  if (!user) {
+    return jsonResponse({ error: 'Login required.' }, 401);
+  }
+
+  if (user.status !== 'active') {
+    return jsonResponse({ error: 'Account pending admin approval.' }, 403);
+  }
+
+  return { user };
+}
+
+async function requireAdminUser(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<{ user: StoredUser } | Response> {
+  const auth = await requireApprovedUser(request, env, deps);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  if (auth.user.role !== 'admin') {
+    return jsonResponse({ error: 'Admin access required.' }, 403);
+  }
+
+  return auth;
+}
+
+function readBearerToken(request: Request): string | null {
+  const header = request.headers.get('Authorization') ?? '';
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  return match?.[1]?.trim() || null;
+}
+
 async function readJsonBody<T = GenerateModelRequestBody>(
   request: Request,
 ): Promise<{ ok: true; value: T } | { ok: false; error: string }> {
@@ -809,6 +1165,19 @@ async function removePendingJob(env: WorkerEnv, jobId: string): Promise<void> {
 
 async function readGeneratedModelsIndex(env: WorkerEnv): Promise<GeneratedModelsIndex> {
   return readJsonObject<GeneratedModelsIndex>(env, generatedModelsIndexKey, { models: [] });
+}
+
+async function readUsersIndex(env: WorkerEnv): Promise<UsersIndex> {
+  return readJsonObject<UsersIndex>(env, usersIndexKey, { users: [] });
+}
+
+async function writeUsersIndex(env: WorkerEnv, index: UsersIndex): Promise<void> {
+  await writeJsonObject(env, usersIndexKey, {
+    users: index.users.map((user) => ({
+      ...user,
+      role: user.email === getAdminEmail(env) ? 'admin' : user.role,
+    })),
+  });
 }
 
 async function upsertGeneratedModel(env: WorkerEnv, job: StoredJob): Promise<void> {
@@ -1045,6 +1414,119 @@ function stripDataUrlPrefix(value: string): string {
   }
 
   return value;
+}
+
+async function hashPassword(password: string, salt: string): Promise<string> {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+  const hash = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: bytesToArrayBuffer(base64UrlToBytes(salt)),
+      iterations: passwordHashIterations,
+      hash: 'SHA-256',
+    },
+    keyMaterial,
+    256,
+  );
+  return bytesToBase64Url(new Uint8Array(hash));
+}
+
+async function verifyPassword(password: string, salt: string, expectedHash: string): Promise<boolean> {
+  return constantTimeEqual(await hashPassword(password, salt), expectedHash);
+}
+
+async function createSessionToken(user: StoredUser, env: WorkerEnv, now: Date): Promise<string> {
+  const issuedAt = Math.floor(now.getTime() / 1000);
+  const payload: SessionPayload = {
+    sub: user.email,
+    role: user.role,
+    iat: issuedAt,
+    exp: issuedAt + sessionLifetimeSeconds,
+  };
+  const encodedPayload = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
+  const signature = await signSessionPayload(encodedPayload, env.AUTH_SECRET);
+  return `${encodedPayload}.${signature}`;
+}
+
+async function verifySessionToken(token: string, env: WorkerEnv, now: Date): Promise<SessionPayload | null> {
+  const [encodedPayload, signature, extra] = token.split('.');
+  if (!encodedPayload || !signature || extra !== undefined) {
+    return null;
+  }
+
+  const expectedSignature = await signSessionPayload(encodedPayload, env.AUTH_SECRET);
+  if (!constantTimeEqual(signature, expectedSignature)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(encodedPayload))) as SessionPayload;
+    if (!payload.sub || !payload.exp || payload.exp < Math.floor(now.getTime() / 1000)) {
+      return null;
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+async function signSessionPayload(encodedPayload: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(encodedPayload));
+  return bytesToBase64Url(new Uint8Array(signature));
+}
+
+function randomBase64UrlBytes(length: number): string {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return bytesToBase64Url(bytes);
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64UrlToBytes(value: string): Uint8Array {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function bytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
 }
 
 function base64ToArrayBuffer(value: string): ArrayBuffer {
