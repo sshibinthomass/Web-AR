@@ -12,15 +12,17 @@ interface HUDHandlers {
   onStartCamera(): void;
   onCaptureImage(): void;
   onUploadImage(file: File): void;
+  onUploadModel(file: File): void;
   onSubmitTarget(targetObject: string): void;
   onGenerateModel(targetObject: string): void;
   onFullFlowCapture(targetObject: string): void;
   onRenameGeneratedModel(modelId: string, label: string): void;
   onDeleteGeneratedModel(modelId: string): void;
+  onDeleteUploadedModel(modelId: string): void;
   onReturnHome(): void;
 }
 
-type HudRoute = 'home' | 'camera' | 'upload' | 'ar' | 'full-flow' | 'models';
+type HudRoute = 'home' | 'camera' | 'upload' | 'upload-model' | 'ar' | 'full-flow' | 'models';
 
 export class ARHud {
   readonly overlay: HTMLElement;
@@ -44,6 +46,8 @@ export class ARHud {
   private readonly cameraLabel: HTMLElement;
   private readonly uploadImageField: HTMLElement;
   private readonly uploadImageInput: HTMLInputElement;
+  private readonly uploadModelField: HTMLElement;
+  private readonly uploadModelInput: HTMLInputElement;
   private readonly targetObjectLabel: HTMLElement;
   private readonly targetObjectInput: HTMLInputElement;
   private readonly modelSelect: HTMLSelectElement;
@@ -55,8 +59,10 @@ export class ARHud {
   private readonly captureButton: HTMLButtonElement;
   private readonly submitButton: HTMLButtonElement;
   private readonly generateButton: HTMLButtonElement;
+  private readonly cameraActions: HTMLElement;
   private readonly baseModelOptions: ModelOption[];
   private generatedModelOptions: ModelOption[] = [];
+  private uploadedModelOptions: ModelOption[] = [];
   private modelReady = false;
   private activeRoute: HudRoute | null = null;
 
@@ -83,6 +89,7 @@ export class ARHud {
     modePicker.append(
       this.createButton('Camera', 'primary', () => this.navigateTo('camera')),
       this.createButton('Upload Image', '', () => this.navigateTo('upload')),
+      this.createButton('Upload Model', '', () => this.navigateTo('upload-model')),
       this.createButton('AR View', '', () => this.navigateTo('ar')),
       this.createButton('Full Flow', '', () => this.navigateTo('full-flow')),
       this.createButton('Models', '', () => this.navigateTo('models')),
@@ -100,7 +107,7 @@ export class ARHud {
     const modelManagerTitle = document.createElement('h2');
     modelManagerTitle.textContent = 'Models';
     const modelManagerDescription = document.createElement('p');
-    modelManagerDescription.textContent = 'Rename or delete generated models from the dropdown.';
+    modelManagerDescription.textContent = 'Manage generated models and uploaded GLBs from the dropdown.';
     modelManagerHeader.append(modelManagerTitle, modelManagerDescription);
     this.modelList = document.createElement('div');
     this.modelList.className = 'model-manager-list';
@@ -165,6 +172,10 @@ export class ARHud {
         <span>Image file</span>
         <input name="uploadImage" type="file" accept="image/*">
       </label>
+      <label class="upload-model-field upload-image-field hidden">
+        <span>GLB model file</span>
+        <input name="uploadModel" type="file" accept=".glb,model/gltf-binary">
+      </label>
       <label class="target-object-field hidden">
         <span>Object to extract</span>
         <input name="targetObject" type="text" autocomplete="off" placeholder="Optional, e.g. laptop">
@@ -180,6 +191,8 @@ export class ARHud {
     this.generatedModelMessage = cameraPanel.querySelector<HTMLElement>('.generated-model-status')!;
     this.uploadImageField = cameraPanel.querySelector<HTMLElement>('.upload-image-field')!;
     this.uploadImageInput = cameraPanel.querySelector<HTMLInputElement>('input[name="uploadImage"]')!;
+    this.uploadModelField = cameraPanel.querySelector<HTMLElement>('.upload-model-field')!;
+    this.uploadModelInput = cameraPanel.querySelector<HTMLInputElement>('input[name="uploadModel"]')!;
     this.targetObjectLabel = cameraPanel.querySelector<HTMLElement>('.target-object-field')!;
     this.targetObjectInput = cameraPanel.querySelector<HTMLInputElement>('input[name="targetObject"]')!;
     this.uploadImageInput.addEventListener('change', () => {
@@ -188,9 +201,16 @@ export class ARHud {
         this.handlers.onUploadImage(file);
       }
     });
+    this.uploadModelInput.addEventListener('change', () => {
+      const file = this.uploadModelInput.files?.[0];
+      if (file) {
+        this.handlers.onUploadModel(file);
+      }
+    });
 
     const cameraActions = document.createElement('div');
     cameraActions.className = 'camera-actions';
+    this.cameraActions = cameraActions;
     this.captureButton = this.createButton('Capture', '', () => this.handleCaptureClick());
     this.submitButton = this.createButton('Submit', '', () => this.handleSubmitClick());
     this.submitButton.classList.add('hidden');
@@ -266,6 +286,10 @@ export class ARHud {
     this.cameraLabel.textContent = 'Camera';
     this.uploadImageField.classList.add('hidden');
     this.uploadImageInput.value = '';
+    this.uploadModelField.classList.add('hidden');
+    this.uploadModelInput.value = '';
+    this.cameraActions.classList.remove('hidden');
+    this.generatedModelMessage.classList.remove('hidden');
     this.cameraPreviewImage.classList.add('hidden');
     this.cameraPreviewImage.removeAttribute('src');
     this.cameraPreviewVideo.classList.remove('hidden');
@@ -288,6 +312,10 @@ export class ARHud {
     this.cameraPreviewImage.removeAttribute('src');
     this.uploadImageField.classList.remove('hidden');
     this.uploadImageInput.value = '';
+    this.uploadModelField.classList.add('hidden');
+    this.uploadModelInput.value = '';
+    this.cameraActions.classList.remove('hidden');
+    this.generatedModelMessage.classList.remove('hidden');
     this.targetObjectInput.value = '';
     this.targetObjectInput.classList.add('hidden');
     this.targetObjectLabel.classList.add('hidden');
@@ -301,8 +329,34 @@ export class ARHud {
     this.updateCameraStatus('Upload an image to create a 3D model.', false);
   }
 
+  showUploadModelPicker(): void {
+    this.cameraLabel.textContent = 'Upload Model';
+    this.cameraPreviewVideo.classList.add('hidden');
+    this.cameraPreviewImage.classList.add('hidden');
+    this.cameraPreviewImage.removeAttribute('src');
+    this.uploadImageField.classList.add('hidden');
+    this.uploadImageInput.value = '';
+    this.uploadModelField.classList.remove('hidden');
+    this.uploadModelInput.value = '';
+    this.targetObjectInput.value = '';
+    this.targetObjectInput.classList.add('hidden');
+    this.targetObjectLabel.classList.add('hidden');
+    this.cameraActions.classList.remove('hidden');
+    this.captureButton.classList.add('hidden');
+    this.captureButton.disabled = true;
+    this.submitButton.classList.add('hidden');
+    this.submitButton.disabled = true;
+    this.generateButton.classList.add('hidden');
+    this.generateButton.disabled = true;
+    this.generatedModelMessage.classList.add('hidden');
+    this.updateCameraStatus('Choose a .glb model to add it to AR View.', false);
+  }
+
   showCapturedImagePreview(imageUrl: string): void {
     this.uploadImageField.classList.add('hidden');
+    this.uploadModelField.classList.add('hidden');
+    this.cameraActions.classList.remove('hidden');
+    this.generatedModelMessage.classList.remove('hidden');
     this.cameraPreviewVideo.classList.add('hidden');
     this.cameraPreviewImage.src = imageUrl;
     this.cameraPreviewImage.classList.remove('hidden');
@@ -318,6 +372,9 @@ export class ARHud {
 
   showUploadedImagePreview(imageUrl: string): void {
     this.uploadImageField.classList.add('hidden');
+    this.uploadModelField.classList.add('hidden');
+    this.cameraActions.classList.remove('hidden');
+    this.generatedModelMessage.classList.remove('hidden');
     this.cameraPreviewVideo.classList.add('hidden');
     this.cameraPreviewImage.src = imageUrl;
     this.cameraPreviewImage.classList.remove('hidden');
@@ -333,6 +390,9 @@ export class ARHud {
 
   showExtractedImageReady(imageUrl: string): void {
     this.uploadImageField.classList.add('hidden');
+    this.uploadModelField.classList.add('hidden');
+    this.cameraActions.classList.remove('hidden');
+    this.generatedModelMessage.classList.remove('hidden');
     this.cameraPreviewVideo.classList.add('hidden');
     this.cameraPreviewImage.src = imageUrl;
     this.cameraPreviewImage.classList.remove('hidden');
@@ -353,21 +413,22 @@ export class ARHud {
 
   updateGeneratedModels(generatedModels: ModelOption[]): void {
     this.generatedModelOptions = [...generatedModels];
-    const selectedModelId = this.modelSelect.value;
-    this.modelSelect.replaceChildren(new Option('Select model', '', true, !selectedModelId));
-    [...this.baseModelOptions, ...generatedModels].forEach((model) => {
-      this.modelSelect.append(new Option(model.label, model.id));
-    });
-    if ([...this.modelSelect.options].some((option) => option.value === selectedModelId)) {
-      this.modelSelect.value = selectedModelId;
-    } else {
-      this.modelSelect.value = '';
-    }
+    this.renderModelSelect();
+    this.renderModelManagerList();
+  }
+
+  updateUploadedModels(uploadedModels: ModelOption[]): void {
+    this.uploadedModelOptions = [...uploadedModels];
+    this.renderModelSelect();
     this.renderModelManagerList();
   }
 
   updateModelManagerStatus(message: string): void {
     this.modelManagerMessage.textContent = message;
+  }
+
+  updateUploadedModelStatus(message: string): void {
+    this.cameraStatusMessage.textContent = message;
   }
 
   setCameraPanelVisible(isVisible: boolean): void {
@@ -431,6 +492,8 @@ export class ARHud {
         return 'camera';
       case '#/upload':
         return 'upload';
+      case '#/upload-model':
+        return 'upload-model';
       case '#/ar':
         return 'ar';
       case '#/full-flow':
@@ -457,6 +520,11 @@ export class ARHud {
 
     if (route === 'upload') {
       this.openUploadPage();
+      return;
+    }
+
+    if (route === 'upload-model') {
+      this.openUploadModelPage();
       return;
     }
 
@@ -552,6 +620,20 @@ export class ARHud {
     this.showUploadImagePicker();
   }
 
+  private openUploadModelPage(): void {
+    this.landing.classList.add('hidden');
+    this.modelManager.classList.add('hidden');
+    this.statusPanel.classList.remove('hidden');
+    this.statusPanel.classList.add('camera-active');
+    this.statusPanel.classList.remove('full-flow-active');
+    this.hudActions.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.cameraPanel.classList.remove('hidden');
+    this.cameraPanel.classList.add('fullscreen');
+    this.fullFlowLoading.classList.add('hidden');
+    this.showUploadModelPicker();
+  }
+
   private openModelManagerPage(): void {
     this.landing.classList.add('hidden');
     this.modelManager.classList.remove('hidden');
@@ -584,15 +666,34 @@ export class ARHud {
     this.handlers.onGenerateModel(targetObject);
   }
 
+  private renderModelSelect(): void {
+    const selectedModelId = this.modelSelect.value;
+    this.modelSelect.replaceChildren(new Option('Select model', '', true, !selectedModelId));
+    this.allModelOptions().forEach((model) => {
+      this.modelSelect.append(new Option(model.label, model.id));
+    });
+    if ([...this.modelSelect.options].some((option) => option.value === selectedModelId)) {
+      this.modelSelect.value = selectedModelId;
+    } else {
+      this.modelSelect.value = '';
+    }
+  }
+
+  private allModelOptions(): ModelOption[] {
+    return [...this.baseModelOptions, ...this.generatedModelOptions, ...this.uploadedModelOptions];
+  }
+
   private renderModelManagerList(): void {
     this.modelList.replaceChildren();
-    [...this.baseModelOptions, ...this.generatedModelOptions].forEach((model) => {
-      const isGenerated = model.id.startsWith('generated-');
+    this.allModelOptions().forEach((model) => {
+      const modelKind = this.modelKind(model);
+      const isGenerated = modelKind === 'generated';
+      const isUploaded = modelKind === 'uploaded';
       const row = document.createElement('article');
-      row.className = `model-manager-row${isGenerated ? ' is-generated' : ''}`;
+      row.className = `model-manager-row${isGenerated ? ' is-generated' : ''}${isUploaded ? ' is-uploaded' : ''}`;
       row.dataset.modelId = model.id;
 
-      if (isGenerated) {
+      if (isGenerated || isUploaded) {
         row.appendChild(this.createModelThumbnail(model));
       }
 
@@ -600,7 +701,7 @@ export class ARHud {
       details.className = 'model-manager-details';
       const badge = document.createElement('span');
       badge.className = 'model-manager-badge';
-      badge.textContent = isGenerated ? 'Generated' : 'Built-in';
+      badge.textContent = this.modelBadgeText(modelKind);
       details.appendChild(badge);
 
       if (isGenerated) {
@@ -620,17 +721,24 @@ export class ARHud {
 
       row.appendChild(details);
 
-      if (isGenerated) {
+      if (isGenerated || isUploaded) {
         const actions = document.createElement('div');
         actions.className = 'model-manager-actions';
-        const renameButton = this.createButton('Rename', '', () => {
-          const input = row.querySelector<HTMLInputElement>('input[name="modelLabel"]');
-          this.handleModelRename(model.id, input?.value ?? '');
-        });
+        if (isGenerated) {
+          const renameButton = this.createButton('Rename', '', () => {
+            const input = row.querySelector<HTMLInputElement>('input[name="modelLabel"]');
+            this.handleModelRename(model.id, input?.value ?? '');
+          });
+          actions.append(renameButton);
+        }
         const deleteButton = this.createButton('Delete', 'danger', () => {
+          if (isUploaded) {
+            this.handlers.onDeleteUploadedModel(model.id);
+            return;
+          }
           this.handlers.onDeleteGeneratedModel(model.id);
         });
-        actions.append(renameButton, deleteButton);
+        actions.append(deleteButton);
         row.appendChild(actions);
       }
 
@@ -652,9 +760,30 @@ export class ARHud {
     }
 
     const placeholder = document.createElement('span');
-    placeholder.textContent = 'No image';
+    placeholder.textContent = model.id.startsWith('uploaded-') ? 'GLB' : 'No image';
     thumbnail.appendChild(placeholder);
     return thumbnail;
+  }
+
+  private modelKind(model: ModelOption): 'built-in' | 'generated' | 'uploaded' {
+    if (model.id.startsWith('generated-')) {
+      return 'generated';
+    }
+    if (model.id.startsWith('uploaded-')) {
+      return 'uploaded';
+    }
+    return 'built-in';
+  }
+
+  private modelBadgeText(modelKind: 'built-in' | 'generated' | 'uploaded'): string {
+    switch (modelKind) {
+      case 'generated':
+        return 'Generated';
+      case 'uploaded':
+        return 'Uploaded';
+      case 'built-in':
+        return 'Built-in';
+    }
   }
 
   private handleModelRename(modelId: string, label: string): void {

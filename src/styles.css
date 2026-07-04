@@ -587,6 +587,12 @@ canvas {
   background: #5eead4;
 }
 
+.model-manager-row.is-uploaded .model-manager-badge {
+  border-color: rgba(251, 191, 36, 0.42);
+  color: #221402;
+  background: #fbbf24;
+}
+
 .model-manager-name {
   margin: 0;
   color: #ffffff;

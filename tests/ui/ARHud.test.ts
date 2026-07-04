@@ -26,11 +26,13 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onStartCamera: vi.fn(),
     onCaptureImage: vi.fn(),
     onUploadImage: vi.fn(),
+    onUploadModel: vi.fn(),
     onSubmitTarget: vi.fn(),
     onGenerateModel: vi.fn(),
     onFullFlowCapture: vi.fn(),
     onRenameGeneratedModel: vi.fn(),
     onDeleteGeneratedModel: vi.fn(),
+    onDeleteUploadedModel: vi.fn(),
     onReturnHome: vi.fn(),
     ...overrides,
   };
@@ -52,7 +54,7 @@ describe('ARHud', () => {
     const cameraPanel = root.querySelector('.camera-panel');
     const hudActions = root.querySelector('.hud-actions');
 
-    expect(choiceButtons).toEqual(['Camera', 'Upload Image', 'AR View', 'Full Flow', 'Models']);
+    expect(choiceButtons).toEqual(['Camera', 'Upload Image', 'Upload Model', 'AR View', 'Full Flow', 'Models']);
     expect(statusPanel?.classList.contains('hidden')).toBe(true);
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
     expect(hudActions?.classList.contains('hidden')).toBe(true);
@@ -142,6 +144,31 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Upload an image to create a 3D model.');
   });
 
+  it('opens upload model from the first screen with a GLB picker', () => {
+    const root = document.createElement('div');
+    const onStartCamera = vi.fn();
+    const onUploadModel = vi.fn();
+    new ARHud(root, modelOptions, createHandlers({ onStartCamera, onUploadModel }));
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Upload Model')?.click();
+    const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept=".glb,model/gltf-binary"]')!;
+    const file = new File(['glb bytes'], 'chair.glb', { type: 'model/gltf-binary' });
+    Object.defineProperty(uploadInput, 'files', { value: [file], configurable: true });
+
+    uploadInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(onStartCamera).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('#/upload-model');
+    expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.status-panel')?.classList.contains('camera-active')).toBe(true);
+    expect(root.querySelector('.camera-panel')?.classList.contains('fullscreen')).toBe(true);
+    expect(uploadInput).toBeInstanceOf(HTMLInputElement);
+    expect(uploadInput.classList.contains('hidden')).toBe(false);
+    expect([...root.querySelectorAll('.camera-actions button')].every((button) => button.classList.contains('hidden'))).toBe(true);
+    expect(root.textContent).toContain('Choose a .glb model to add it to AR View.');
+    expect(onUploadModel).toHaveBeenCalledWith(file);
+  });
+
   it('opens a model manager from the first screen with every dropdown model listed', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
@@ -174,6 +201,55 @@ describe('ARHud', () => {
       'Delete',
     ]);
     expect(root.textContent).toContain('Built-in');
+  });
+
+  it('shows uploaded models in the AR dropdown and model manager', () => {
+    const root = document.createElement('div');
+    const onModelSelect = vi.fn();
+    const onDeleteUploadedModel = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onModelSelect, onDeleteUploadedModel }));
+
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-fc-123',
+        label: 'chair - 2026-07-04 12:00:00 UTC',
+        url: 'https://assets.example/generated-chair.glb',
+      },
+    ]);
+    hud.updateUploadedModels([
+      {
+        id: 'uploaded-123-chair',
+        label: 'chair',
+        url: 'blob:uploaded-chair',
+      },
+    ]);
+
+    const dropdownOptions = [...root.querySelectorAll('option')].map((option) => ({
+      label: option.textContent,
+      value: option.value,
+    }));
+    expect(dropdownOptions).toEqual([
+      { label: 'Select model', value: '' },
+      { label: 'Fast output', value: 'trellis-fast-output' },
+      { label: 'Image 4 output', value: 'img4-output' },
+      { label: 'chair - 2026-07-04 12:00:00 UTC', value: 'generated-fc-123' },
+      { label: 'chair', value: 'uploaded-123-chair' },
+    ]);
+
+    const select = root.querySelector('select') as HTMLSelectElement;
+    select.value = 'uploaded-123-chair';
+    select.dispatchEvent(new Event('change'));
+    expect(onModelSelect).toHaveBeenCalledWith('uploaded-123-chair');
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
+    const uploadedRow = root.querySelector<HTMLElement>('.model-manager-row.is-uploaded')!;
+
+    expect(uploadedRow).toBeInstanceOf(HTMLElement);
+    expect(uploadedRow.textContent).toContain('Uploaded');
+    expect(uploadedRow.textContent).toContain('chair');
+    expect(uploadedRow.querySelector('.model-manager-thumbnail')?.textContent).toBe('GLB');
+    uploadedRow.querySelector('button')?.click();
+    expect(onDeleteUploadedModel).toHaveBeenCalledWith('uploaded-123-chair');
   });
 
   it('renames and deletes generated models from the model manager', () => {

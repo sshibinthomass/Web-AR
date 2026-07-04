@@ -6,7 +6,7 @@ import {
   rotationDeltaFromVerticalDrag,
   type PlacementGestureZone,
 } from '../interaction/PlacementGestureZone';
-import { MODEL_OPTIONS } from './models';
+import { MODEL_OPTIONS, type ModelOption } from './models';
 import {
   captureVideoFrame,
   imageFileToCapturedImage,
@@ -33,6 +33,7 @@ import { PlaneTrackingManager } from '../xr/PlaneTrackingManager';
 import { checkXRSupport } from '../xr/XRSupport';
 import { createARSessionButton } from '../xr/XRSessionManager';
 import { getGenerateModelApiUrl } from './config';
+import { createUploadedModelOption } from './uploadedModels';
 
 export class WebARApp {
   private sceneContext: SceneContext | null = null;
@@ -52,6 +53,8 @@ export class WebARApp {
   private lastPlacementDragPoint: Point2 | null = null;
   private lastHudMode = this.appState.mode;
   private availableModels = [...MODEL_OPTIONS];
+  private generatedModelOptions: ModelOption[] = [];
+  private uploadedModelOptions: ModelOption[] = [];
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -72,11 +75,13 @@ export class WebARApp {
       onStartCamera: () => void this.startCamera(),
       onCaptureImage: () => void this.captureImage(),
       onUploadImage: (file) => void this.uploadImage(file),
+      onUploadModel: (file) => void this.uploadModel(file),
       onSubmitTarget: (targetObject) => void this.submitCapturedImageToGpt(targetObject),
       onGenerateModel: (targetObject) => void this.generateModel(targetObject),
       onFullFlowCapture: (targetObject) => void this.runFullFlow(targetObject),
       onRenameGeneratedModel: (modelId, label) => void this.renameGeneratedModel(modelId, label),
       onDeleteGeneratedModel: (modelId) => void this.deleteGeneratedModel(modelId),
+      onDeleteUploadedModel: (modelId) => this.deleteUploadedModel(modelId),
       onReturnHome: () => void this.returnHome(),
     });
     this.hud.updateModelSource('Cloudflare only');
@@ -111,10 +116,12 @@ export class WebARApp {
       return;
     }
 
+    const isUploadedModel = modelOption.id.startsWith('uploaded-');
+    const sourceLabel = isUploadedModel ? 'uploaded file' : 'Cloudflare';
     await this.loadModelFromUrl(modelOption.url, modelOption.label, {
-      loadingMessage: `Downloading ${modelOption.label} from Cloudflare...`,
-      successMessage: `${modelOption.label} loaded from Cloudflare.`,
-      sourceMessage: 'Cloudflare hosted model',
+      loadingMessage: `Loading ${modelOption.label} from ${sourceLabel}...`,
+      successMessage: `${modelOption.label} loaded from ${sourceLabel}.`,
+      sourceMessage: isUploadedModel ? 'Uploaded GLB' : 'Cloudflare hosted model',
       selectedModelId: modelId,
     });
   }
@@ -309,11 +316,45 @@ export class WebARApp {
 
     try {
       const generatedModels = await listGeneratedModels({ apiUrl });
-      this.availableModels = [...MODEL_OPTIONS, ...generatedModels];
-      this.hud?.updateGeneratedModels(generatedModels);
+      this.generatedModelOptions = generatedModels;
+      this.syncAvailableModels();
     } catch (error) {
       console.warn('Could not refresh generated models.', error);
     }
+  }
+
+  private async uploadModel(file: File): Promise<void> {
+    try {
+      if (!file.name.toLowerCase().endsWith('.glb')) {
+        throw new Error('Choose a .glb model file.');
+      }
+      const objectUrl = URL.createObjectURL(file);
+      const uploadedModel = createUploadedModelOption(file, objectUrl);
+      this.uploadedModelOptions = [...this.uploadedModelOptions, uploadedModel];
+      this.syncAvailableModels();
+      this.hud?.updateSelectedModel(uploadedModel.id);
+      this.hud?.updateUploadedModelStatus(`${uploadedModel.label} added to AR View and Models.`);
+      await this.loadSelectedModel(uploadedModel.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not upload model.';
+      this.hud?.updateUploadedModelStatus(`Model upload failed: ${message}`);
+    }
+  }
+
+  private deleteUploadedModel(modelId: string): void {
+    const model = this.uploadedModelOptions.find((option) => option.id === modelId);
+    if (model) {
+      URL.revokeObjectURL(model.url);
+    }
+    this.uploadedModelOptions = this.uploadedModelOptions.filter((option) => option.id !== modelId);
+    this.syncAvailableModels();
+    this.hud?.updateModelManagerStatus('Uploaded model removed.');
+  }
+
+  private syncAvailableModels(): void {
+    this.availableModels = [...MODEL_OPTIONS, ...this.generatedModelOptions, ...this.uploadedModelOptions];
+    this.hud?.updateGeneratedModels(this.generatedModelOptions);
+    this.hud?.updateUploadedModels(this.uploadedModelOptions);
   }
 
   private async uploadImage(file: File): Promise<void> {
