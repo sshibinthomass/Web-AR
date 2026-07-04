@@ -4,6 +4,7 @@ import {
   DEFAULT_CAPTURE_MAX_DIMENSION,
   blobToBase64,
   getCaptureDimensions,
+  imageFileToCapturedImage,
   startCameraPreview,
   stopCameraPreview,
 } from '../../src/capture/cameraCapture';
@@ -13,6 +14,16 @@ describe('cameraCapture', () => {
     const blob = new Blob(['hello'], { type: 'image/jpeg' });
 
     await expect(blobToBase64(blob)).resolves.toBe('aGVsbG8=');
+  });
+
+  it('converts an uploaded image file into a captured image payload', async () => {
+    const file = new File(['uploaded image'], 'chair.jpg', { type: 'image/jpeg' });
+
+    await expect(imageFileToCapturedImage(file)).resolves.toEqual({
+      imageBase64: 'dXBsb2FkZWQgaW1hZ2U=',
+      imageMimeType: 'image/jpeg',
+      blob: file,
+    });
   });
 
   it('requests an HD rear camera stream and attaches it to the preview video', async () => {

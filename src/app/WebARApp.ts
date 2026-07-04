@@ -7,7 +7,13 @@ import {
   type PlacementGestureZone,
 } from '../interaction/PlacementGestureZone';
 import { MODEL_OPTIONS } from './models';
-import { captureVideoFrame, startCameraPreview, stopCameraPreview, type CapturedImage } from '../capture/cameraCapture';
+import {
+  captureVideoFrame,
+  imageFileToCapturedImage,
+  startCameraPreview,
+  stopCameraPreview,
+  type CapturedImage,
+} from '../capture/cameraCapture';
 import { createScene, type SceneContext } from '../scene/createScene';
 import { loadGLBModel } from '../scene/loadModel';
 import {
@@ -65,6 +71,7 @@ export class WebARApp {
       onModelSelect: (modelId) => void this.loadSelectedModel(modelId),
       onStartCamera: () => void this.startCamera(),
       onCaptureImage: () => void this.captureImage(),
+      onUploadImage: (file) => void this.uploadImage(file),
       onSubmitTarget: (targetObject) => void this.submitCapturedImageToGpt(targetObject),
       onGenerateModel: (targetObject) => void this.generateModel(targetObject),
       onFullFlowCapture: (targetObject) => void this.runFullFlow(targetObject),
@@ -309,6 +316,20 @@ export class WebARApp {
     }
   }
 
+  private async uploadImage(file: File): Promise<void> {
+    try {
+      stopCameraPreview(this.cameraStream);
+      this.cameraStream = null;
+      this.hud?.updateCameraStatus('Preparing uploaded image...', false);
+      this.capturedImage = await imageFileToCapturedImage(file);
+      this.capturedImageGenerationPipeline = 'openai-to-3d';
+      this.setUploadedImagePreview(this.capturedImage.blob);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not prepare uploaded image.';
+      this.hud?.updateCameraStatus(`Upload failed: ${message}`, false);
+    }
+  }
+
   private async renameGeneratedModel(modelId: string, label: string): Promise<void> {
     const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
 
@@ -349,6 +370,12 @@ export class WebARApp {
     this.clearCapturedImagePreview();
     this.capturedImagePreviewUrl = URL.createObjectURL(blob);
     this.hud?.showExtractedImageReady(this.capturedImagePreviewUrl);
+  }
+
+  private setUploadedImagePreview(blob: Blob): void {
+    this.clearCapturedImagePreview();
+    this.capturedImagePreviewUrl = URL.createObjectURL(blob);
+    this.hud?.showUploadedImagePreview(this.capturedImagePreviewUrl);
   }
 
   private clearCapturedImagePreview(): void {

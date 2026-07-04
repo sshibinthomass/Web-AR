@@ -11,6 +11,7 @@ interface HUDHandlers {
   onModelSelect(modelId: string): void;
   onStartCamera(): void;
   onCaptureImage(): void;
+  onUploadImage(file: File): void;
   onSubmitTarget(targetObject: string): void;
   onGenerateModel(targetObject: string): void;
   onFullFlowCapture(targetObject: string): void;
@@ -19,7 +20,7 @@ interface HUDHandlers {
   onReturnHome(): void;
 }
 
-type HudRoute = 'home' | 'camera' | 'ar' | 'full-flow' | 'models';
+type HudRoute = 'home' | 'camera' | 'upload' | 'ar' | 'full-flow' | 'models';
 
 export class ARHud {
   readonly overlay: HTMLElement;
@@ -40,6 +41,9 @@ export class ARHud {
   private readonly modelManagerMessage: HTMLElement;
   private readonly cameraStatusMessage: HTMLElement;
   private readonly generatedModelMessage: HTMLElement;
+  private readonly cameraLabel: HTMLElement;
+  private readonly uploadImageField: HTMLElement;
+  private readonly uploadImageInput: HTMLInputElement;
   private readonly targetObjectLabel: HTMLElement;
   private readonly targetObjectInput: HTMLInputElement;
   private readonly modelSelect: HTMLSelectElement;
@@ -78,6 +82,7 @@ export class ARHud {
     modePicker.className = 'mode-picker';
     modePicker.append(
       this.createButton('Camera', 'primary', () => this.navigateTo('camera')),
+      this.createButton('Upload Image', '', () => this.navigateTo('upload')),
       this.createButton('AR View', '', () => this.navigateTo('ar')),
       this.createButton('Full Flow', '', () => this.navigateTo('full-flow')),
       this.createButton('Models', '', () => this.navigateTo('models')),
@@ -156,6 +161,10 @@ export class ARHud {
       <p class="camera-label">Camera</p>
       <video class="camera-preview" muted playsinline></video>
       <img class="camera-preview hidden" alt="Captured image preview">
+      <label class="upload-image-field hidden">
+        <span>Image file</span>
+        <input name="uploadImage" type="file" accept="image/*">
+      </label>
       <label class="target-object-field hidden">
         <span>Object to extract</span>
         <input name="targetObject" type="text" autocomplete="off" placeholder="Optional, e.g. laptop">
@@ -166,10 +175,19 @@ export class ARHud {
     this.cameraPreviewVideo = cameraPanel.querySelector<HTMLVideoElement>('.camera-preview')!;
     this.cameraPreviewImage = cameraPanel.querySelector<HTMLImageElement>('img.camera-preview')!;
     this.cameraPanel = cameraPanel;
+    this.cameraLabel = cameraPanel.querySelector<HTMLElement>('.camera-label')!;
     this.cameraStatusMessage = cameraPanel.querySelector<HTMLElement>('.camera-status')!;
     this.generatedModelMessage = cameraPanel.querySelector<HTMLElement>('.generated-model-status')!;
+    this.uploadImageField = cameraPanel.querySelector<HTMLElement>('.upload-image-field')!;
+    this.uploadImageInput = cameraPanel.querySelector<HTMLInputElement>('input[name="uploadImage"]')!;
     this.targetObjectLabel = cameraPanel.querySelector<HTMLElement>('.target-object-field')!;
     this.targetObjectInput = cameraPanel.querySelector<HTMLInputElement>('input[name="targetObject"]')!;
+    this.uploadImageInput.addEventListener('change', () => {
+      const file = this.uploadImageInput.files?.[0];
+      if (file) {
+        this.handlers.onUploadImage(file);
+      }
+    });
 
     const cameraActions = document.createElement('div');
     cameraActions.className = 'camera-actions';
@@ -245,6 +263,9 @@ export class ARHud {
   }
 
   showLiveCameraPreview(): void {
+    this.cameraLabel.textContent = 'Camera';
+    this.uploadImageField.classList.add('hidden');
+    this.uploadImageInput.value = '';
     this.cameraPreviewImage.classList.add('hidden');
     this.cameraPreviewImage.removeAttribute('src');
     this.cameraPreviewVideo.classList.remove('hidden');
@@ -260,7 +281,28 @@ export class ARHud {
     this.generateButton.disabled = true;
   }
 
+  showUploadImagePicker(): void {
+    this.cameraLabel.textContent = 'Upload Image';
+    this.cameraPreviewVideo.classList.add('hidden');
+    this.cameraPreviewImage.classList.add('hidden');
+    this.cameraPreviewImage.removeAttribute('src');
+    this.uploadImageField.classList.remove('hidden');
+    this.uploadImageInput.value = '';
+    this.targetObjectInput.value = '';
+    this.targetObjectInput.classList.add('hidden');
+    this.targetObjectLabel.classList.add('hidden');
+    this.captureButton.classList.add('hidden');
+    this.captureButton.disabled = true;
+    this.submitButton.classList.add('hidden');
+    this.submitButton.disabled = true;
+    this.generateButton.classList.remove('hidden');
+    this.generateButton.textContent = this.generationButtonLabel();
+    this.generateButton.disabled = true;
+    this.updateCameraStatus('Upload an image to create a 3D model.', false);
+  }
+
   showCapturedImagePreview(imageUrl: string): void {
+    this.uploadImageField.classList.add('hidden');
     this.cameraPreviewVideo.classList.add('hidden');
     this.cameraPreviewImage.src = imageUrl;
     this.cameraPreviewImage.classList.remove('hidden');
@@ -274,7 +316,23 @@ export class ARHud {
     this.updateCameraStatus('Image captured. Submit to GPT or generate a 3D model directly.', true);
   }
 
+  showUploadedImagePreview(imageUrl: string): void {
+    this.uploadImageField.classList.add('hidden');
+    this.cameraPreviewVideo.classList.add('hidden');
+    this.cameraPreviewImage.src = imageUrl;
+    this.cameraPreviewImage.classList.remove('hidden');
+    this.targetObjectInput.classList.remove('hidden');
+    this.targetObjectLabel.classList.remove('hidden');
+    this.captureButton.classList.add('hidden');
+    this.captureButton.disabled = true;
+    this.submitButton.classList.remove('hidden');
+    this.generateButton.classList.remove('hidden');
+    this.generateButton.textContent = this.generationButtonLabel();
+    this.updateCameraStatus('Image uploaded. Submit to GPT or generate a 3D model directly.', true);
+  }
+
   showExtractedImageReady(imageUrl: string): void {
+    this.uploadImageField.classList.add('hidden');
     this.cameraPreviewVideo.classList.add('hidden');
     this.cameraPreviewImage.src = imageUrl;
     this.cameraPreviewImage.classList.remove('hidden');
@@ -371,6 +429,8 @@ export class ARHud {
     switch (hash) {
       case '#/camera':
         return 'camera';
+      case '#/upload':
+        return 'upload';
       case '#/ar':
         return 'ar';
       case '#/full-flow':
@@ -392,6 +452,11 @@ export class ARHud {
 
     if (route === 'camera') {
       this.openCameraPage();
+      return;
+    }
+
+    if (route === 'upload') {
+      this.openUploadPage();
       return;
     }
 
@@ -471,6 +536,20 @@ export class ARHud {
     this.showLiveCameraPreview();
     this.updateCameraStatus('Capture an image to build and place a 3D object.', false);
     this.handlers.onStartCamera();
+  }
+
+  private openUploadPage(): void {
+    this.landing.classList.add('hidden');
+    this.modelManager.classList.add('hidden');
+    this.statusPanel.classList.remove('hidden');
+    this.statusPanel.classList.add('camera-active');
+    this.statusPanel.classList.remove('full-flow-active');
+    this.hudActions.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.cameraPanel.classList.remove('hidden');
+    this.cameraPanel.classList.add('fullscreen');
+    this.fullFlowLoading.classList.add('hidden');
+    this.showUploadImagePicker();
   }
 
   private openModelManagerPage(): void {

@@ -25,6 +25,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onModelSelect: vi.fn(),
     onStartCamera: vi.fn(),
     onCaptureImage: vi.fn(),
+    onUploadImage: vi.fn(),
     onSubmitTarget: vi.fn(),
     onGenerateModel: vi.fn(),
     onFullFlowCapture: vi.fn(),
@@ -51,7 +52,7 @@ describe('ARHud', () => {
     const cameraPanel = root.querySelector('.camera-panel');
     const hudActions = root.querySelector('.hud-actions');
 
-    expect(choiceButtons).toEqual(['Camera', 'AR View', 'Full Flow', 'Models']);
+    expect(choiceButtons).toEqual(['Camera', 'Upload Image', 'AR View', 'Full Flow', 'Models']);
     expect(statusPanel?.classList.contains('hidden')).toBe(true);
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
     expect(hudActions?.classList.contains('hidden')).toBe(true);
@@ -113,6 +114,32 @@ describe('ARHud', () => {
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.camera-panel')?.classList.contains('fullscreen')).toBe(true);
     expect(root.textContent).toContain('Capture');
+  });
+
+  it('opens upload image from the first screen without starting the camera', () => {
+    const root = document.createElement('div');
+    const onStartCamera = vi.fn();
+    new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Upload Image')?.click();
+
+    const landing = root.querySelector('.landing');
+    const statusPanel = root.querySelector('.status-panel');
+    const cameraPanel = root.querySelector('.camera-panel');
+    const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept="image/*"]');
+    const captureButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Capture');
+    const generateButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate 3D');
+
+    expect(onStartCamera).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('#/upload');
+    expect(landing?.classList.contains('hidden')).toBe(true);
+    expect(statusPanel?.classList.contains('camera-active')).toBe(true);
+    expect(cameraPanel?.classList.contains('fullscreen')).toBe(true);
+    expect(uploadInput).toBeInstanceOf(HTMLInputElement);
+    expect(uploadInput?.classList.contains('hidden')).toBe(false);
+    expect(captureButton?.classList.contains('hidden')).toBe(true);
+    expect((generateButton as HTMLButtonElement).disabled).toBe(true);
+    expect(root.textContent).toContain('Upload an image to create a 3D model.');
   });
 
   it('opens a model manager from the first screen with every dropdown model listed', () => {
@@ -414,6 +441,41 @@ describe('ARHud', () => {
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate 3D')?.click();
 
     expect(onGenerateModel).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers direct or GPT-assisted generation after image upload', () => {
+    const root = document.createElement('div');
+    const onUploadImage = vi.fn();
+    const onSubmitTarget = vi.fn();
+    const onGenerateModel = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onUploadImage, onSubmitTarget, onGenerateModel }));
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Upload Image')?.click();
+    const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept="image/*"]')!;
+    const file = new File(['fake image bytes'], 'chair.png', { type: 'image/png' });
+    Object.defineProperty(uploadInput, 'files', { value: [file], configurable: true });
+
+    uploadInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(onUploadImage).toHaveBeenCalledWith(file);
+
+    hud.showUploadedImagePreview('blob:uploaded-image');
+    const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
+    targetInput!.value = ' chair ';
+    const directGenerateButton = [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Generate 3D',
+    );
+
+    expect(root.textContent).toContain('Image uploaded. Submit to GPT or generate a 3D model directly.');
+    expect((directGenerateButton as HTMLButtonElement).disabled).toBe(false);
+    directGenerateButton?.click();
+
+    expect(onGenerateModel).toHaveBeenCalledWith('chair');
+    expect(onSubmitTarget).not.toHaveBeenCalled();
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit')?.click();
+
+    expect(onSubmitTarget).toHaveBeenCalledWith('chair');
   });
 
   it('shows generated model status and enables generation after capture', () => {

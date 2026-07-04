@@ -68,6 +68,18 @@ export async function captureVideoFrame(
   };
 }
 
+export async function imageFileToCapturedImage(file: File): Promise<CapturedImage> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Choose an image file before generating a 3D model.');
+  }
+
+  return {
+    imageBase64: await blobToBase64(file),
+    imageMimeType: file.type || DEFAULT_CAPTURE_IMAGE_MIME_TYPE,
+    blob: file,
+  };
+}
+
 export async function blobToBase64(blob: Blob): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let binary = '';

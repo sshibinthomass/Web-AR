@@ -247,6 +247,32 @@ canvas {
   font-weight: 700;
 }
 
+.upload-image-field {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  min-height: 220px;
+  border: 1px dashed rgba(94, 234, 212, 0.46);
+  border-radius: 8px;
+  padding: 18px;
+  color: rgba(255, 255, 255, 0.84);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.upload-image-field input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: #f8fafc;
+  background: rgba(5, 10, 14, 0.78);
+  font: inherit;
+  font-size: 12px;
+}
+
 .target-object-field input {
   min-height: 42px;
   border: 1px solid rgba(255, 255, 255, 0.18);
