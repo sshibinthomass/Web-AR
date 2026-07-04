@@ -451,7 +451,7 @@ canvas {
 .model-rail {
   position: fixed;
   right: 0;
-  bottom: calc(max(18px, env(safe-area-inset-bottom)) + 112px);
+  bottom: calc(max(18px, env(safe-area-inset-bottom)) + 72px);
   left: 0;
   z-index: 4;
   display: flex;
@@ -980,7 +980,7 @@ canvas {
   }
 
   .model-rail {
-    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 116px);
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 72px);
     padding-inline: 12px;
   }
 
