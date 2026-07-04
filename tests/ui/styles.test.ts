@@ -18,17 +18,17 @@ describe('AR overlay styles', () => {
     expect(styles).not.toContain('+ 116px');
   });
 
-  it('keeps the AR model search controls fixed at the top while model cards scroll', () => {
+  it('keeps the AR model search controls in the page flow above model cards', () => {
     const pickerRule = cssRule('.ar-model-picker');
     const controlsRule = cssRule('.ar-model-picker .model-library-controls');
 
     expect(pickerRule).toContain(
-      'padding: calc(max(18px, env(safe-area-inset-top)) + 150px) 20px calc(max(18px, env(safe-area-inset-bottom)) + 104px);',
+      'padding: calc(max(18px, env(safe-area-inset-top)) + 72px) 20px calc(max(18px, env(safe-area-inset-bottom)) + 104px);',
     );
-    expect(controlsRule).toContain('position: fixed;');
-    expect(controlsRule).toContain('top: calc(max(14px, env(safe-area-inset-top)) + 54px);');
-    expect(controlsRule).toContain('left: 50%;');
-    expect(controlsRule).toContain('width: min(1040px, calc(100% - 40px));');
+    expect(controlsRule).not.toContain('position: fixed;');
     expect(controlsRule).not.toContain('position: sticky;');
+    expect(controlsRule).not.toContain('transform: translateX(-50%);');
+    expect(controlsRule).toContain('width: 100%;');
+    expect(controlsRule).toContain('margin: 0 0 14px;');
   });
 });

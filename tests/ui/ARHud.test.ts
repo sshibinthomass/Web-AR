@@ -429,6 +429,46 @@ describe('ARHud', () => {
     expect(ownerRow.querySelector<HTMLButtonElement>('button[data-action="delete"]')?.getAttribute('aria-label')).toBe('Delete Chair');
   });
 
+  it('does not open preview when model action icons are clicked', () => {
+    const root = document.createElement('div');
+    const onPreviewModel = vi.fn();
+    const onToggleGeneratedModelVisibility = vi.fn();
+    const onDeleteGeneratedModel = vi.fn();
+    const hud = new ARHud(
+      root,
+      modelOptions,
+      createHandlers({ onPreviewModel, onToggleGeneratedModelVisibility, onDeleteGeneratedModel }),
+    );
+    hud.updateAuthState(activeUser);
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-owned-chair',
+        label: 'Chair',
+        url: 'https://assets.example/chair.glb',
+        ownerEmail: activeUser.email,
+        visibility: 'public',
+      },
+    ]);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
+
+    const clickIcon = (action: string): void => {
+      root
+        .querySelector<SVGElement>(`.model-manager-row[data-model-id="generated-owned-chair"] button[data-action="${action}"] svg`)
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    };
+
+    clickIcon('favorite');
+    clickIcon('visibility');
+    clickIcon('edit');
+    expect(root.querySelector('.model-edit-dialog')).toBeInstanceOf(HTMLElement);
+    clickIcon('delete');
+
+    expect(onPreviewModel).not.toHaveBeenCalled();
+    expect(onToggleGeneratedModelVisibility).toHaveBeenCalledWith('generated-owned-chair', 'private');
+    expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-owned-chair');
+  });
+
   it('searches, filters, favorites, and recenters the model library and AR picker', () => {
     localStorage.clear();
     const root = document.createElement('div');

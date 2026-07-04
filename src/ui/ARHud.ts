@@ -2024,7 +2024,7 @@ export class ARHud {
   }
 
   private isModelManagerControl(target: EventTarget | null): boolean {
-    return target instanceof HTMLElement && Boolean(target.closest('button, input, select, textarea, a, label'));
+    return target instanceof Element && Boolean(target.closest('button, input, select, textarea, a, label'));
   }
 
   private generationButtonLabel(): string {

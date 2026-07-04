@@ -549,7 +549,7 @@ canvas {
   inset: 0;
   z-index: 2;
   overflow-y: auto;
-  padding: calc(max(18px, env(safe-area-inset-top)) + 150px) 20px calc(max(18px, env(safe-area-inset-bottom)) + 104px);
+  padding: calc(max(18px, env(safe-area-inset-top)) + 72px) 20px calc(max(18px, env(safe-area-inset-bottom)) + 104px);
   background:
     linear-gradient(180deg, rgba(7, 16, 22, 0.98), rgba(8, 16, 21, 0.94)),
     radial-gradient(circle at 85% 12%, rgba(94, 234, 212, 0.14), transparent 34%);
@@ -569,19 +569,14 @@ canvas {
 }
 
 .ar-model-picker .model-library-controls {
-  position: fixed;
-  top: calc(max(14px, env(safe-area-inset-top)) + 54px);
-  left: 50%;
-  z-index: 6;
   grid-template-columns: minmax(0, 1fr) minmax(132px, 0.58fr);
-  width: min(1040px, calc(100% - 40px));
-  margin: 0;
+  width: 100%;
+  margin: 0 0 14px;
   padding: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   background: rgba(2, 7, 11, 0.74);
   backdrop-filter: blur(14px);
-  transform: translateX(-50%);
 }
 
 .model-library-search,
