@@ -97,6 +97,7 @@ export class WebARApp {
       onDeleteUploadedModel: (modelId) => this.deleteUploadedModel(modelId),
       onPreviewModel: (modelId) => void this.previewModel(modelId),
       onCloseModelPreview: () => this.closeModelPreview(),
+      onPreviewLightingChange: (intensity) => this.updateModelPreviewLighting(intensity),
       onUpdateModelThumbnail: (modelId, file) => void this.updateModelThumbnail(modelId, file),
       onReturnHome: () => void this.returnHome(),
       onLogin: (email, password) => void this.login(email, password),
@@ -663,6 +664,7 @@ export class WebARApp {
     }
 
     try {
+      this.modelPreviewViewer.setLightingIntensity(this.hud?.getModelPreviewLightingIntensity() ?? 1);
       await this.modelPreviewViewer.preview(modelOption);
       this.hud?.showModelPreviewReady();
     } catch (error) {
@@ -675,6 +677,10 @@ export class WebARApp {
     this.modelPreviewViewer?.dispose();
     this.modelPreviewViewer = null;
     this.hud?.hideModelPreview();
+  }
+
+  private updateModelPreviewLighting(intensity: number): void {
+    this.modelPreviewViewer?.setLightingIntensity(intensity);
   }
 
   private async uploadImage(file: File): Promise<void> {

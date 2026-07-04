@@ -1503,7 +1503,31 @@ canvas {
 }
 
 .model-preview-heading {
+  flex: 1 1 auto;
   min-width: 0;
+}
+
+.model-preview-lighting {
+  flex: 0 1 260px;
+  display: grid;
+  grid-template-columns: auto minmax(110px, 1fr) 44px;
+  align-items: center;
+  gap: 10px;
+  min-width: 220px;
+  color: rgba(16, 35, 38, 0.7);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.model-preview-lighting input {
+  width: 100%;
+  accent-color: #0f766e;
+}
+
+.model-preview-lighting-value {
+  color: #102326;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .model-preview-kicker {
@@ -2080,5 +2104,20 @@ canvas {
   .model-preview-panel {
     min-height: 0;
     height: 100%;
+  }
+
+  .model-preview-bar {
+    flex-wrap: wrap;
+  }
+
+  .model-preview-heading {
+    flex: 1 1 calc(100% - 84px);
+  }
+
+  .model-preview-lighting {
+    order: 3;
+    flex-basis: 100%;
+    grid-template-columns: auto minmax(0, 1fr) 44px;
+    min-width: 0;
   }
 }

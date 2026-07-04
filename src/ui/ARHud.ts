@@ -25,6 +25,7 @@ interface HUDHandlers {
   onDeleteUploadedModel(modelId: string): void;
   onPreviewModel(modelId: string): void;
   onCloseModelPreview(): void;
+  onPreviewLightingChange(intensity: number): void;
   onUpdateModelThumbnail(modelId: string, file: File): void;
   onReturnHome(): void;
   onLogin(email: string, password: string): void;
@@ -78,6 +79,8 @@ export class ARHud {
   private readonly modelPreview: HTMLElement;
   private readonly modelPreviewTitle: HTMLElement;
   private readonly modelPreviewStatus: HTMLElement;
+  private readonly modelPreviewLightingInput: HTMLInputElement;
+  private readonly modelPreviewLightingValue: HTMLOutputElement;
   private readonly modelRail: HTMLElement;
   private readonly arModelPicker: HTMLElement;
   private readonly arModelSearchInput: HTMLInputElement;
@@ -323,6 +326,11 @@ export class ARHud {
             <span class="model-preview-kicker">3D preview</span>
             <h3 class="model-preview-title"></h3>
           </div>
+          <label class="model-preview-lighting">
+            <span>Lighting</span>
+            <input class="model-preview-lighting-input" type="range" min="50" max="180" step="5" value="100" aria-label="Preview lighting intensity">
+            <output class="model-preview-lighting-value">100%</output>
+          </label>
           <button class="model-preview-close" type="button">Close</button>
         </div>
         <div class="model-preview-viewport"></div>
@@ -332,6 +340,9 @@ export class ARHud {
     this.modelPreviewViewport = this.modelPreview.querySelector<HTMLElement>('.model-preview-viewport')!;
     this.modelPreviewTitle = this.modelPreview.querySelector<HTMLElement>('.model-preview-title')!;
     this.modelPreviewStatus = this.modelPreview.querySelector<HTMLElement>('.model-preview-status')!;
+    this.modelPreviewLightingInput = this.modelPreview.querySelector<HTMLInputElement>('.model-preview-lighting-input')!;
+    this.modelPreviewLightingValue = this.modelPreview.querySelector<HTMLOutputElement>('.model-preview-lighting-value')!;
+    this.modelPreviewLightingInput.addEventListener('input', () => this.handleModelPreviewLightingInput());
     this.modelPreview.querySelector<HTMLButtonElement>('.model-preview-close')?.addEventListener('click', () => {
       this.handlers.onCloseModelPreview();
     });
@@ -739,6 +750,7 @@ export class ARHud {
     this.modelPreviewTitle.textContent = modelLabel;
     this.modelPreviewStatus.textContent = 'Loading preview...';
     this.modelPreviewViewport.replaceChildren();
+    this.updateModelPreviewLightingLabel();
     this.modelPreview.classList.remove('hidden');
   }
 
@@ -749,6 +761,10 @@ export class ARHud {
   showModelPreviewError(message: string): void {
     this.modelPreviewStatus.textContent = message;
     this.modelPreview.classList.remove('hidden');
+  }
+
+  getModelPreviewLightingIntensity(): number {
+    return this.parseModelPreviewLightingIntensity();
   }
 
   hideModelPreview(): void {
@@ -1178,6 +1194,28 @@ export class ARHud {
     }
 
     this.handlers.onGenerateModel(targetObject);
+  }
+
+  private handleModelPreviewLightingInput(): void {
+    const intensity = this.parseModelPreviewLightingIntensity();
+    this.updateModelPreviewLightingLabel();
+    this.handlers.onPreviewLightingChange(intensity);
+  }
+
+  private parseModelPreviewLightingIntensity(): number {
+    const value = Number(this.modelPreviewLightingInput.value);
+    if (!Number.isFinite(value)) {
+      return 1;
+    }
+
+    return Math.min(1.8, Math.max(0.5, value / 100));
+  }
+
+  private updateModelPreviewLightingLabel(): void {
+    const percentage = `${Math.round(this.parseModelPreviewLightingIntensity() * 100)}%`;
+    this.modelPreviewLightingValue.value = percentage;
+    this.modelPreviewLightingValue.textContent = percentage;
+    this.modelPreviewLightingInput.setAttribute('aria-valuetext', percentage);
   }
 
   private renderModelSelect(): void {

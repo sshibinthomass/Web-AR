@@ -23,6 +23,21 @@ type PreviewControls = {
 
 type FrameCallback = (time: number) => void;
 
+type PreviewLighting = {
+  hemisphereLight: THREE.HemisphereLight;
+  ambientLight: THREE.AmbientLight;
+  keyLight: THREE.DirectionalLight;
+  rimLight: THREE.DirectionalLight;
+};
+
+const basePreviewLighting = {
+  hemisphere: 1.5,
+  ambient: 0.45,
+  key: 2.2,
+  rim: 0.95,
+  shadowOpacity: 0.22,
+} as const;
+
 export type ModelPreviewViewerOptions = {
   loadModel?: (url: string) => Promise<THREE.Group>;
   createRenderer?: () => PreviewRenderer;
@@ -46,6 +61,8 @@ export class ModelPreviewViewer {
   private controls: PreviewControls | null = null;
   private model: THREE.Object3D | null = null;
   private shadowFloor: THREE.Mesh | null = null;
+  private previewLighting: PreviewLighting | null = null;
+  private lightingIntensity = 1;
   private frameId: number | null = null;
   private disconnectResize: (() => void) | null = null;
   private requestVersion = 0;
@@ -76,9 +93,11 @@ export class ModelPreviewViewer {
     controls.enableDamping = true;
     controls.enablePan = false;
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0xd8e8e4, 1.5));
-    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
-    const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
+    const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0xd8e8e4, basePreviewLighting.hemisphere);
+    const ambientLight = new THREE.AmbientLight(0xffffff, basePreviewLighting.ambient);
+    scene.add(hemisphereLight);
+    scene.add(ambientLight);
+    const keyLight = new THREE.DirectionalLight(0xffffff, basePreviewLighting.key);
     keyLight.position.set(3.5, 5, 4);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.set(2048, 2048);
@@ -86,9 +105,11 @@ export class ModelPreviewViewer {
     keyLight.shadow.normalBias = 0.025;
     scene.add(keyLight);
     scene.add(keyLight.target);
-    const rimLight = new THREE.DirectionalLight(0x7ddfd5, 0.95);
+    const rimLight = new THREE.DirectionalLight(0x7ddfd5, basePreviewLighting.rim);
     rimLight.position.set(-3, 2.5, -2.5);
     scene.add(rimLight);
+    this.previewLighting = { hemisphereLight, ambientLight, keyLight, rimLight };
+    this.applyLightingIntensity();
 
     this.scene = scene;
     this.camera = camera;
@@ -113,6 +134,7 @@ export class ModelPreviewViewer {
       configurePreviewShadowCamera(keyLight, bounds);
       scene.add(loadedModel);
       scene.add(shadowFloor);
+      this.applyLightingIntensity();
       this.frameCameraToModel(loadedModel, bounds);
       this.startRenderLoop();
     } catch (error) {
@@ -150,11 +172,22 @@ export class ModelPreviewViewer {
     this.scene?.clear();
     this.scene = null;
     this.camera = null;
+    this.previewLighting = null;
 
     this.renderer?.dispose();
     this.renderer = null;
 
     this.container.replaceChildren();
+  }
+
+  setLightingIntensity(intensity: number): void {
+    if (!Number.isFinite(intensity)) {
+      return;
+    }
+
+    this.lightingIntensity = Math.min(1.8, Math.max(0.5, intensity));
+    this.applyLightingIntensity();
+    this.renderFrame();
   }
 
   private resize(): void {
@@ -210,6 +243,23 @@ export class ModelPreviewViewer {
   private renderFrame(): void {
     if (this.renderer && this.scene && this.camera) {
       this.renderer.render(this.scene, this.camera);
+    }
+  }
+
+  private applyLightingIntensity(): void {
+    if (this.previewLighting) {
+      this.previewLighting.hemisphereLight.intensity = basePreviewLighting.hemisphere * this.lightingIntensity;
+      this.previewLighting.ambientLight.intensity = basePreviewLighting.ambient * this.lightingIntensity;
+      this.previewLighting.keyLight.intensity = basePreviewLighting.key * this.lightingIntensity;
+      this.previewLighting.rimLight.intensity = basePreviewLighting.rim * this.lightingIntensity;
+    }
+
+    if (this.shadowFloor) {
+      const material = this.shadowFloor.material;
+      if (material instanceof THREE.ShadowMaterial) {
+        material.opacity = Math.min(0.36, Math.max(0.12, basePreviewLighting.shadowOpacity * Math.sqrt(this.lightingIntensity)));
+        material.needsUpdate = true;
+      }
     }
   }
 }

@@ -37,6 +37,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onDeleteUploadedModel: vi.fn(),
     onPreviewModel: vi.fn(),
     onCloseModelPreview: vi.fn(),
+    onPreviewLightingChange: vi.fn(),
     onUpdateModelThumbnail: vi.fn(),
     onReturnHome: vi.fn(),
     onLogin: vi.fn(),
@@ -487,7 +488,8 @@ describe('ARHud', () => {
     const root = document.createElement('div');
     const onPreviewModel = vi.fn();
     const onCloseModelPreview = vi.fn();
-    const hud = new ARHud(root, modelOptions, createHandlers({ onPreviewModel, onCloseModelPreview }));
+    const onPreviewLightingChange = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onPreviewModel, onCloseModelPreview, onPreviewLightingChange }));
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
     const firstRow = root.querySelector<HTMLElement>('.model-manager-row')!;
@@ -502,6 +504,13 @@ describe('ARHud', () => {
     expect(preview?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.model-preview-title')?.textContent).toBe('Fast output');
     expect(root.querySelector('.model-preview-status')?.textContent).toBe('Preview ready.');
+    const lightingInput = root.querySelector<HTMLInputElement>('.model-preview-lighting-input')!;
+    lightingInput.value = '145';
+    lightingInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    expect(onPreviewLightingChange).toHaveBeenCalledWith(1.45);
+    expect(root.querySelector('.model-preview-lighting-value')?.textContent).toBe('145%');
+    expect(hud.getModelPreviewLightingIntensity()).toBe(1.45);
 
     root.querySelector<HTMLButtonElement>('.model-preview-close')?.click();
 

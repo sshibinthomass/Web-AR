@@ -62,7 +62,16 @@ describe('ModelPreviewViewer', () => {
     expect(shadowFloor).toBeInstanceOf(THREE.Mesh);
     expect(shadowFloor?.receiveShadow).toBe(true);
     expect(shadowFloor?.material).toBeInstanceOf(THREE.ShadowMaterial);
-    expect(previewScene.children.some((child) => child instanceof THREE.DirectionalLight && child.castShadow)).toBe(true);
+    const keyLight = previewScene.children.find((child) => child instanceof THREE.DirectionalLight && child.castShadow) as
+      | THREE.DirectionalLight
+      | undefined;
+    expect(keyLight).toBeInstanceOf(THREE.DirectionalLight);
+
+    viewer.setLightingIntensity(1.5);
+
+    expect(keyLight?.intensity).toBeCloseTo(3.3);
+    expect((shadowFloor?.material as THREE.ShadowMaterial).opacity).toBeGreaterThan(0.22);
+    expect(renderer.render).toHaveBeenCalledWith(previewScene, expect.any(THREE.PerspectiveCamera));
 
     viewer.dispose();
 
