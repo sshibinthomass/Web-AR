@@ -42,6 +42,8 @@ interface HUDHandlers {
 
 type HudRoute = 'home' | 'camera' | 'upload' | 'upload-model' | 'ar' | 'full-flow' | 'models' | 'login' | 'admin';
 type ModelLibraryFilter = 'all' | 'generated' | 'uploaded' | 'favorites' | 'recent';
+type AuthFormMode = 'login' | 'signup';
+type ModelActionIcon = 'preview' | 'favorite' | 'favorite-filled' | 'visibility-public' | 'visibility-private' | 'edit' | 'delete';
 
 export class ARHud {
   readonly overlay: HTMLElement;
@@ -61,7 +63,10 @@ export class ARHud {
   private readonly authMessage: HTMLElement;
   private readonly authEmailInput: HTMLInputElement;
   private readonly authPasswordInput: HTMLInputElement;
+  private readonly authNameLabel: HTMLLabelElement;
   private readonly authNameInput: HTMLInputElement;
+  private readonly authSignInButton: HTMLButtonElement;
+  private readonly authSignupButton: HTMLButtonElement;
   private readonly adminDashboard: HTMLElement;
   private readonly adminAccountList: HTMLElement;
   private readonly adminJobList: HTMLElement;
@@ -121,9 +126,11 @@ export class ARHud {
   private arPlacementStarted = false;
   private modelReady = false;
   private activeRoute: HudRoute | null = null;
+  private authFormMode: AuthFormMode = 'login';
   private currentUser: AuthUser | null = null;
   private adminAccounts: AuthUser[] = [];
   private adminJobs: AdminJobEntry[] = [];
+  private modelEditDialog: HTMLElement | null = null;
   private readonly favoriteStorageKey = 'web-ar-model-favorites';
   private readonly recentStorageKey = 'web-ar-model-recents';
 
@@ -227,7 +234,7 @@ export class ARHud {
           <span>Password</span>
           <input name="authPassword" type="password" autocomplete="current-password">
         </label>
-        <label>
+        <label hidden>
           <span>Name</span>
           <input name="authName" type="text" autocomplete="name">
         </label>
@@ -238,11 +245,15 @@ export class ARHud {
     this.authEmailInput = this.authPanel.querySelector<HTMLInputElement>('input[name="authEmail"]')!;
     this.authPasswordInput = this.authPanel.querySelector<HTMLInputElement>('input[name="authPassword"]')!;
     this.authNameInput = this.authPanel.querySelector<HTMLInputElement>('input[name="authName"]')!;
+    this.authNameLabel = this.authNameInput.closest('label') as HTMLLabelElement;
     this.authPanel.querySelector<HTMLButtonElement>('.page-back')?.addEventListener('click', () => this.navigateTo('home'));
+    this.authSignInButton = this.createButton('Sign in', 'primary', () => this.handleLoginClick());
+    this.authSignupButton = this.createButton('Create account', '', () => this.handleSignupClick());
     this.authPanel.querySelector<HTMLElement>('.auth-form-actions')?.append(
-      this.createButton('Sign in', 'primary', () => this.handleLoginClick()),
-      this.createButton('Create account', '', () => this.handleSignupClick()),
+      this.authSignInButton,
+      this.authSignupButton,
     );
+    this.setAuthFormMode('login');
     shell.appendChild(this.authPanel);
 
     this.adminDashboard = document.createElement('section');
@@ -1153,6 +1164,7 @@ export class ARHud {
     this.cameraPanel.classList.add('hidden');
     this.cameraPanel.classList.remove('fullscreen');
     this.fullFlowLoading.classList.add('hidden');
+    this.setAuthFormMode('login');
     this.showAuthMessage(message, false);
   }
 
@@ -1186,15 +1198,44 @@ export class ARHud {
   }
 
   private handleLoginClick(): void {
+    if (this.authFormMode === 'signup') {
+      this.setAuthFormMode('login');
+      this.showAuthMessage('Sign in with an approved account, or create one for admin approval.', false);
+      return;
+    }
+
     this.handlers.onLogin(this.authEmailInput.value.trim().toLowerCase(), this.authPasswordInput.value);
   }
 
   private handleSignupClick(): void {
+    if (this.authFormMode === 'login') {
+      this.setAuthFormMode('signup');
+      this.showAuthMessage('Create an account for admin approval.', false);
+      this.authNameInput.focus();
+      return;
+    }
+
     this.handlers.onSignup(
       this.authEmailInput.value.trim().toLowerCase(),
       this.authPasswordInput.value,
       this.authNameInput.value.trim(),
     );
+  }
+
+  private setAuthFormMode(mode: AuthFormMode): void {
+    this.authFormMode = mode;
+    const isSignup = mode === 'signup';
+
+    this.authNameLabel.hidden = !isSignup;
+    this.authNameInput.disabled = !isSignup;
+    this.authNameInput.required = isSignup;
+    this.authPasswordInput.autocomplete = isSignup ? 'new-password' : 'current-password';
+    this.authSignInButton.classList.toggle('primary', !isSignup);
+    this.authSignupButton.classList.toggle('primary', isSignup);
+
+    if (!isSignup) {
+      this.authNameInput.value = '';
+    }
   }
 
   private handleSubmitClick(): void {
@@ -1275,6 +1316,10 @@ export class ARHud {
 
   private allModelOptions(): ModelOption[] {
     return [...this.baseModelOptions, ...this.generatedModelOptions, ...this.uploadedModelOptions];
+  }
+
+  private modelManagerOptions(): ModelOption[] {
+    return [...this.generatedModelOptions, ...this.uploadedModelOptions];
   }
 
   private selectableModelOptions(): ModelOption[] {
@@ -1369,8 +1414,9 @@ export class ARHud {
   }
 
   private renderModelManagerList(): void {
+    this.closeModelEditDialog();
     this.modelList.replaceChildren();
-    const models = this.filteredModelOptions(this.allModelOptions());
+    const models = this.filteredModelOptions(this.modelManagerOptions());
     if (models.length === 0) {
       const empty = document.createElement('p');
       empty.className = 'model-manager-empty';
@@ -1431,58 +1477,35 @@ export class ARHud {
         details.appendChild(owner);
       }
 
-      if (isGenerated && canManageModel) {
-        const input = document.createElement('input');
-        input.name = 'modelLabel';
-        input.type = 'text';
-        input.autocomplete = 'off';
-        input.value = model.label;
-        input.setAttribute('aria-label', `Name for ${model.label}`);
-        details.appendChild(input);
-      } else {
-        const label = document.createElement('p');
-        label.className = 'model-manager-name';
-        label.textContent = model.label;
-        details.appendChild(label);
-      }
+      const label = document.createElement('p');
+      label.className = 'model-manager-name';
+      label.textContent = model.label;
+      details.appendChild(label);
 
       row.appendChild(details);
 
       const actions = document.createElement('div');
       actions.className = 'model-manager-actions';
-      actions.append(this.createButton('Preview', '', () => this.handlers.onPreviewModel(model.id)));
+      actions.append(this.createModelActionButton(`Preview ${model.label}`, 'preview', 'preview', '', () => this.handlers.onPreviewModel(model.id)));
       actions.append(this.createFavoriteButton(model));
       if (canManageModel && model.id.startsWith('generated-') && (isGenerated || isUploaded)) {
         const nextVisibility: ModelVisibility = model.visibility === 'public' ? 'private' : 'public';
+        const visibilityLabel = model.visibility === 'public' ? `Make private ${model.label}` : `Make public ${model.label}`;
         actions.append(
-          this.createButton(model.visibility === 'public' ? 'Make private' : 'Make public', '', () => {
+          this.createModelActionButton(visibilityLabel, nextVisibility === 'public' ? 'visibility-public' : 'visibility-private', 'visibility', '', () => {
             this.handlers.onToggleGeneratedModelVisibility(model.id, nextVisibility);
           }),
         );
       }
       if (canManageModel && canUpdateThumbnail) {
-        const thumbnailInput = document.createElement('input');
-        thumbnailInput.type = 'file';
-        thumbnailInput.accept = 'image/*';
-        thumbnailInput.className = 'model-manager-thumbnail-input hidden';
-        thumbnailInput.setAttribute('aria-label', `Thumbnail for ${model.label}`);
-        thumbnailInput.addEventListener('change', () => this.handleModelThumbnailChange(model.id, thumbnailInput));
         actions.append(
-          thumbnailInput,
-          this.createButton('Thumbnail', '', () => {
-            thumbnailInput.click();
+          this.createModelActionButton(`Edit ${model.label}`, 'edit', 'edit', '', () => {
+            this.openModelEditDialog(model);
           }),
         );
       }
-      if (canManageModel && isGenerated) {
-        const renameButton = this.createButton('Rename', '', () => {
-          const input = row.querySelector<HTMLInputElement>('input[name="modelLabel"]');
-          this.handleModelRename(model.id, input?.value ?? '');
-        });
-        actions.append(renameButton);
-      }
       if (canManageModel && (isGenerated || isUploaded)) {
-        const deleteButton = this.createButton('Delete', 'danger', () => {
+        const deleteButton = this.createModelActionButton(`Delete ${model.label}`, 'delete', 'delete', 'danger', () => {
           if (isUploaded && model.id.startsWith('uploaded-')) {
             this.handlers.onDeleteUploadedModel(model.id);
             return;
@@ -1760,10 +1783,15 @@ export class ARHud {
 
   private createFavoriteButton(model: ModelOption): HTMLButtonElement {
     const isFavorite = this.favoriteModelIds.has(model.id);
-    const button = this.createButton(isFavorite ? 'Unfavorite' : 'Favorite', '', () => {
-      this.toggleFavorite(model.id);
-    });
-    button.dataset.action = 'favorite';
+    const button = this.createModelActionButton(
+      isFavorite ? `Remove favorite ${model.label}` : `Favorite ${model.label}`,
+      isFavorite ? 'favorite-filled' : 'favorite',
+      'favorite',
+      isFavorite ? 'is-active' : '',
+      () => {
+        this.toggleFavorite(model.id);
+      },
+    );
     button.setAttribute('aria-pressed', isFavorite ? 'true' : 'false');
     return button;
   }
@@ -1866,19 +1894,118 @@ export class ARHud {
     this.handlers.onRenameGeneratedModel(modelId, trimmedLabel);
   }
 
-  private handleModelThumbnailChange(modelId: string, input: HTMLInputElement): void {
+  private handleModelThumbnailChange(modelId: string, input: HTMLInputElement, statusTarget?: HTMLElement): boolean {
     const file = input.files?.[0];
     input.value = '';
     if (!file) {
-      return;
+      return false;
     }
 
     if (!file.type.startsWith('image/')) {
-      this.updateModelManagerStatus('Choose an image file for the thumbnail.');
-      return;
+      const message = 'Choose an image file for the thumbnail.';
+      if (statusTarget) {
+        statusTarget.textContent = message;
+      } else {
+        this.updateModelManagerStatus(message);
+      }
+      return false;
     }
 
     this.handlers.onUpdateModelThumbnail(modelId, file);
+    return true;
+  }
+
+  private openModelEditDialog(model: ModelOption): void {
+    this.closeModelEditDialog();
+
+    const dialog = document.createElement('div');
+    dialog.className = 'model-edit-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', `Edit ${model.label}`);
+
+    const panel = document.createElement('div');
+    panel.className = 'model-edit-panel';
+
+    const title = document.createElement('h3');
+    title.textContent = 'Edit model';
+
+    const nameLabel = document.createElement('label');
+    nameLabel.className = 'model-edit-field';
+    const nameText = document.createElement('span');
+    nameText.textContent = 'Name';
+    const nameInput = document.createElement('input');
+    nameInput.name = 'modelLabel';
+    nameInput.type = 'text';
+    nameInput.autocomplete = 'off';
+    nameInput.value = model.label;
+    nameInput.setAttribute('aria-label', `Name for ${model.label}`);
+    nameLabel.append(nameText, nameInput);
+
+    const thumbnailLabel = document.createElement('label');
+    thumbnailLabel.className = 'model-edit-field';
+    const thumbnailText = document.createElement('span');
+    thumbnailText.textContent = 'Thumbnail';
+    const thumbnailInput = document.createElement('input');
+    thumbnailInput.type = 'file';
+    thumbnailInput.accept = 'image/*';
+    thumbnailInput.setAttribute('aria-label', `Thumbnail for ${model.label}`);
+    thumbnailLabel.append(thumbnailText, thumbnailInput);
+
+    const status = document.createElement('p');
+    status.className = 'model-edit-status';
+    status.textContent = 'Update the visible name or choose a new image thumbnail.';
+
+    const actions = document.createElement('div');
+    actions.className = 'model-edit-actions';
+    const cancelButton = this.createButton('Cancel', '', () => this.closeModelEditDialog());
+    cancelButton.dataset.action = 'cancel-edit';
+    const saveButton = this.createButton('Save changes', 'primary', () => {
+      const nextLabel = nameInput.value.trim();
+      if (!nextLabel) {
+        status.textContent = 'Enter a model name before saving.';
+        nameInput.focus();
+        return;
+      }
+
+      if (nextLabel !== model.label.trim()) {
+        this.handleModelRename(model.id, nextLabel);
+      }
+
+      const hasThumbnailFile = Boolean(thumbnailInput.files?.length);
+      const thumbnailSaved = this.handleModelThumbnailChange(model.id, thumbnailInput, status);
+      if (hasThumbnailFile && !thumbnailSaved) {
+        return;
+      }
+
+      this.closeModelEditDialog();
+    });
+    saveButton.dataset.action = 'save-edit';
+    actions.append(cancelButton, saveButton);
+
+    panel.append(title, nameLabel, thumbnailLabel, status, actions);
+    dialog.appendChild(panel);
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) {
+        this.closeModelEditDialog();
+      }
+    });
+    dialog.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeModelEditDialog();
+      }
+    });
+
+    this.modelManager.appendChild(dialog);
+    this.modelEditDialog = dialog;
+    nameInput.focus();
+  }
+
+  private closeModelEditDialog(): void {
+    this.modelEditDialog?.classList.add('hidden');
+    this.modelEditDialog?.remove();
+    this.modelEditDialog = null;
   }
 
   private closeModelPreviewIfOpen(): void {
@@ -1990,6 +2117,58 @@ export class ARHud {
       onClick();
     });
     return button;
+  }
+
+  private createModelActionButton(
+    label: string,
+    icon: ModelActionIcon,
+    action: string,
+    className: string,
+    onClick: () => void,
+  ): HTMLButtonElement {
+    const button = this.createButton('', ['model-manager-icon-button', className].filter(Boolean).join(' '), onClick);
+    button.dataset.action = action;
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    button.append(this.createIconSvg(icon));
+    const text = document.createElement('span');
+    text.className = 'sr-only';
+    text.textContent = label;
+    button.appendChild(text);
+    return button;
+  }
+
+  private createIconSvg(icon: ModelActionIcon): SVGSVGElement {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+
+    const paths: Record<ModelActionIcon, string[]> = {
+      preview: [
+        'M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z',
+        'M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z',
+      ],
+      favorite: ['M12 3.6l2.6 5.2 5.7.8-4.1 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4.1-4 5.7-.8L12 3.6Z'],
+      'favorite-filled': ['M12 3.6l2.6 5.2 5.7.8-4.1 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4.1-4 5.7-.8L12 3.6Z'],
+      'visibility-public': ['M6 10V8a6 6 0 0 1 11.6-2', 'M7 10h10a2 2 0 0 1 2 2v7H5v-7a2 2 0 0 1 2-2Z'],
+      'visibility-private': ['M7 10V8a5 5 0 0 1 10 0v2', 'M7 10h10a2 2 0 0 1 2 2v7H5v-7a2 2 0 0 1 2-2Z'],
+      edit: ['M4 20h4.2L19.4 8.8a2.1 2.1 0 0 0-3-3L5.2 17H4v3Z', 'M14.8 7.4l1.8 1.8'],
+      delete: ['M4 7h16', 'M9 7V5h6v2', 'M6 7l1 13h10l1-13', 'M10 11v5', 'M14 11v5'],
+    };
+
+    paths[icon].forEach((pathData) => {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', pathData);
+      path.setAttribute('fill', icon === 'favorite-filled' ? 'currentColor' : 'none');
+      path.setAttribute('stroke', 'currentColor');
+      path.setAttribute('stroke-width', '1.8');
+      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('stroke-linejoin', 'round');
+      svg.appendChild(path);
+    });
+
+    return svg;
   }
 
   private formatBytes(bytes: number): string {
