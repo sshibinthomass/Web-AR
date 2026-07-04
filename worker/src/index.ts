@@ -165,7 +165,7 @@ const pendingJobsIndexKey = 'models/generated/jobs/index.json';
 const jobKeyPrefix = 'models/generated/jobs/';
 const usersIndexKey = 'auth/users/index.json';
 const defaultAdminEmail = 'sshibinthomass@gmail.com';
-const passwordHashIterations = 120_000;
+const passwordHashIterations = 100_000;
 const sessionLifetimeSeconds = 60 * 60 * 24 * 7;
 
 const corsHeaders = {

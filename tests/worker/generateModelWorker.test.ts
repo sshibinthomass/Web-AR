@@ -155,6 +155,56 @@ describe('handleGenerateModelRequest', () => {
     });
   });
 
+  it('uses a Cloudflare-compatible PBKDF2 iteration count during signup', async () => {
+    const originalDeriveBits = crypto.subtle.deriveBits.bind(crypto.subtle);
+    const deriveBitsSpy = vi.spyOn(crypto.subtle, 'deriveBits').mockImplementation((algorithm, baseKey, length) => {
+      if (
+        typeof algorithm === 'object' &&
+        'iterations' in algorithm &&
+        typeof algorithm.iterations === 'number' &&
+        algorithm.iterations > 100_000
+      ) {
+        return Promise.reject(
+          new DOMException(
+            `Pbkdf2 failed: iteration counts above 100000 are not supported (requested ${algorithm.iterations}).`,
+            'NotSupportedError',
+          ),
+        );
+      }
+
+      return originalDeriveBits(algorithm, baseKey, length);
+    });
+
+    try {
+      const { bucket } = createMemoryBucket();
+      const response = await handleGenerateModelRequest(
+        new Request('https://worker.example/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: 'worker-compatible@example.com',
+            password: 'password123',
+            name: 'Compatible User',
+          }),
+        }),
+        createEnv({ MODEL_BUCKET: bucket }),
+        { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') },
+      );
+
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({
+        user: {
+          email: 'worker-compatible@example.com',
+          name: 'Compatible User',
+          role: 'user',
+          status: 'pending',
+        },
+      });
+    } finally {
+      deriveBitsSpy.mockRestore();
+    }
+  });
+
   it('keeps new user accounts pending until the admin approves them and allows removal', async () => {
     const { bucket } = createMemoryBucket();
     const env = createEnv({ MODEL_BUCKET: bucket });
