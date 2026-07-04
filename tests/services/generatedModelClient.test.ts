@@ -3,10 +3,14 @@ import {
   extractImageFor3D,
   deleteGeneratedModel,
   generateModelFromImage,
+  listAdminJobs,
   listGeneratedModels,
   renameGeneratedModel,
+  retryAdminJob,
   startGeneratedModelJob,
   storeUploadedModel,
+  toggleGeneratedModelVisibility,
+  cleanupFailedJobArtifacts,
   updateGeneratedModelThumbnail,
 } from '../../src/services/generatedModelClient';
 
@@ -31,6 +35,7 @@ describe('extractImageFor3D', () => {
       imageBase64: 'abc123',
       imageMimeType: 'image/png',
       targetObject: ' laptop ',
+      authToken: 'signed-token',
       fetchImpl,
     });
 
@@ -38,7 +43,7 @@ describe('extractImageFor3D', () => {
       'https://worker.example/extract-image',
       expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer signed-token' },
         body: JSON.stringify({
           image_base64: 'abc123',
           image_mime_type: 'image/png',
@@ -169,6 +174,8 @@ describe('listGeneratedModels', () => {
               model_url: 'https://assets.example/generated.glb',
               object_key: 'models/generated/capture.glb',
               preview_url: 'https://assets.example/previews/capture.png',
+              owner_email: 'maker@example.com',
+              visibility: 'private',
             },
           ],
         }),
@@ -191,8 +198,29 @@ describe('listGeneratedModels', () => {
         label: '2026-06-28 12:00:00 UTC',
         url: 'https://assets.example/generated.glb',
         previewUrl: 'https://assets.example/previews/capture.png',
+        ownerEmail: 'maker@example.com',
+        visibility: 'private',
       },
     ]);
+  });
+
+  it('sends the bearer token when listing models for a signed-in user', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await listGeneratedModels({
+      apiUrl: 'https://worker.example/generate-3d',
+      authToken: 'signed-token',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith('https://worker.example/generate-3d/models', {
+      headers: { Authorization: 'Bearer signed-token' },
+    });
   });
 
   it('sends the bearer token when starting a protected Worker job', async () => {
@@ -360,6 +388,123 @@ describe('renameGeneratedModel', () => {
         fetchImpl: vi.fn(),
       }),
     ).rejects.toThrow('Enter a model name before renaming.');
+  });
+});
+
+describe('toggleGeneratedModelVisibility', () => {
+  it('updates a generated model visibility state', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'fc-123',
+          label: 'Living room chair',
+          model_url: 'https://assets.example/generated-chair.glb',
+          object_key: 'models/generated/generated-chair.glb',
+          visibility: 'public',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const model = await toggleGeneratedModelVisibility({
+      apiUrl: 'https://worker.example/generate-3d',
+      modelId: 'generated-fc-123',
+      visibility: 'public',
+      authToken: 'signed-token',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/generate-3d/models/fc-123',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer signed-token' },
+        body: JSON.stringify({ visibility: 'public' }),
+      }),
+    );
+    expect(model.visibility).toBe('public');
+  });
+});
+
+describe('admin job operations', () => {
+  it('lists jobs, retries a job, and requests failed-artifact cleanup', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            jobs: [
+              {
+                id: 'fc-123',
+                label: 'Chair',
+                status: 'failed',
+                error: 'Modal exploded',
+                owner_email: 'maker@example.com',
+                created_at: '2026-07-04T12:00:00.000Z',
+                updated_at: '2026-07-04T12:05:00.000Z',
+                bytes: 4096,
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'fc-123', status: 'running' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ cleaned: 2 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    await expect(
+      listAdminJobs({ apiUrl: 'https://worker.example/generate-3d', authToken: 'admin-token', fetchImpl }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: 'fc-123',
+        status: 'failed',
+        error: 'Modal exploded',
+        ownerEmail: 'maker@example.com',
+        bytes: 4096,
+      }),
+    ]);
+    await expect(
+      retryAdminJob({
+        apiUrl: 'https://worker.example/generate-3d',
+        jobId: 'fc-123',
+        authToken: 'admin-token',
+        fetchImpl,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ id: 'fc-123', status: 'running' }));
+    await expect(
+      cleanupFailedJobArtifacts({
+        apiUrl: 'https://worker.example/generate-3d',
+        authToken: 'admin-token',
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ cleaned: 2 });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, 'https://worker.example/generate-3d/jobs', {
+      headers: { Authorization: 'Bearer admin-token' },
+    });
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'https://worker.example/generate-3d/jobs/fc-123/retry',
+      expect.objectContaining({ method: 'POST', headers: { Authorization: 'Bearer admin-token' } }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      3,
+      'https://worker.example/generate-3d/jobs/cleanup',
+      expect.objectContaining({ method: 'POST', headers: { Authorization: 'Bearer admin-token' } }),
+    );
   });
 });
 

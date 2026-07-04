@@ -102,6 +102,21 @@ export async function getCurrentUser({ apiUrl, token, fetchImpl = fetch }: Token
   return body.user;
 }
 
+export async function logout({ apiUrl, token, fetchImpl = fetch }: TokenInput): Promise<void> {
+  if (!token) {
+    return;
+  }
+
+  const response = await fetchImpl(`${authBaseUrl(apiUrl)}/logout`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const body = (await response.json()) as { error?: string };
+  if (!response.ok) {
+    throw new Error(body.error ?? `Logout failed with HTTP ${response.status}.`);
+  }
+}
+
 export async function listAccounts({ apiUrl, token, fetchImpl = fetch }: TokenInput): Promise<AuthUser[]> {
   const response = await fetchImpl(`${authBaseUrl(apiUrl)}/users`, {
     headers: { Authorization: `Bearer ${token}` },

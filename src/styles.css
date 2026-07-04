@@ -549,6 +549,53 @@ canvas {
   margin: 0 auto;
 }
 
+.model-library-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, auto);
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.ar-model-picker .model-library-controls {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  margin-bottom: 16px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(2, 7, 11, 0.74);
+  backdrop-filter: blur(14px);
+}
+
+.model-library-search,
+.model-library-filter {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.model-library-search input,
+.model-library-filter select {
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.model-library-search input::placeholder {
+  color: rgba(255, 255, 255, 0.44);
+}
+
 .ar-model-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
@@ -648,7 +695,7 @@ canvas {
   position: fixed;
   inset: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   padding: clamp(22px, 5vw, 64px) 24px max(56px, env(safe-area-inset-bottom));
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -669,6 +716,7 @@ canvas {
   gap: clamp(24px, 5vw, 72px);
   align-items: center;
   width: min(1180px, 100%);
+  margin: auto;
 }
 
 .landing-copy {
@@ -983,7 +1031,9 @@ canvas {
 
 .auth-actions button,
 .auth-form-actions button,
-.admin-account-actions button {
+.admin-account-actions button,
+.admin-dashboard-section-header button,
+.admin-job-actions button {
   min-height: 42px;
   border: 1px solid rgba(15, 118, 110, 0.2);
   border-radius: 8px;
@@ -998,12 +1048,14 @@ canvas {
 
 .auth-actions button.primary,
 .auth-form-actions button.primary,
-.admin-account-actions button.primary {
+.admin-account-actions button.primary,
+.admin-job-actions button.primary {
   color: #031b18;
   background: #5eead4;
 }
 
-.admin-account-actions button.danger {
+.admin-account-actions button.danger,
+.admin-job-actions button.danger {
   border-color: rgba(248, 113, 113, 0.52);
   color: #fee2e2;
   background: rgba(127, 29, 29, 0.44);
@@ -1055,6 +1107,10 @@ canvas {
   color: #fecaca;
 }
 
+.admin-job-message.is-error {
+  color: #fecaca;
+}
+
 .auth-panel label {
   display: grid;
   gap: 6px;
@@ -1080,12 +1136,41 @@ canvas {
   gap: 10px;
 }
 
-.admin-account-list {
+.admin-dashboard-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.admin-dashboard-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-dashboard-section-header h3 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 17px;
+  letter-spacing: 0;
+}
+
+.admin-dashboard-actions,
+.admin-account-list,
+.admin-job-list {
   display: grid;
   gap: 10px;
 }
 
-.admin-account-row {
+.admin-dashboard-actions {
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+}
+
+.admin-account-row,
+.admin-job-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
@@ -1101,11 +1186,21 @@ canvas {
   border-color: rgba(251, 191, 36, 0.38);
 }
 
-.admin-account-details {
+.admin-job-row.is-failed {
+  border-color: rgba(248, 113, 113, 0.44);
+}
+
+.admin-job-row.is-running {
+  border-color: rgba(94, 234, 212, 0.36);
+}
+
+.admin-account-details,
+.admin-job-details {
   min-width: 0;
 }
 
-.admin-account-email {
+.admin-account-email,
+.admin-job-title {
   margin: 0;
   color: #ffffff;
   font-size: 15px;
@@ -1113,7 +1208,9 @@ canvas {
   overflow-wrap: anywhere;
 }
 
-.admin-account-meta {
+.admin-account-meta,
+.admin-job-meta,
+.admin-job-error {
   margin: 5px 0 0;
   color: rgba(255, 255, 255, 0.68);
   font-size: 12px;
@@ -1121,11 +1218,30 @@ canvas {
   overflow-wrap: anywhere;
 }
 
-.admin-account-actions {
+.admin-job-error {
+  color: #fecaca;
+}
+
+.admin-account-actions,
+.admin-job-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.admin-job-actions a {
+  display: inline-grid;
+  align-items: center;
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
 }
 
 .model-manager {
@@ -1166,6 +1282,19 @@ canvas {
 .model-manager-list {
   display: grid;
   gap: 10px;
+}
+
+.model-manager-empty,
+.ar-model-empty {
+  margin: 0;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 18px;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 14px;
+  font-weight: 750;
+  text-align: center;
 }
 
 .model-manager-row {
@@ -1229,15 +1358,55 @@ canvas {
   font-weight: 800;
 }
 
+.model-manager-badge.visibility-private {
+  border-color: rgba(248, 113, 113, 0.38);
+  color: #fee2e2;
+  background: rgba(127, 29, 29, 0.38);
+}
+
+.model-manager-badge.visibility-public {
+  border-color: rgba(134, 239, 172, 0.4);
+  color: #052e16;
+  background: #86efac;
+}
+
 .model-manager-row.is-generated .model-manager-badge {
   color: #031b18;
   background: #5eead4;
+}
+
+.model-manager-row.is-generated .model-manager-badge.visibility-private {
+  color: #fee2e2;
+  background: rgba(127, 29, 29, 0.38);
+}
+
+.model-manager-row.is-generated .model-manager-badge.visibility-public {
+  color: #052e16;
+  background: #86efac;
 }
 
 .model-manager-row.is-uploaded .model-manager-badge {
   border-color: rgba(251, 191, 36, 0.42);
   color: #221402;
   background: #fbbf24;
+}
+
+.model-manager-row.is-uploaded .model-manager-badge.visibility-private {
+  color: #fee2e2;
+  background: rgba(127, 29, 29, 0.38);
+}
+
+.model-manager-row.is-uploaded .model-manager-badge.visibility-public {
+  color: #052e16;
+  background: #86efac;
+}
+
+.model-manager-owner {
+  width: fit-content;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
 }
 
 .model-manager-name {
@@ -1514,6 +1683,10 @@ canvas {
 
   .mode-action button {
     min-height: 50px;
+  }
+
+  .model-library-controls {
+    grid-template-columns: 1fr;
   }
 
   .model-rail {

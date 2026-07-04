@@ -6,6 +6,7 @@ import {
   listAccounts,
   loadAuthToken,
   login,
+  logout,
   removeAccount,
   saveAuthToken,
   signup,
@@ -116,6 +117,29 @@ describe('authClient', () => {
       }),
     );
     expect(user).toEqual({ email: 'maker@example.com', role: 'user', status: 'active' });
+  });
+
+  it('logs out through the Worker so the session can be revoked server-side', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await logout({
+      apiUrl: 'https://worker.example/generate-3d',
+      token: 'signed-token',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/auth/logout',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { Authorization: 'Bearer signed-token' },
+      }),
+    );
   });
 
   it('lists, approves, and removes accounts through admin endpoints', async () => {

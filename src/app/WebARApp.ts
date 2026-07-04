@@ -1,11 +1,8 @@
-import * as THREE from 'three';
-import { GestureController } from '../interaction/GestureController';
-import { ObjectTransformController } from '../interaction/ObjectTransformController';
-import {
-  classifyPlacementGesture,
-  rotationDeltaFromVerticalDrag,
-  type PlacementGestureZone,
-} from '../interaction/PlacementGestureZone';
+import type * as Three from 'three';
+import type { GestureController } from '../interaction/GestureController';
+import type { ObjectTransformController } from '../interaction/ObjectTransformController';
+import type { HitTestManager } from '../xr/HitTestManager';
+import type { PlaneTrackingManager } from '../xr/PlaneTrackingManager';
 import { MODEL_OPTIONS, type ModelOption } from './models';
 import {
   captureVideoFrame,
@@ -15,17 +12,19 @@ import {
   type CapturedImage,
 } from '../capture/cameraCapture';
 import { compressThumbnailImage } from '../capture/thumbnailCompression';
-import { createScene, type SceneContext } from '../scene/createScene';
-import { loadGLBModel } from '../scene/loadModel';
-import { ModelPreviewViewer } from '../scene/ModelPreviewViewer';
+import type { ModelPreviewViewer } from '../scene/ModelPreviewViewer';
 import {
+  cleanupFailedJobArtifacts as cleanupFailedJobArtifactsRequest,
   extractImageFor3D,
   deleteGeneratedModel as deleteGeneratedModelRequest,
   generateModelFromImage,
   listGeneratedModels,
+  listAdminJobs as listAdminJobsRequest,
   renameGeneratedModel as renameGeneratedModelRequest,
+  retryAdminJob as retryAdminJobRequest,
   startGeneratedModelJob,
   storeUploadedModel as storeUploadedModelRequest,
+  toggleGeneratedModelVisibility as toggleGeneratedModelVisibilityRequest,
   updateGeneratedModelThumbnail as updateGeneratedModelThumbnailRequest,
   type GenerationPipeline,
 } from '../services/generatedModelClient';
@@ -36,6 +35,7 @@ import {
   listAccounts,
   loadAuthToken,
   login as loginRequest,
+  logout as logoutRequest,
   removeAccount as removeAccountRequest,
   saveAuthToken,
   signup as signupRequest,
@@ -43,22 +43,19 @@ import {
 } from '../services/authClient';
 import { AppState } from '../state/AppState';
 import { ARHud } from '../ui/ARHud';
-import { screenPointToFloorPoint, type Point2 } from '../utils/math';
-import { HitTestManager } from '../xr/HitTestManager';
-import { PlaneTrackingManager } from '../xr/PlaneTrackingManager';
-import { checkXRSupport } from '../xr/XRSupport';
-import { createARSessionButton } from '../xr/XRSessionManager';
 import { getGenerateModelApiUrl } from './config';
+import type { ARRuntime, PlacementGestureZone, Point2, SceneContext } from './arRuntime';
 
 export class WebARApp {
+  private arRuntime: ARRuntime | null = null;
   private sceneContext: SceneContext | null = null;
   private hud: ARHud | null = null;
   private gestureController: GestureController | null = null;
   private hitTestManager: HitTestManager | null = null;
   private planeTrackingManager: PlaneTrackingManager | null = null;
   private readonly appState = new AppState();
-  private readonly transformController = new ObjectTransformController();
-  private readonly clock = new THREE.Clock();
+  private transformController: ObjectTransformController | null = null;
+  private clock: Three.Clock | null = null;
   private cameraStream: MediaStream | null = null;
   private capturedImage: CapturedImage | null = null;
   private capturedImageGenerationPipeline: GenerationPipeline = 'openai-to-3d';
@@ -78,18 +75,13 @@ export class WebARApp {
   constructor(private readonly root: HTMLElement) {}
 
   async start(): Promise<void> {
-    const sceneContext = createScene(this.root);
-    this.sceneContext = sceneContext;
-    this.hitTestManager = new HitTestManager(sceneContext.reticle);
-    this.planeTrackingManager = new PlaneTrackingManager(sceneContext.floorGrid);
-
     this.hud = new ARHud(this.root, MODEL_OPTIONS, {
       onPlace: () => this.placeAtLatestHit(),
       onEdit: () => this.setEditing(),
       onReset: () => this.resetObject(),
       onResetScale: () => this.resetScale(),
-      onRotateLeft: () => this.rotateBy(-THREE.MathUtils.degToRad(15)),
-      onRotateRight: () => this.rotateBy(THREE.MathUtils.degToRad(15)),
+      onRotateLeft: () => this.rotateBy(-Math.PI / 12),
+      onRotateRight: () => this.rotateBy(Math.PI / 12),
       onModelSelect: (modelId) => void this.loadSelectedModel(modelId),
       onStartCamera: () => void this.startCamera(),
       onCaptureImage: () => void this.captureImage(),
@@ -101,6 +93,7 @@ export class WebARApp {
       onStoreUploadedModel: () => void this.storeUploadedModel(),
       onRenameGeneratedModel: (modelId, label) => void this.renameGeneratedModel(modelId, label),
       onDeleteGeneratedModel: (modelId) => void this.deleteGeneratedModel(modelId),
+      onToggleGeneratedModelVisibility: (modelId, visibility) => void this.toggleGeneratedModelVisibility(modelId, visibility),
       onDeleteUploadedModel: (modelId) => this.deleteUploadedModel(modelId),
       onPreviewModel: (modelId) => void this.previewModel(modelId),
       onCloseModelPreview: () => this.closeModelPreview(),
@@ -112,6 +105,9 @@ export class WebARApp {
       onApproveAccount: (email) => void this.approveAccount(email),
       onRemoveAccount: (email) => void this.removeAccount(email),
       onRefreshAdminAccounts: () => void this.refreshAdminAccounts(),
+      onRefreshAdminJobs: () => void this.refreshAdminJobs(),
+      onRetryAdminJob: (jobId) => void this.retryAdminJob(jobId),
+      onCleanupFailedJobArtifacts: () => void this.cleanupFailedJobArtifacts(),
     });
     this.hud.updateModelSource('Cloudflare only');
     this.authToken = loadAuthToken();
@@ -125,22 +121,6 @@ export class WebARApp {
     window.addEventListener('focus', () => {
       void this.refreshGeneratedModels();
     });
-
-    this.gestureController = new GestureController(this.hud.gestureSurface, {
-      onTap: (point) => this.handleTap(point),
-      onDrag: (point, startPoint) => this.handleDrag(point, startPoint),
-      onPinch: (multiplier) => this.handlePinch(multiplier),
-      onGestureEnd: () => this.resetPlacementDrag(),
-    });
-    this.gestureController.connect();
-
-    await this.configureXR(sceneContext);
-
-    const controller = sceneContext.renderer.xr.getController(0);
-    controller.addEventListener('select', () => this.placeAtLatestHit());
-    sceneContext.scene.add(controller);
-
-    sceneContext.renderer.setAnimationLoop((time, frame) => this.render(time, frame));
   }
 
   private async restoreSession(): Promise<void> {
@@ -152,14 +132,15 @@ export class WebARApp {
     try {
       const user = await getCurrentUser({ apiUrl, token: this.authToken });
       if (!user) {
-        this.logout();
+        void this.logout();
         return;
       }
       this.currentUser = user;
       this.hud?.updateAuthState(user);
+      await this.refreshGeneratedModels();
     } catch (error) {
       console.warn('Could not restore auth session.', error);
-      this.logout();
+      void this.logout();
     }
   }
 
@@ -178,6 +159,7 @@ export class WebARApp {
       saveAuthToken(session.token);
       this.hud?.updateAuthState(session.user);
       this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
+      void this.refreshGeneratedModels();
       window.location.hash = '#/';
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed.';
@@ -200,6 +182,7 @@ export class WebARApp {
       saveAuthToken(session.token);
       this.hud?.updateAuthState(session.user);
       this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
+      void this.refreshGeneratedModels();
       window.location.hash = '#/';
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Account creation failed.';
@@ -207,11 +190,19 @@ export class WebARApp {
     }
   }
 
-  private logout(): void {
+  private async logout(): Promise<void> {
+    const token = this.authToken;
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    if (token) {
+      await logoutRequest({ apiUrl, token }).catch((error) => {
+        console.warn('Could not revoke auth session.', error);
+      });
+    }
     this.authToken = null;
     this.currentUser = null;
     clearAuthToken();
     this.hud?.updateAuthState(null);
+    void this.refreshGeneratedModels();
     window.location.hash = '#/';
   }
 
@@ -226,6 +217,52 @@ export class WebARApp {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not load accounts.';
       this.hud?.showAuthMessage(message, true);
+    }
+  }
+
+  private async refreshAdminJobs(): Promise<void> {
+    if (!this.authToken || this.currentUser?.role !== 'admin') {
+      return;
+    }
+
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    try {
+      this.hud?.updateAdminJobs(await listAdminJobsRequest({ apiUrl, authToken: this.authToken }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load jobs.';
+      this.hud?.showAdminJobMessage(message, true);
+    }
+  }
+
+  private async retryAdminJob(jobId: string): Promise<void> {
+    if (!this.authToken || this.currentUser?.role !== 'admin') {
+      return;
+    }
+
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    try {
+      await retryAdminJobRequest({ apiUrl, jobId, authToken: this.authToken });
+      await this.refreshAdminJobs();
+      this.hud?.showAdminJobMessage(`Retry queued for ${jobId}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not retry job.';
+      this.hud?.showAdminJobMessage(message, true);
+    }
+  }
+
+  private async cleanupFailedJobArtifacts(): Promise<void> {
+    if (!this.authToken || this.currentUser?.role !== 'admin') {
+      return;
+    }
+
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    try {
+      const result = await cleanupFailedJobArtifactsRequest({ apiUrl, authToken: this.authToken });
+      await this.refreshAdminJobs();
+      this.hud?.showAdminJobMessage(`Cleaned ${result.cleaned} orphaned preview${result.cleaned === 1 ? '' : 's'}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not clean failed previews.';
+      this.hud?.showAdminJobMessage(message, true);
     }
   }
 
@@ -269,6 +306,42 @@ export class WebARApp {
     return null;
   }
 
+  private async ensureARRuntime(): Promise<ARRuntime> {
+    if (this.arRuntime && this.sceneContext && this.transformController && this.clock) {
+      return this.arRuntime;
+    }
+
+    const { arRuntime } = await import('./arRuntime');
+    this.arRuntime = arRuntime;
+
+    if (!this.sceneContext) {
+      const sceneContext = arRuntime.createScene(this.root);
+      this.sceneContext = sceneContext;
+      this.hitTestManager = new arRuntime.HitTestManager(sceneContext.reticle);
+      this.planeTrackingManager = new arRuntime.PlaneTrackingManager(sceneContext.floorGrid);
+      this.transformController = new arRuntime.ObjectTransformController();
+      this.clock = new arRuntime.THREE.Clock();
+
+      const hud = this.requireHud();
+      this.gestureController = new arRuntime.GestureController(hud.gestureSurface, {
+        onTap: (point) => this.handleTap(point),
+        onDrag: (point, startPoint) => this.handleDrag(point, startPoint),
+        onPinch: (multiplier) => this.handlePinch(multiplier),
+        onGestureEnd: () => this.resetPlacementDrag(),
+      });
+      this.gestureController.connect();
+
+      await this.configureXR(sceneContext);
+
+      const controller = sceneContext.renderer.xr.getController(0);
+      controller.addEventListener('select', () => this.placeAtLatestHit());
+      sceneContext.scene.add(controller);
+      sceneContext.renderer.setAnimationLoop((time, frame) => this.render(time, frame));
+    }
+
+    return arRuntime;
+  }
+
   private async loadSelectedModel(modelId: string): Promise<void> {
     const modelOption = this.availableModels.find((model) => model.id === modelId);
     if (!modelOption) {
@@ -295,7 +368,9 @@ export class WebARApp {
       selectedModelId?: string;
     },
   ): Promise<void> {
+    await this.ensureARRuntime();
     const sceneContext = this.requireScene();
+    const transformController = this.requireTransformController();
     const wasPlaced = this.appState.mode === 'placed' || this.appState.mode === 'editing';
     this.appState.modelLoaded = false;
     this.hud?.updateModelReady(false);
@@ -306,10 +381,11 @@ export class WebARApp {
     this.hud?.update(this.appState.mode, options.loadingMessage);
 
     try {
+      const { loadGLBModel } = await import('../scene/loadModel');
       const model = await loadGLBModel(modelUrl);
       this.removeLoadedModels(sceneContext.modelRoot);
       sceneContext.modelRoot.add(model);
-      this.transformController.setTarget(sceneContext.modelRoot);
+      transformController.setTarget(sceneContext.modelRoot);
       this.appState.modelLoaded = true;
       this.hud?.updateModelReady(true);
       if (!wasPlaced) {
@@ -498,7 +574,7 @@ export class WebARApp {
     const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
 
     try {
-      const generatedModels = await listGeneratedModels({ apiUrl });
+      const generatedModels = await listGeneratedModels({ apiUrl, authToken: this.authToken });
       this.generatedModelOptions = generatedModels;
       this.syncAvailableModels();
     } catch (error) {
@@ -581,7 +657,10 @@ export class WebARApp {
     }
 
     this.hud?.showModelPreviewLoading(modelOption.label);
-    this.modelPreviewViewer ??= new ModelPreviewViewer(previewViewport);
+    if (!this.modelPreviewViewer) {
+      const { ModelPreviewViewer: ModelPreviewViewerCtor } = await import('../scene/ModelPreviewViewer');
+      this.modelPreviewViewer = new ModelPreviewViewerCtor(previewViewport);
+    }
 
     try {
       await this.modelPreviewViewer.preview(modelOption);
@@ -652,6 +731,25 @@ export class WebARApp {
     }
   }
 
+  private async toggleGeneratedModelVisibility(modelId: string, visibility: 'public' | 'private'): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to change model visibility.');
+    if (!authToken) {
+      return;
+    }
+
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    this.hud?.updateModelManagerStatus('Updating visibility...');
+
+    try {
+      await toggleGeneratedModelVisibilityRequest({ apiUrl, modelId, visibility, authToken });
+      await this.refreshGeneratedModels();
+      this.hud?.updateModelManagerStatus(visibility === 'public' ? 'Model is public.' : 'Model is private.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not update visibility.';
+      this.hud?.updateModelManagerStatus(`Visibility update failed: ${message}`);
+    }
+  }
+
   private async updateModelThumbnail(modelId: string, file: File): Promise<void> {
     const authToken = this.requireAuthToken('Sign in to update thumbnails.');
     if (!authToken) {
@@ -703,7 +801,7 @@ export class WebARApp {
     }
   }
 
-  private removeLoadedModels(root: THREE.Group): void {
+  private removeLoadedModels(root: Three.Group): void {
     root.children
       .filter((child) => child.name === 'loaded-glb-model')
       .forEach((model) => {
@@ -712,7 +810,8 @@ export class WebARApp {
       });
   }
 
-  private disposeModel(root: THREE.Object3D): void {
+  private disposeModel(root: Three.Object3D): void {
+    const { THREE } = this.requireARRuntime();
     root.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();
@@ -723,7 +822,8 @@ export class WebARApp {
   }
 
   private async configureXR(sceneContext: SceneContext): Promise<void> {
-    const support = await checkXRSupport();
+    const runtime = this.requireARRuntime();
+    const support = await runtime.checkXRSupport();
 
     if (!support.supportsImmersiveAR) {
       this.appState.setMode('unsupported');
@@ -736,7 +836,7 @@ export class WebARApp {
       throw new Error('HUD overlay has not been created.');
     }
 
-    const button = createARSessionButton(sceneContext.renderer, overlay);
+    const button = runtime.createARSessionButton(sceneContext.renderer, overlay);
     this.hud?.attachARButton(button);
 
     sceneContext.renderer.xr.addEventListener('sessionstart', () => {
@@ -761,12 +861,14 @@ export class WebARApp {
 
   private render(_time: number, frame?: XRFrame): void {
     const sceneContext = this.requireScene();
+    const transformController = this.requireTransformController();
+    const clock = this.requireClock();
     const session = sceneContext.renderer.xr.getSession();
     const referenceSpace = sceneContext.renderer.xr.getReferenceSpace();
 
     if (frame && session && referenceSpace) {
       const hasFloorHit = this.hitTestManager?.update(frame, session, referenceSpace) ?? false;
-      const floorY = this.transformController.floorY ?? this.hitTestManager?.latestPoint?.y ?? null;
+      const floorY = transformController.floorY ?? this.hitTestManager?.latestPoint?.y ?? null;
       this.planeTrackingManager?.update(frame, referenceSpace, floorY);
 
       if (this.appState.mode === 'scanning' && hasFloorHit) {
@@ -779,7 +881,7 @@ export class WebARApp {
       this.lastHudMode = this.appState.mode;
     }
 
-    this.clock.getDelta();
+    clock.getDelta();
     sceneContext.renderer.render(sceneContext.scene, sceneContext.camera);
   }
 
@@ -796,6 +898,8 @@ export class WebARApp {
     }
 
     const sceneContext = this.requireScene();
+    const runtime = this.requireARRuntime();
+    const transformController = this.requireTransformController();
     const dragMode = this.getPlacementDragMode(startPoint, sceneContext);
     if (dragMode === 'none') {
       return;
@@ -803,23 +907,23 @@ export class WebARApp {
 
     if (dragMode === 'rotate') {
       const previousPoint = this.lastPlacementDragPoint ?? startPoint;
-      this.transformController.rotateBy(rotationDeltaFromVerticalDrag(previousPoint, point));
+      transformController.rotateBy(runtime.rotationDeltaFromVerticalDrag(previousPoint, point));
       this.lastPlacementDragPoint = point;
       this.appState.setMode('editing');
       return;
     }
 
-    const floorY = this.transformController.floorY;
+    const floorY = transformController.floorY;
     if (floorY === null) {
       return;
     }
 
-    const floorPoint = screenPointToFloorPoint(point, sceneContext.renderer.domElement, sceneContext.camera, floorY);
+    const floorPoint = runtime.screenPointToFloorPoint(point, sceneContext.renderer.domElement, sceneContext.camera, floorY);
     if (!floorPoint) {
       return;
     }
 
-    this.transformController.moveToFloorPoint(floorPoint);
+    transformController.moveToFloorPoint(floorPoint);
     this.lastPlacementDragPoint = point;
     this.appState.setMode('editing');
   }
@@ -829,7 +933,7 @@ export class WebARApp {
       return;
     }
 
-    this.transformController.scaleBy(multiplier);
+    this.requireTransformController().scaleBy(multiplier);
     this.appState.setMode('editing');
   }
 
@@ -844,7 +948,7 @@ export class WebARApp {
 
     const placementMatrix = this.hitTestManager?.latestPoseMatrix ?? this.createEstimatedPlacementMatrix();
 
-    this.transformController.placeAt(placementMatrix);
+    this.requireTransformController().placeAt(placementMatrix);
     this.appState.floorLocked = true;
     this.appState.setMode('placed');
     this.planeTrackingManager?.hide();
@@ -856,7 +960,7 @@ export class WebARApp {
       const bounds = this.getProjectedPlacementMarkerBounds(sceneContext);
       this.placementDragStart = startPoint;
       this.lastPlacementDragPoint = startPoint;
-      this.placementDragMode = bounds ? classifyPlacementGesture(startPoint, bounds) : 'none';
+      this.placementDragMode = bounds ? this.requireARRuntime().classifyPlacementGesture(startPoint, bounds) : 'none';
     }
 
     return this.placementDragMode ?? 'none';
@@ -873,6 +977,7 @@ export class WebARApp {
       return null;
     }
 
+    const { THREE } = this.requireARRuntime();
     const centerWorld = new THREE.Vector3();
     sceneContext.placementMarker.getWorldPosition(centerWorld);
     const radiusWorld = sceneContext.placementMarker.localToWorld(new THREE.Vector3(0.24, 0, 0));
@@ -885,7 +990,7 @@ export class WebARApp {
     };
   }
 
-  private worldToScreenPoint(worldPoint: THREE.Vector3, camera: THREE.Camera, rect: DOMRect): Point2 {
+  private worldToScreenPoint(worldPoint: Three.Vector3, camera: Three.Camera, rect: DOMRect): Point2 {
     const projected = worldPoint.clone().project(camera);
     return {
       x: rect.left + ((projected.x + 1) / 2) * rect.width,
@@ -899,8 +1004,9 @@ export class WebARApp {
     this.lastPlacementDragPoint = null;
   }
 
-  private createEstimatedPlacementMatrix(): THREE.Matrix4 {
+  private createEstimatedPlacementMatrix(): Three.Matrix4 {
     const sceneContext = this.requireScene();
+    const { THREE } = this.requireARRuntime();
     const camera = sceneContext.camera;
     const cameraPosition = new THREE.Vector3();
     const cameraDirection = new THREE.Vector3();
@@ -936,23 +1042,24 @@ export class WebARApp {
     }
 
     const latestMatrix = this.hitTestManager?.latestPoseMatrix;
+    const transformController = this.requireTransformController();
     if (latestMatrix) {
-      this.transformController.placeAt(latestMatrix);
+      transformController.placeAt(latestMatrix);
     } else {
-      this.transformController.resetTransform();
+      transformController.resetTransform();
     }
     this.appState.setMode('placed');
     this.hud?.update(this.appState.mode);
   }
 
   private resetScale(): void {
-    this.transformController.resetScale();
+    this.requireTransformController().resetScale();
     this.appState.setMode('editing');
     this.hud?.update(this.appState.mode);
   }
 
   private rotateBy(deltaRadians: number): void {
-    this.transformController.rotateBy(deltaRadians);
+    this.requireTransformController().rotateBy(deltaRadians);
     this.appState.setMode('editing');
     this.hud?.update(this.appState.mode);
   }
@@ -963,6 +1070,38 @@ export class WebARApp {
     }
 
     return this.sceneContext;
+  }
+
+  private requireHud(): ARHud {
+    if (!this.hud) {
+      throw new Error('HUD has not been created.');
+    }
+
+    return this.hud;
+  }
+
+  private requireARRuntime(): ARRuntime {
+    if (!this.arRuntime) {
+      throw new Error('AR runtime has not been loaded.');
+    }
+
+    return this.arRuntime;
+  }
+
+  private requireTransformController(): ObjectTransformController {
+    if (!this.transformController) {
+      throw new Error('Transform controller has not been created.');
+    }
+
+    return this.transformController;
+  }
+
+  private requireClock(): Three.Clock {
+    if (!this.clock) {
+      throw new Error('Render clock has not been created.');
+    }
+
+    return this.clock;
   }
 }
 

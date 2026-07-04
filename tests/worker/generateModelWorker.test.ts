@@ -104,6 +104,49 @@ function withAuth(request: Request, token: string): Request {
   return new Request(request, { headers });
 }
 
+async function createApprovedUserToken(
+  env: WorkerEnv,
+  deps: { fetch: typeof fetch; now: () => Date },
+  adminToken: string,
+  email = 'maker@example.com',
+): Promise<string> {
+  await handleGenerateModelRequest(
+    new Request('https://worker.example/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: 'maker-password-123', name: 'Maker' }),
+    }),
+    env,
+    deps,
+  );
+  await handleGenerateModelRequest(
+    new Request(`https://worker.example/auth/users/${encodeURIComponent(email)}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ status: 'active' }),
+    }),
+    env,
+    deps,
+  );
+  const loginResponse = await handleGenerateModelRequest(
+    new Request('https://worker.example/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: 'maker-password-123' }),
+    }),
+    env,
+    deps,
+  );
+  const loginBody = (await loginResponse.json()) as { token?: string };
+  if (!loginBody.token) {
+    throw new Error('Approved user token was not returned.');
+  }
+  return loginBody.token;
+}
+
 describe('handleGenerateModelRequest', () => {
   it('creates the requested admin account as active and returns a reusable session', async () => {
     const { bucket } = createMemoryBucket();
@@ -849,6 +892,8 @@ describe('handleGenerateModelRequest', () => {
       object_key: objectKey,
       completed_at: '2026-07-04T12:00:00.000Z',
       bytes: 4,
+      owner_email: 'sshibinthomass@gmail.com',
+      visibility: 'private',
       source: 'uploaded',
     });
     expect(JSON.parse(storedObjects.get('models/generated/index.json') as string)).toEqual({
@@ -860,6 +905,8 @@ describe('handleGenerateModelRequest', () => {
           object_key: objectKey,
           completed_at: '2026-07-04T12:00:00.000Z',
           bytes: 4,
+          owner_email: 'sshibinthomass@gmail.com',
+          visibility: 'private',
           source: 'uploaded',
         },
       ],
@@ -1175,5 +1222,290 @@ describe('handleGenerateModelRequest', () => {
 
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: 'Modal job start failed: Modal exploded' });
+  });
+
+  it('filters model listing by public visibility, owner, and admin access', async () => {
+    const { bucket } = createMemoryBucket({
+      'models/generated/index.json': JSON.stringify({
+        models: [
+          {
+            id: 'public-chair',
+            label: 'Public chair',
+            model_url: 'https://assets.example/public-chair.glb',
+            object_key: 'models/generated/public-chair.glb',
+            completed_at: '2026-07-04T12:00:00.000Z',
+            bytes: 4,
+            owner_email: 'maker@example.com',
+            visibility: 'public',
+          },
+          {
+            id: 'private-chair',
+            label: 'Private chair',
+            model_url: 'https://assets.example/private-chair.glb',
+            object_key: 'models/generated/private-chair.glb',
+            completed_at: '2026-07-04T12:01:00.000Z',
+            bytes: 4,
+            owner_email: 'maker@example.com',
+            visibility: 'private',
+          },
+          {
+            id: 'other-private-table',
+            label: 'Other private table',
+            model_url: 'https://assets.example/other-private-table.glb',
+            object_key: 'models/generated/other-private-table.glb',
+            completed_at: '2026-07-04T12:02:00.000Z',
+            bytes: 4,
+            owner_email: 'other@example.com',
+            visibility: 'private',
+          },
+        ],
+      }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const guestResponse = await handleGenerateModelRequest(new Request('https://worker.example/generate-3d/models'), env, deps);
+    const ownerResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/models'), ownerToken),
+      env,
+      deps,
+    );
+    const adminResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/models'), adminToken),
+      env,
+      deps,
+    );
+
+    expect(((await guestResponse.json()) as { models: Array<{ id: string }> }).models.map((model) => model.id)).toEqual([
+      'public-chair',
+    ]);
+    expect(((await ownerResponse.json()) as { models: Array<{ id: string }> }).models.map((model) => model.id)).toEqual([
+      'private-chair',
+      'public-chair',
+    ]);
+    expect(((await adminResponse.json()) as { models: Array<{ id: string }> }).models.map((model) => model.id)).toEqual([
+      'other-private-table',
+      'private-chair',
+      'public-chair',
+    ]);
+  });
+
+  it('allows only owners or admins to update generated model metadata', async () => {
+    const { bucket } = createMemoryBucket({
+      'models/generated/index.json': JSON.stringify({
+        models: [
+          {
+            id: 'private-chair',
+            label: 'Private chair',
+            model_url: 'https://assets.example/private-chair.glb',
+            object_key: 'models/generated/private-chair.glb',
+            completed_at: '2026-07-04T12:01:00.000Z',
+            bytes: 4,
+            owner_email: 'maker@example.com',
+            visibility: 'private',
+          },
+        ],
+      }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    const otherToken = await createApprovedUserToken(env, deps, adminToken, 'other@example.com');
+
+    const otherResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/models/private-chair', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: 'Nope' }),
+      }), otherToken),
+      env,
+      deps,
+    );
+    const ownerResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/models/private-chair', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visibility: 'public' }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+    const adminResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/models/private-chair', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: 'Admin renamed chair' }),
+      }), adminToken),
+      env,
+      deps,
+    );
+
+    expect(otherResponse.status).toBe(403);
+    expect(await otherResponse.json()).toEqual({ error: 'Only the owner or an admin can manage this model.' });
+    expect(ownerResponse.status).toBe(200);
+    expect(await ownerResponse.json()).toMatchObject({ id: 'private-chair', visibility: 'public' });
+    expect(adminResponse.status).toBe(200);
+    expect(await adminResponse.json()).toMatchObject({ id: 'private-chair', label: 'Admin renamed chair' });
+  });
+
+  it('stores owner and private visibility metadata when starting jobs and uploading GLBs', async () => {
+    const { bucket, objects } = createMemoryBucket({
+      'models/generated/index.json': JSON.stringify({ models: [] }),
+      'models/generated/jobs/index.json': JSON.stringify({ pending: [] }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = {
+      fetch: vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ call_id: 'fc-owned' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+      now: () => new Date('2026-07-04T12:00:00Z'),
+    };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const jobResponse = await handleGenerateModelRequest(
+      withAuth(jsonRequest({ image_base64: 'aW1hZ2U=', image_mime_type: 'image/png' }), ownerToken),
+      env,
+      deps,
+    );
+    const uploadResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/models/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_name: 'chair.glb', model_base64: 'Z2xURg==' }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+
+    expect(jobResponse.status).toBe(202);
+    expect(JSON.parse(objects.get('models/generated/jobs/fc-owned.json') as string)).toMatchObject({
+      owner_email: 'maker@example.com',
+      visibility: 'private',
+    });
+    expect(uploadResponse.status).toBe(201);
+    expect(await uploadResponse.json()).toMatchObject({
+      owner_email: 'maker@example.com',
+      visibility: 'private',
+    });
+  });
+
+  it('exposes an admin job dashboard, retry, and failed-preview cleanup', async () => {
+    const { bucket, objects } = createMemoryBucket({
+      'models/generated/jobs/history.json': JSON.stringify({ jobs: ['failed-job'] }),
+      'models/generated/jobs/index.json': JSON.stringify({ pending: [] }),
+      'models/generated/jobs/failed-job.json': JSON.stringify({
+        id: 'failed-job',
+        label: 'Failed chair',
+        status: 'failed',
+        error: 'Modal exploded',
+        created_at: '2026-07-04T12:00:00.000Z',
+        updated_at: '2026-07-04T12:05:00.000Z',
+        failed_at: '2026-07-04T12:05:00.000Z',
+        owner_email: 'maker@example.com',
+        preview_url: 'https://assets.example/preview.png',
+        preview_object_key: 'models/generated/previews/failed-job.png',
+      }),
+      'models/generated/previews/failed-job.png': new Uint8Array([1, 2, 3]).buffer,
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-04T12:10:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+
+    const listResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/jobs'), adminToken),
+      env,
+      deps,
+    );
+    const retryResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/jobs/failed-job/retry', { method: 'POST' }), adminToken),
+      env,
+      deps,
+    );
+    const cleanupResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/jobs/cleanup', { method: 'POST' }), adminToken),
+      env,
+      deps,
+    );
+
+    expect(listResponse.status).toBe(200);
+    expect(await listResponse.json()).toEqual({
+      jobs: [
+        expect.objectContaining({
+          id: 'failed-job',
+          status: 'failed',
+          error: 'Modal exploded',
+          owner_email: 'maker@example.com',
+        }),
+      ],
+    });
+    expect(retryResponse.status).toBe(200);
+    expect(await retryResponse.json()).toMatchObject({ id: 'failed-job', status: 'running' });
+    expect(JSON.parse(objects.get('models/generated/jobs/index.json') as string)).toEqual({ pending: ['failed-job'] });
+    expect(cleanupResponse.status).toBe(200);
+    expect(await cleanupResponse.json()).toEqual({ cleaned: 1 });
+    expect(objects.has('models/generated/previews/failed-job.png')).toBe(false);
+  });
+
+  it('revokes a session token after logout', async () => {
+    const env = createEnv();
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') };
+    const token = await createAdminToken(env, deps);
+
+    const logoutResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/logout', { method: 'POST' }), token),
+      env,
+      deps,
+    );
+    const sessionResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/session'), token),
+      env,
+      deps,
+    );
+
+    expect(logoutResponse.status).toBe(200);
+    expect(await logoutResponse.json()).toEqual({ ok: true });
+    expect(sessionResponse.status).toBe(401);
+  });
+
+  it('rate-limits repeated invalid login attempts', async () => {
+    const env = createEnv();
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') };
+
+    let response = new Response(null);
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      response = await handleGenerateModelRequest(
+        new Request('https://worker.example/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: 'missing@example.com', password: 'bad-password' }),
+        }),
+        env,
+        deps,
+      );
+    }
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({ error: 'Too many login attempts. Try again later.' });
+  });
+
+  it('uses the configured allowed CORS origin instead of a wildcard', async () => {
+    const env = createEnv({ ALLOWED_ORIGINS: 'https://sshibinthomass.github.io,http://127.0.0.1:5173' });
+    const response = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/models', {
+        headers: { Origin: 'https://sshibinthomass.github.io' },
+      }),
+      env,
+      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') },
+    );
+
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://sshibinthomass.github.io');
+    expect(response.headers.get('Vary')).toBe('Origin');
   });
 });

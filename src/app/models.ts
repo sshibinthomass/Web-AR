@@ -4,7 +4,14 @@ export type ModelOption = {
   url: string;
   previewUrl?: string;
   source?: 'uploaded';
+  ownerEmail?: string;
+  visibility?: ModelVisibility;
+  bytes?: number;
+  createdAt?: string;
+  updatedAt?: string;
 };
+
+export type ModelVisibility = 'public' | 'private';
 
 const CLOUDFLARE_ASSET_ORIGIN = 'https://web-ar-model-assets.pages.dev';
 

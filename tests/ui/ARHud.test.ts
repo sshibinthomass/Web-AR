@@ -33,6 +33,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onStoreUploadedModel: vi.fn(),
     onRenameGeneratedModel: vi.fn(),
     onDeleteGeneratedModel: vi.fn(),
+    onToggleGeneratedModelVisibility: vi.fn(),
     onDeleteUploadedModel: vi.fn(),
     onPreviewModel: vi.fn(),
     onCloseModelPreview: vi.fn(),
@@ -44,6 +45,9 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onApproveAccount: vi.fn(),
     onRemoveAccount: vi.fn(),
     onRefreshAdminAccounts: vi.fn(),
+    onRefreshAdminJobs: vi.fn(),
+    onRetryAdminJob: vi.fn(),
+    onCleanupFailedJobArtifacts: vi.fn(),
     ...overrides,
   };
 }
@@ -342,6 +346,8 @@ describe('ARHud', () => {
         label: 'chair - 2026-07-04 12:00:00 UTC',
         url: 'https://assets.example/generated-chair.glb',
         previewUrl: 'https://assets.example/previews/generated-chair.png',
+        ownerEmail: 'maker@example.com',
+        visibility: 'private',
       },
     ]);
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
@@ -361,11 +367,120 @@ describe('ARHud', () => {
     );
     expect([...root.querySelectorAll('.model-manager-row.is-generated button')].map((button) => button.textContent)).toEqual([
       'Preview',
+      'Favorite',
+    ]);
+    expect(root.textContent).toContain('Private');
+    expect(root.textContent).not.toContain('No image');
+    expect(root.textContent).toContain('Built-in');
+  });
+
+  it('lets owners manage their models while guests only preview and favorite them', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-owned-chair',
+        label: 'Chair',
+        url: 'https://assets.example/chair.glb',
+        ownerEmail: 'maker@example.com',
+        visibility: 'private',
+      },
+      {
+        id: 'generated-other-table',
+        label: 'Table',
+        url: 'https://assets.example/table.glb',
+        ownerEmail: 'other@example.com',
+        visibility: 'private',
+      },
+    ]);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
+
+    const guestGeneratedRows = [...root.querySelectorAll('.model-manager-row.is-generated')];
+    expect(guestGeneratedRows.map((row) => [...row.querySelectorAll('button')].map((button) => button.textContent))).toEqual([
+      ['Preview', 'Favorite'],
+      ['Preview', 'Favorite'],
+    ]);
+
+    hud.updateAuthState(activeUser);
+
+    const ownerRow = root.querySelector<HTMLElement>('.model-manager-row[data-model-id="generated-owned-chair"]')!;
+    const otherRow = root.querySelector<HTMLElement>('.model-manager-row[data-model-id="generated-other-table"]')!;
+
+    expect([...ownerRow.querySelectorAll('button')].map((button) => button.textContent)).toEqual([
+      'Preview',
+      'Favorite',
+      'Make public',
       'Thumbnail',
       'Rename',
       'Delete',
     ]);
-    expect(root.textContent).toContain('Built-in');
+    expect([...otherRow.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Preview', 'Favorite']);
+  });
+
+  it('searches, filters, favorites, and recenters the model library and AR picker', () => {
+    localStorage.clear();
+    const root = document.createElement('div');
+    const onModelSelect = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onModelSelect }));
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-chair',
+        label: 'Yellow chair',
+        url: 'https://assets.example/chair.glb',
+        visibility: 'public',
+      },
+      {
+        id: 'generated-laptop',
+        label: 'Laptop stand',
+        url: 'https://assets.example/laptop.glb',
+        visibility: 'public',
+      },
+    ]);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
+    const searchInput = root.querySelector<HTMLInputElement>('input[name="modelSearch"]')!;
+    const filterSelect = root.querySelector<HTMLSelectElement>('select[name="modelFilter"]')!;
+
+    searchInput.value = 'chair';
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    expect([...root.querySelectorAll<HTMLElement>('.model-manager-row')].map((row) => row.dataset.modelId)).toEqual([
+      'generated-chair',
+    ]);
+
+    root.querySelector<HTMLButtonElement>('.model-manager-row[data-model-id="generated-chair"] button[data-action="favorite"]')?.click();
+    searchInput.value = '';
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    filterSelect.value = 'favorites';
+    filterSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect([...root.querySelectorAll<HTMLElement>('.model-manager-row')].map((row) => row.dataset.modelId)).toEqual([
+      'generated-chair',
+    ]);
+
+    filterSelect.value = 'all';
+    filterSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+    const arSearchInput = root.querySelector<HTMLInputElement>('input[name="arModelSearch"]')!;
+    arSearchInput.value = 'laptop';
+    arSearchInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    expect([...root.querySelectorAll<HTMLElement>('.ar-model-card')].map((card) => card.dataset.modelId)).toEqual([
+      'generated-laptop',
+    ]);
+
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="generated-laptop"]')?.click();
+    expect(onModelSelect).toHaveBeenCalledWith('generated-laptop');
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
+    const recentFilter = root.querySelector<HTMLSelectElement>('select[name="modelFilter"]')!;
+    recentFilter.value = 'recent';
+    recentFilter.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect([...root.querySelectorAll<HTMLElement>('.model-manager-row')].map((row) => row.dataset.modelId)).toEqual([
+      'generated-laptop',
+    ]);
   });
 
   it('opens a non-AR 3D preview when a model row is clicked', () => {
@@ -405,12 +520,16 @@ describe('ARHud', () => {
         label: 'chair - 2026-07-04 12:00:00 UTC',
         url: 'https://assets.example/generated-chair.glb',
         previewUrl: 'https://assets.example/previews/generated-chair.png',
+        ownerEmail: 'maker@example.com',
+        visibility: 'private',
       },
       {
         id: 'generated-upload-123-chair',
         label: 'chair',
         url: 'https://assets.example/uploaded-chair.glb',
         source: 'uploaded',
+        ownerEmail: 'maker@example.com',
+        visibility: 'private',
       },
     ]);
 
@@ -449,15 +568,15 @@ describe('ARHud', () => {
     expect(uploadedRow.textContent).toContain('Uploaded');
     expect(uploadedRow.textContent).toContain('chair');
     expect(uploadedRow.querySelector('.model-manager-thumbnail')?.textContent).toBe('GLB');
-    expect([...uploadedRow.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Preview', 'Thumbnail', 'Delete']);
-    [...uploadedRow.querySelectorAll('button')].find((button) => button.textContent === 'Delete')?.click();
-    expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-upload-123-chair');
+    expect([...uploadedRow.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Preview', 'Favorite']);
+    expect(onDeleteGeneratedModel).not.toHaveBeenCalled();
   });
 
   it('uploads a replacement thumbnail from the model manager', () => {
     const root = document.createElement('div');
     const onUpdateModelThumbnail = vi.fn();
     const hud = new ARHud(root, modelOptions, createHandlers({ onUpdateModelThumbnail }));
+    hud.updateAuthState(activeUser);
 
     hud.updateGeneratedModels([
       {
@@ -465,6 +584,8 @@ describe('ARHud', () => {
         label: 'chair - 2026-07-04 12:00:00 UTC',
         url: 'https://assets.example/generated-chair.glb',
         previewUrl: 'https://assets.example/previews/generated-chair.png',
+        ownerEmail: activeUser.email,
+        visibility: 'private',
       },
     ]);
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
@@ -484,6 +605,7 @@ describe('ARHud', () => {
     const onRenameGeneratedModel = vi.fn();
     const onDeleteGeneratedModel = vi.fn();
     const hud = new ARHud(root, modelOptions, createHandlers({ onRenameGeneratedModel, onDeleteGeneratedModel }));
+    hud.updateAuthState(activeUser);
 
     hud.updateGeneratedModels([
       {
@@ -491,6 +613,8 @@ describe('ARHud', () => {
         label: 'chair - 2026-07-04 12:00:00 UTC',
         url: 'https://assets.example/generated-chair.glb',
         previewUrl: 'https://assets.example/previews/generated-chair.png',
+        ownerEmail: activeUser.email,
+        visibility: 'private',
       },
     ]);
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
@@ -634,7 +758,7 @@ describe('ARHud', () => {
     });
 
     expect(window.location.hash).toBe('#/ar');
-    expect(root.querySelector<HTMLSelectElement>('select')?.value).toBe('full-flow-generated-object');
+    expect(root.querySelector<HTMLSelectElement>('.model-picker select')?.value).toBe('full-flow-generated-object');
     expect(root.querySelector('.model-rail-item.is-selected')?.textContent).toContain('Generated object');
     expect(startArCamera).not.toHaveBeenCalled();
   });

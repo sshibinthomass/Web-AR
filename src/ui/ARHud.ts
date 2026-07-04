@@ -1,6 +1,7 @@
 import type { AppMode } from '../state/AppState';
-import type { ModelOption } from '../app/models';
+import type { ModelOption, ModelVisibility } from '../app/models';
 import type { AuthUser } from '../services/authClient';
+import type { AdminJobEntry } from '../services/generatedModelClient';
 
 interface HUDHandlers {
   onPlace(): void;
@@ -20,6 +21,7 @@ interface HUDHandlers {
   onStoreUploadedModel(): void;
   onRenameGeneratedModel(modelId: string, label: string): void;
   onDeleteGeneratedModel(modelId: string): void;
+  onToggleGeneratedModelVisibility(modelId: string, visibility: ModelVisibility): void;
   onDeleteUploadedModel(modelId: string): void;
   onPreviewModel(modelId: string): void;
   onCloseModelPreview(): void;
@@ -31,9 +33,13 @@ interface HUDHandlers {
   onApproveAccount(email: string): void;
   onRemoveAccount(email: string): void;
   onRefreshAdminAccounts(): void;
+  onRefreshAdminJobs(): void;
+  onRetryAdminJob(jobId: string): void;
+  onCleanupFailedJobArtifacts(): void;
 }
 
 type HudRoute = 'home' | 'camera' | 'upload' | 'upload-model' | 'ar' | 'full-flow' | 'models' | 'login' | 'admin';
+type ModelLibraryFilter = 'all' | 'generated' | 'uploaded' | 'favorites' | 'recent';
 
 export class ARHud {
   readonly overlay: HTMLElement;
@@ -56,7 +62,9 @@ export class ARHud {
   private readonly authNameInput: HTMLInputElement;
   private readonly adminDashboard: HTMLElement;
   private readonly adminAccountList: HTMLElement;
+  private readonly adminJobList: HTMLElement;
   private readonly adminDashboardMessage: HTMLElement;
+  private readonly adminJobMessage: HTMLElement;
   private readonly statusPanel: HTMLElement;
   private readonly hudActions: HTMLElement;
   private readonly statusMessage: HTMLElement;
@@ -64,12 +72,16 @@ export class ARHud {
   private readonly cameraPanel: HTMLElement;
   private readonly fullFlowLoading: HTMLElement;
   private readonly modelManager: HTMLElement;
+  private readonly modelSearchInput: HTMLInputElement;
+  private readonly modelFilterSelect: HTMLSelectElement;
   private readonly modelList: HTMLElement;
   private readonly modelPreview: HTMLElement;
   private readonly modelPreviewTitle: HTMLElement;
   private readonly modelPreviewStatus: HTMLElement;
   private readonly modelRail: HTMLElement;
   private readonly arModelPicker: HTMLElement;
+  private readonly arModelSearchInput: HTMLInputElement;
+  private readonly arModelFilterSelect: HTMLSelectElement;
   private readonly arModelList: HTMLElement;
   private readonly arPlaceButton: HTMLButtonElement;
   private readonly modelManagerMessage: HTMLElement;
@@ -96,11 +108,18 @@ export class ARHud {
   private generatedModelOptions: ModelOption[] = [];
   private uploadedModelOptions: ModelOption[] = [];
   private fullFlowModelOption: ModelOption | null = null;
+  private modelSearchQuery = '';
+  private modelFilter: ModelLibraryFilter = 'all';
+  private favoriteModelIds = new Set<string>();
+  private recentModelIds: string[] = [];
   private arPlacementStarted = false;
   private modelReady = false;
   private activeRoute: HudRoute | null = null;
   private currentUser: AuthUser | null = null;
   private adminAccounts: AuthUser[] = [];
+  private adminJobs: AdminJobEntry[] = [];
+  private readonly favoriteStorageKey = 'web-ar-model-favorites';
+  private readonly recentStorageKey = 'web-ar-model-recents';
 
   constructor(
     root: HTMLElement,
@@ -108,6 +127,8 @@ export class ARHud {
     private readonly handlers: HUDHandlers,
   ) {
     this.baseModelOptions = [...modelOptions];
+    this.favoriteModelIds = new Set(this.readStoredModelIds(this.favoriteStorageKey));
+    this.recentModelIds = this.readStoredModelIds(this.recentStorageKey);
     const shell = document.createElement('div');
     shell.className = 'app-shell';
     root.appendChild(shell);
@@ -225,15 +246,44 @@ export class ARHud {
         <button class="page-back" type="button">Back</button>
         <div class="admin-dashboard-header">
           <h2>Admin</h2>
-          <p>Approve pending accounts or remove users.</p>
+          <p>Approve accounts and watch background generation jobs.</p>
         </div>
-        <div class="admin-account-list"></div>
+        <section class="admin-dashboard-section">
+          <div class="admin-dashboard-section-header">
+            <h3>Accounts</h3>
+            <button class="admin-refresh-accounts" type="button">Refresh</button>
+          </div>
+          <div class="admin-account-list"></div>
+        </section>
+        <section class="admin-dashboard-section">
+          <div class="admin-dashboard-section-header">
+            <h3>Jobs</h3>
+            <div class="admin-dashboard-actions">
+              <button class="admin-refresh-jobs" type="button">Refresh</button>
+              <button class="admin-cleanup-jobs" type="button">Cleanup</button>
+            </div>
+          </div>
+          <div class="admin-job-list"></div>
+          <p class="admin-job-message">Jobs load from Cloudflare storage.</p>
+        </section>
         <p class="admin-dashboard-message">Accounts load from Cloudflare storage.</p>
       </div>
     `;
     this.adminDashboard.querySelector<HTMLButtonElement>('.page-back')?.addEventListener('click', () => this.navigateTo('home'));
+    this.adminDashboard.querySelector<HTMLButtonElement>('.admin-refresh-accounts')?.addEventListener('click', () => {
+      this.handlers.onRefreshAdminAccounts();
+    });
+    this.adminDashboard.querySelector<HTMLButtonElement>('.admin-refresh-jobs')?.addEventListener('click', () => {
+      this.handlers.onRefreshAdminJobs();
+    });
+    this.adminDashboard.querySelector<HTMLButtonElement>('.admin-cleanup-jobs')?.addEventListener('click', () => {
+      this.adminJobMessage.textContent = 'Cleaning failed previews...';
+      this.handlers.onCleanupFailedJobArtifacts();
+    });
     this.adminAccountList = this.adminDashboard.querySelector<HTMLElement>('.admin-account-list')!;
+    this.adminJobList = this.adminDashboard.querySelector<HTMLElement>('.admin-job-list')!;
     this.adminDashboardMessage = this.adminDashboard.querySelector<HTMLElement>('.admin-dashboard-message')!;
+    this.adminJobMessage = this.adminDashboard.querySelector<HTMLElement>('.admin-job-message')!;
     shell.appendChild(this.adminDashboard);
 
     this.modelManager = document.createElement('section');
@@ -248,12 +298,21 @@ export class ARHud {
     const modelManagerDescription = document.createElement('p');
     modelManagerDescription.textContent = 'Manage generated models and uploaded GLBs from the dropdown.';
     modelManagerHeader.append(modelManagerTitle, modelManagerDescription);
+    const modelManagerControls = this.createModelLibraryControls('modelSearch', 'modelFilter');
+    this.modelSearchInput = modelManagerControls.searchInput;
+    this.modelFilterSelect = modelManagerControls.filterSelect;
     this.modelList = document.createElement('div');
     this.modelList.className = 'model-manager-list';
     this.modelManagerMessage = document.createElement('p');
     this.modelManagerMessage.className = 'model-manager-message';
     this.modelManagerMessage.textContent = 'Generated models are saved in Cloudflare storage.';
-    modelManagerInner.append(modelManagerBackButton, modelManagerHeader, this.modelList, this.modelManagerMessage);
+    modelManagerInner.append(
+      modelManagerBackButton,
+      modelManagerHeader,
+      modelManagerControls.root,
+      this.modelList,
+      this.modelManagerMessage,
+    );
     this.modelManager.appendChild(modelManagerInner);
     this.modelPreview = document.createElement('section');
     this.modelPreview.className = 'model-preview hidden';
@@ -317,6 +376,7 @@ export class ARHud {
     });
     this.modelSelect.addEventListener('change', () => {
       if (this.modelSelect.value) {
+        this.markModelRecent(this.modelSelect.value);
         this.handlers.onModelSelect(this.modelSelect.value);
       }
     });
@@ -395,6 +455,9 @@ export class ARHud {
     this.arModelPicker.className = 'ar-model-picker hidden';
     const arModelPickerInner = document.createElement('div');
     arModelPickerInner.className = 'ar-model-picker-inner';
+    const arModelControls = this.createModelLibraryControls('arModelSearch', 'arModelFilter');
+    this.arModelSearchInput = arModelControls.searchInput;
+    this.arModelFilterSelect = arModelControls.filterSelect;
     this.arModelList = document.createElement('div');
     this.arModelList.className = 'ar-model-grid';
     const arModelPlaceBar = document.createElement('div');
@@ -402,7 +465,7 @@ export class ARHud {
     this.arPlaceButton = this.createButton('Select a model', 'ar-model-place-button primary', () => this.openSelectedModelInAR());
     this.arPlaceButton.disabled = true;
     arModelPlaceBar.appendChild(this.arPlaceButton);
-    arModelPickerInner.append(this.arModelList, arModelPlaceBar);
+    arModelPickerInner.append(arModelControls.root, this.arModelList, arModelPlaceBar);
     this.arModelPicker.appendChild(arModelPickerInner);
     this.overlay.appendChild(this.arModelPicker);
 
@@ -461,6 +524,16 @@ export class ARHud {
     this.renderAdminAccounts();
   }
 
+  updateAdminJobs(jobs: AdminJobEntry[]): void {
+    this.adminJobs = [...jobs];
+    this.renderAdminJobs();
+  }
+
+  showAdminJobMessage(message: string, isError = false): void {
+    this.adminJobMessage.textContent = message;
+    this.adminJobMessage.classList.toggle('is-error', isError);
+  }
+
   update(mode: AppMode, customMessage?: string): void {
     this.statusMessage.textContent = customMessage ?? this.messageForMode(mode);
 
@@ -482,6 +555,7 @@ export class ARHud {
 
   updateSelectedModel(modelId: string): void {
     this.modelSelect.value = modelId;
+    this.markModelRecent(modelId);
     this.updateModelRailSelection(modelId);
     this.updateARModelPickerSelection(modelId);
     this.updateARPlaceButton();
@@ -1068,7 +1142,9 @@ export class ARHud {
     this.cameraPanel.classList.remove('fullscreen');
     this.fullFlowLoading.classList.add('hidden');
     this.renderAdminAccounts();
+    this.renderAdminJobs();
     this.handlers.onRefreshAdminAccounts();
+    this.handlers.onRefreshAdminJobs();
   }
 
   private handleCaptureClick(): void {
@@ -1132,13 +1208,105 @@ export class ARHud {
     return [...models, this.fullFlowModelOption];
   }
 
+  private filteredModelOptions(models: ModelOption[]): ModelOption[] {
+    const query = this.modelSearchQuery;
+    return models.filter((model) => {
+      const modelKind = this.modelKind(model);
+      const matchesQuery =
+        !query ||
+        model.label.toLowerCase().includes(query) ||
+        model.ownerEmail?.toLowerCase().includes(query) ||
+        this.modelBadgeText(modelKind).toLowerCase().includes(query);
+      if (!matchesQuery) {
+        return false;
+      }
+
+      switch (this.modelFilter) {
+        case 'generated':
+          return modelKind === 'generated';
+        case 'uploaded':
+          return modelKind === 'uploaded';
+        case 'favorites':
+          return this.favoriteModelIds.has(model.id);
+        case 'recent':
+          return this.recentModelIds.includes(model.id);
+        case 'all':
+          return true;
+      }
+    });
+  }
+
+  private setModelSearchQuery(value: string): void {
+    this.modelSearchQuery = value.trim().toLowerCase();
+    this.syncModelLibraryControls();
+    this.renderModelManagerList();
+    this.renderARModelPicker();
+  }
+
+  private setModelFilter(value: string): void {
+    this.modelFilter = this.isModelLibraryFilter(value) ? value : 'all';
+    this.syncModelLibraryControls();
+    this.renderModelManagerList();
+    this.renderARModelPicker();
+  }
+
+  private syncModelLibraryControls(): void {
+    [this.modelSearchInput, this.arModelSearchInput].forEach((input) => {
+      if (input.value !== this.modelSearchQuery) {
+        input.value = this.modelSearchQuery;
+      }
+    });
+    [this.modelFilterSelect, this.arModelFilterSelect].forEach((select) => {
+      if (select.value !== this.modelFilter) {
+        select.value = this.modelFilter;
+      }
+    });
+  }
+
+  private isModelLibraryFilter(value: string): value is ModelLibraryFilter {
+    return ['all', 'generated', 'uploaded', 'favorites', 'recent'].includes(value);
+  }
+
+  private canManageModel(model: ModelOption): boolean {
+    if (!this.currentUser) {
+      return false;
+    }
+    if (this.currentUser.role === 'admin') {
+      return model.id.startsWith('generated-') || model.id.startsWith('uploaded-');
+    }
+    if (model.ownerEmail) {
+      return model.ownerEmail === this.currentUser.email;
+    }
+    return model.id.startsWith('uploaded-');
+  }
+
+  private ownerLabel(ownerEmail: string): string {
+    if (this.currentUser?.email === ownerEmail) {
+      return 'Owned by you';
+    }
+    if (this.currentUser?.role === 'admin') {
+      return ownerEmail;
+    }
+    return 'Owned';
+  }
+
   private renderModelManagerList(): void {
     this.modelList.replaceChildren();
-    this.allModelOptions().forEach((model) => {
+    const models = this.filteredModelOptions(this.allModelOptions());
+    if (models.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'model-manager-empty';
+      empty.textContent = 'No models match this view.';
+      this.modelList.appendChild(empty);
+      return;
+    }
+
+    models.forEach((model) => {
       const modelKind = this.modelKind(model);
       const isGenerated = modelKind === 'generated';
       const isUploaded = modelKind === 'uploaded';
       const canUpdateThumbnail = model.id.startsWith('generated-');
+      const canManageModel = this.canManageModel(model);
       const row = document.createElement('article');
       row.className = `model-manager-row has-preview${isGenerated ? ' is-generated' : ''}${isUploaded ? ' is-uploaded' : ''}`;
       row.dataset.modelId = model.id;
@@ -1171,7 +1339,21 @@ export class ARHud {
       badge.textContent = this.modelBadgeText(modelKind);
       details.appendChild(badge);
 
-      if (isGenerated) {
+      if (model.visibility) {
+        const visibility = document.createElement('span');
+        visibility.className = `model-manager-badge visibility-${model.visibility}`;
+        visibility.textContent = model.visibility === 'public' ? 'Public' : 'Private';
+        details.appendChild(visibility);
+      }
+
+      if (model.ownerEmail) {
+        const owner = document.createElement('span');
+        owner.className = 'model-manager-owner';
+        owner.textContent = this.ownerLabel(model.ownerEmail);
+        details.appendChild(owner);
+      }
+
+      if (isGenerated && canManageModel) {
         const input = document.createElement('input');
         input.name = 'modelLabel';
         input.type = 'text';
@@ -1191,7 +1373,16 @@ export class ARHud {
       const actions = document.createElement('div');
       actions.className = 'model-manager-actions';
       actions.append(this.createButton('Preview', '', () => this.handlers.onPreviewModel(model.id)));
-      if (canUpdateThumbnail) {
+      actions.append(this.createFavoriteButton(model));
+      if (canManageModel && model.id.startsWith('generated-') && (isGenerated || isUploaded)) {
+        const nextVisibility: ModelVisibility = model.visibility === 'public' ? 'private' : 'public';
+        actions.append(
+          this.createButton(model.visibility === 'public' ? 'Make private' : 'Make public', '', () => {
+            this.handlers.onToggleGeneratedModelVisibility(model.id, nextVisibility);
+          }),
+        );
+      }
+      if (canManageModel && canUpdateThumbnail) {
         const thumbnailInput = document.createElement('input');
         thumbnailInput.type = 'file';
         thumbnailInput.accept = 'image/*';
@@ -1205,14 +1396,14 @@ export class ARHud {
           }),
         );
       }
-      if (isGenerated) {
+      if (canManageModel && isGenerated) {
         const renameButton = this.createButton('Rename', '', () => {
           const input = row.querySelector<HTMLInputElement>('input[name="modelLabel"]');
           this.handleModelRename(model.id, input?.value ?? '');
         });
         actions.append(renameButton);
       }
-      if (isGenerated || isUploaded) {
+      if (canManageModel && (isGenerated || isUploaded)) {
         const deleteButton = this.createButton('Delete', 'danger', () => {
           if (isUploaded && model.id.startsWith('uploaded-')) {
             this.handlers.onDeleteUploadedModel(model.id);
@@ -1234,6 +1425,7 @@ export class ARHud {
       this.loginButton.classList.remove('hidden');
       this.logoutButton.classList.add('hidden');
       this.adminButton.classList.add('hidden');
+      this.renderModelManagerList();
       return;
     }
 
@@ -1241,6 +1433,7 @@ export class ARHud {
     this.loginButton.classList.add('hidden');
     this.logoutButton.classList.remove('hidden');
     this.adminButton.classList.toggle('hidden', this.currentUser.role !== 'admin');
+    this.renderModelManagerList();
   }
 
   private renderAdminAccounts(): void {
@@ -1277,6 +1470,68 @@ export class ARHud {
 
       row.append(details, actions);
       this.adminAccountList.appendChild(row);
+    });
+  }
+
+  private renderAdminJobs(): void {
+    this.adminJobList.replaceChildren();
+    if (this.adminJobs.length === 0) {
+      this.adminJobMessage.textContent = 'No jobs loaded yet.';
+      this.adminJobMessage.classList.remove('is-error');
+      return;
+    }
+
+    this.adminJobMessage.textContent = 'Job changes are stored in Cloudflare storage.';
+    this.adminJobMessage.classList.remove('is-error');
+    this.adminJobs.forEach((job) => {
+      const row = document.createElement('article');
+      row.className = `admin-job-row is-${job.status}`;
+
+      const details = document.createElement('div');
+      details.className = 'admin-job-details';
+      const title = document.createElement('p');
+      title.className = 'admin-job-title';
+      title.textContent = job.label || job.id;
+      const meta = document.createElement('p');
+      meta.className = 'admin-job-meta';
+      const parts = [
+        job.status,
+        job.ownerEmail ? `owner ${job.ownerEmail}` : 'owner unknown',
+        typeof job.bytes === 'number' ? this.formatBytes(job.bytes) : null,
+        job.createdAt ? `created ${this.formatDateTime(job.createdAt)}` : null,
+        job.updatedAt ? `updated ${this.formatDateTime(job.updatedAt)}` : null,
+      ].filter((part): part is string => Boolean(part));
+      meta.textContent = parts.join(' | ');
+      details.append(title, meta);
+
+      if (job.error) {
+        const error = document.createElement('p');
+        error.className = 'admin-job-error';
+        error.textContent = job.error;
+        details.appendChild(error);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'admin-job-actions';
+      if (job.status === 'failed') {
+        actions.append(
+          this.createButton('Retry', 'primary', () => {
+            this.adminJobMessage.textContent = `Retrying ${job.id}...`;
+            this.handlers.onRetryAdminJob(job.id);
+          }),
+        );
+      }
+      if (job.modelUrl) {
+        const link = document.createElement('a');
+        link.href = job.modelUrl;
+        link.target = '_blank';
+        link.rel = 'noreferrer';
+        link.textContent = 'Open GLB';
+        actions.appendChild(link);
+      }
+
+      row.append(details, actions);
+      this.adminJobList.appendChild(row);
     });
   }
 
@@ -1323,7 +1578,17 @@ export class ARHud {
     const selectedModelId = this.modelSelect.value;
     this.arModelList.replaceChildren();
 
-    this.selectableModelOptions().forEach((model) => {
+    const models = this.filteredModelOptions(this.selectableModelOptions());
+    if (models.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'ar-model-empty';
+      empty.textContent = 'No models match this view.';
+      this.arModelList.appendChild(empty);
+      this.updateARPlaceButton();
+      return;
+    }
+
+    models.forEach((model) => {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'ar-model-card';
@@ -1358,6 +1623,7 @@ export class ARHud {
 
   private selectARModelForPlacement(modelId: string): void {
     this.modelSelect.value = modelId;
+    this.markModelRecent(modelId);
     this.updateModelRailSelection(modelId);
     this.updateARModelPickerSelection(modelId);
     this.updateARPlaceButton();
@@ -1414,8 +1680,59 @@ export class ARHud {
     });
   }
 
+  private createFavoriteButton(model: ModelOption): HTMLButtonElement {
+    const isFavorite = this.favoriteModelIds.has(model.id);
+    const button = this.createButton(isFavorite ? 'Unfavorite' : 'Favorite', '', () => {
+      this.toggleFavorite(model.id);
+    });
+    button.dataset.action = 'favorite';
+    button.setAttribute('aria-pressed', isFavorite ? 'true' : 'false');
+    return button;
+  }
+
+  private toggleFavorite(modelId: string): void {
+    if (this.favoriteModelIds.has(modelId)) {
+      this.favoriteModelIds.delete(modelId);
+    } else {
+      this.favoriteModelIds.add(modelId);
+    }
+    this.writeStoredModelIds(this.favoriteStorageKey, [...this.favoriteModelIds]);
+    this.renderModelManagerList();
+    this.renderARModelPicker();
+  }
+
+  private markModelRecent(modelId: string): void {
+    this.recentModelIds = [modelId, ...this.recentModelIds.filter((recentId) => recentId !== modelId)].slice(0, 12);
+    this.writeStoredModelIds(this.recentStorageKey, this.recentModelIds);
+  }
+
+  private readStoredModelIds(key: string): string[] {
+    try {
+      const value = window.localStorage.getItem(key);
+      const parsed = value ? (JSON.parse(value) as unknown) : [];
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private writeStoredModelIds(key: string, modelIds: string[]): void {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(modelIds));
+    } catch {
+      // Local library state is a convenience; storage failure should not block AR usage.
+    }
+  }
+
   private modelRailPlaceholderText(model: ModelOption): string {
-    return this.modelKind(model) === 'uploaded' ? 'GLB' : '3D';
+    switch (this.modelKind(model)) {
+      case 'uploaded':
+        return 'GLB';
+      case 'generated':
+        return 'Gen';
+      case 'built-in':
+        return '3D';
+    }
   }
 
   private createModelThumbnail(model: ModelOption): HTMLElement {
@@ -1432,7 +1749,7 @@ export class ARHud {
     }
 
     const placeholder = document.createElement('span');
-    placeholder.textContent = this.modelKind(model) === 'uploaded' ? 'GLB' : 'No image';
+    placeholder.textContent = this.modelKind(model) === 'uploaded' ? 'GLB' : this.modelKind(model) === 'generated' ? 'Generated' : 'Built-in';
     thumbnail.appendChild(placeholder);
     return thumbnail;
   }
@@ -1518,6 +1835,49 @@ export class ARHud {
     arControl?.click();
   }
 
+  private createModelLibraryControls(
+    searchName: string,
+    filterName: string,
+  ): { root: HTMLElement; searchInput: HTMLInputElement; filterSelect: HTMLSelectElement } {
+    const root = document.createElement('div');
+    root.className = 'model-library-controls';
+
+    const searchLabel = document.createElement('label');
+    searchLabel.className = 'model-library-search';
+    const searchText = document.createElement('span');
+    searchText.textContent = 'Search';
+    const searchInput = document.createElement('input');
+    searchInput.name = searchName;
+    searchInput.type = 'search';
+    searchInput.autocomplete = 'off';
+    searchInput.placeholder = 'Search models';
+    searchInput.value = this.modelSearchQuery;
+    searchInput.addEventListener('input', () => this.setModelSearchQuery(searchInput.value));
+    searchLabel.append(searchText, searchInput);
+
+    const filterLabel = document.createElement('label');
+    filterLabel.className = 'model-library-filter';
+    const filterText = document.createElement('span');
+    filterText.textContent = 'View';
+    const filterSelect = document.createElement('select');
+    filterSelect.name = filterName;
+    [
+      ['all', 'All models'],
+      ['generated', 'Generated'],
+      ['uploaded', 'Uploaded'],
+      ['favorites', 'Favorites'],
+      ['recent', 'Recent'],
+    ].forEach(([value, label]) => {
+      filterSelect.append(new Option(label, value));
+    });
+    filterSelect.value = this.modelFilter;
+    filterSelect.addEventListener('change', () => this.setModelFilter(filterSelect.value));
+    filterLabel.append(filterText, filterSelect);
+
+    root.append(searchLabel, filterLabel);
+    return { root, searchInput, filterSelect };
+  }
+
   private createModeGroup(title: string, description: string, actions: HTMLElement[]): HTMLElement {
     const group = document.createElement('section');
     group.className = 'mode-group';
@@ -1552,6 +1912,29 @@ export class ARHud {
       onClick();
     });
     return button;
+  }
+
+  private formatBytes(bytes: number): string {
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    }
+    if (bytes < 1024 * 1024) {
+      return `${Math.round(bytes / 1024)} KB`;
+    }
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  private formatDateTime(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+    return date.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }
 
   private messageForMode(mode: AppMode): string {

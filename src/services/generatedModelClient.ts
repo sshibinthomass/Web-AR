@@ -1,4 +1,4 @@
-import type { ModelOption } from '../app/models';
+import type { ModelOption, ModelVisibility } from '../app/models';
 import type { CompressedThumbnail } from '../capture/thumbnailCompression';
 
 export interface GenerateModelInput {
@@ -36,6 +36,7 @@ export interface StartGeneratedModelJobResult {
 
 interface ListGeneratedModelsInput {
   apiUrl: string;
+  authToken?: string | null;
   fetchImpl?: typeof fetch;
 }
 
@@ -60,6 +61,24 @@ interface DeleteGeneratedModelInput {
   modelId: string;
   authToken?: string | null;
   fetchImpl?: typeof fetch;
+}
+
+interface ToggleGeneratedModelVisibilityInput {
+  apiUrl: string;
+  modelId: string;
+  visibility: ModelVisibility;
+  authToken?: string | null;
+  fetchImpl?: typeof fetch;
+}
+
+interface AdminJobsInput {
+  apiUrl: string;
+  authToken?: string | null;
+  fetchImpl?: typeof fetch;
+}
+
+interface RetryAdminJobInput extends AdminJobsInput {
+  jobId: string;
 }
 
 interface StoreUploadedModelInput {
@@ -99,10 +118,49 @@ interface WorkerGeneratedModelEntry {
   object_key: string;
   preview_url?: string;
   source?: string;
+  owner_email?: string;
+  visibility?: ModelVisibility;
+  bytes?: number;
+  completed_at?: string;
+  updated_at?: string;
 }
 
 interface WorkerGeneratedModelsResponse {
   models?: WorkerGeneratedModelEntry[];
+}
+
+interface WorkerAdminJobEntry {
+  id: string;
+  label: string;
+  status: 'running' | 'completed' | 'failed';
+  error?: string;
+  owner_email?: string;
+  created_at?: string;
+  updated_at?: string;
+  completed_at?: string;
+  failed_at?: string;
+  bytes?: number;
+  model_url?: string;
+  preview_url?: string;
+}
+
+interface WorkerAdminJobsResponse {
+  jobs?: WorkerAdminJobEntry[];
+}
+
+export interface AdminJobEntry {
+  id: string;
+  label: string;
+  status: 'running' | 'completed' | 'failed';
+  error?: string;
+  ownerEmail?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  completedAt?: string;
+  failedAt?: string;
+  bytes?: number;
+  modelUrl?: string;
+  previewUrl?: string;
 }
 
 export async function startGeneratedModelJob({
@@ -177,13 +235,16 @@ export async function extractImageFor3D({
 
 export async function listGeneratedModels({
   apiUrl,
+  authToken,
   fetchImpl = fetch,
 }: ListGeneratedModelsInput): Promise<ModelOption[]> {
   if (!apiUrl) {
     return [];
   }
 
-  const response = await fetchImpl(`${apiUrl.replace(/\/+$/, '')}/models`);
+  const response = authToken
+    ? await fetchImpl(`${apiUrl.replace(/\/+$/, '')}/models`, { headers: authHeaders(authToken) })
+    : await fetchImpl(`${apiUrl.replace(/\/+$/, '')}/models`);
   const body = (await response.json()) as WorkerGeneratedModelsResponse | WorkerErrorResponse;
   if (!response.ok) {
     throw new Error('error' in body && body.error ? body.error : `Model list failed with HTTP ${response.status}.`);
@@ -193,6 +254,100 @@ export async function listGeneratedModels({
   return (modelList.models ?? [])
     .filter((model: WorkerGeneratedModelEntry) => model.id && model.label && model.model_url)
     .map(mapGeneratedModelEntry);
+}
+
+export async function toggleGeneratedModelVisibility({
+  apiUrl,
+  modelId,
+  visibility,
+  authToken,
+  fetchImpl = fetch,
+}: ToggleGeneratedModelVisibilityInput): Promise<ModelOption> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const response = await fetchImpl(generatedModelItemUrl(apiUrl, modelId), {
+    method: 'PATCH',
+    headers: jsonHeaders(authToken),
+    body: JSON.stringify({ visibility }),
+  });
+  const body = (await response.json()) as WorkerGeneratedModelEntry | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Visibility update failed with HTTP ${response.status}.`);
+  }
+
+  if (!('id' in body) || !body.id || !body.label || !body.model_url) {
+    throw new Error('Worker response did not include the updated model.');
+  }
+
+  return mapGeneratedModelEntry(body);
+}
+
+export async function listAdminJobs({
+  apiUrl,
+  authToken,
+  fetchImpl = fetch,
+}: AdminJobsInput): Promise<AdminJobEntry[]> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const response = await fetchImpl(`${apiUrl.replace(/\/+$/, '')}/jobs`, {
+    headers: authHeaders(authToken),
+  });
+  const body = (await response.json()) as WorkerAdminJobsResponse | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Admin jobs failed with HTTP ${response.status}.`);
+  }
+
+  return ((body as WorkerAdminJobsResponse).jobs ?? []).map(mapAdminJobEntry);
+}
+
+export async function retryAdminJob({
+  apiUrl,
+  jobId,
+  authToken,
+  fetchImpl = fetch,
+}: RetryAdminJobInput): Promise<AdminJobEntry> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const response = await fetchImpl(`${apiUrl.replace(/\/+$/, '')}/jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: 'POST',
+    headers: authHeaders(authToken),
+  });
+  const body = (await response.json()) as WorkerAdminJobEntry | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Job retry failed with HTTP ${response.status}.`);
+  }
+  if (!('id' in body) || !body.id || !body.status) {
+    throw new Error('Worker response did not include the retried job.');
+  }
+
+  return mapAdminJobEntry(body);
+}
+
+export async function cleanupFailedJobArtifacts({
+  apiUrl,
+  authToken,
+  fetchImpl = fetch,
+}: AdminJobsInput): Promise<{ cleaned: number }> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const response = await fetchImpl(`${apiUrl.replace(/\/+$/, '')}/jobs/cleanup`, {
+    method: 'POST',
+    headers: authHeaders(authToken),
+  });
+  const body = (await response.json()) as { cleaned?: number } | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Cleanup failed with HTTP ${response.status}.`);
+  }
+
+  return { cleaned: 'cleaned' in body && typeof body.cleaned === 'number' ? body.cleaned : 0 };
 }
 
 export async function renameGeneratedModel({
@@ -451,7 +606,39 @@ function mapGeneratedModelEntry(model: WorkerGeneratedModelEntry): ModelOption {
   if (model.source === 'uploaded') {
     option.source = 'uploaded';
   }
+  if (model.owner_email) {
+    option.ownerEmail = model.owner_email;
+  }
+  if (model.visibility) {
+    option.visibility = model.visibility;
+  }
+  if (typeof model.bytes === 'number') {
+    option.bytes = model.bytes;
+  }
+  if (model.completed_at) {
+    option.createdAt = model.completed_at;
+  }
+  if (model.updated_at) {
+    option.updatedAt = model.updated_at;
+  }
   return option;
+}
+
+function mapAdminJobEntry(job: WorkerAdminJobEntry): AdminJobEntry {
+  return {
+    id: job.id,
+    label: job.label,
+    status: job.status,
+    ...(job.error ? { error: job.error } : {}),
+    ...(job.owner_email ? { ownerEmail: job.owner_email } : {}),
+    ...(job.created_at ? { createdAt: job.created_at } : {}),
+    ...(job.updated_at ? { updatedAt: job.updated_at } : {}),
+    ...(job.completed_at ? { completedAt: job.completed_at } : {}),
+    ...(job.failed_at ? { failedAt: job.failed_at } : {}),
+    ...(typeof job.bytes === 'number' ? { bytes: job.bytes } : {}),
+    ...(job.model_url ? { modelUrl: job.model_url } : {}),
+    ...(job.preview_url ? { previewUrl: job.preview_url } : {}),
+  };
 }
 
 function generatedModelItemUrl(apiUrl: string, modelId: string): string {

@@ -16,6 +16,7 @@ export interface ModelBucket {
 export interface WorkerEnv {
   AUTH_SECRET: string;
   ADMIN_EMAIL?: string;
+  ALLOWED_ORIGINS?: string;
   MODAL_KEY: string;
   MODAL_SECRET: string;
   MODAL_IMAGE_TO_3D_URL: string;
@@ -60,6 +61,7 @@ interface ModelPatchRequestBody {
   label?: unknown;
   preview_base64?: unknown;
   preview_mime_type?: unknown;
+  visibility?: unknown;
 }
 
 interface AuthRequestBody {
@@ -72,6 +74,7 @@ interface AuthRequestBody {
 type GenerationPipeline = 'trellis' | 'openai-to-3d';
 type AuthRole = 'admin' | 'user';
 type AccountStatus = 'active' | 'pending';
+type ModelVisibility = 'public' | 'private';
 
 interface StoredUser {
   email: string;
@@ -93,6 +96,7 @@ interface UsersIndex {
 interface SessionPayload {
   sub: string;
   role: AuthRole;
+  jti: string;
   iat: number;
   exp: number;
 }
@@ -108,6 +112,8 @@ interface StoredJob {
   error?: string;
   target_object?: string;
   pipeline?: GenerationPipeline;
+  owner_email?: string;
+  visibility?: ModelVisibility;
   model_url?: string;
   object_key?: string;
   preview_url?: string;
@@ -119,6 +125,31 @@ interface JobsIndex {
   pending: string[];
 }
 
+interface JobsHistoryIndex {
+  jobs: string[];
+}
+
+interface RevokedSessionsIndex {
+  revoked: string[];
+}
+
+interface RateLimitEntry {
+  count: number;
+  reset_at: string;
+}
+
+interface AuditLogIndex {
+  events: AuditEvent[];
+}
+
+interface AuditEvent {
+  actor: string;
+  action: string;
+  target?: string;
+  status: string;
+  created_at: string;
+}
+
 interface GeneratedModelEntry {
   id: string;
   label: string;
@@ -128,6 +159,8 @@ interface GeneratedModelEntry {
   preview_object_key?: string;
   completed_at: string;
   bytes: number;
+  owner_email?: string;
+  visibility?: ModelVisibility;
   source?: 'uploaded';
 }
 
@@ -162,9 +195,14 @@ const openAiTo3DModalPayloadDefaults = {
 
 const generatedModelsIndexKey = 'models/generated/index.json';
 const pendingJobsIndexKey = 'models/generated/jobs/index.json';
+const jobHistoryIndexKey = 'models/generated/jobs/history.json';
 const jobKeyPrefix = 'models/generated/jobs/';
 const usersIndexKey = 'auth/users/index.json';
+const revokedSessionsIndexKey = 'auth/sessions/revoked.json';
+const auditLogIndexKey = 'security/audit/events.json';
+const rateLimitKeyPrefix = 'security/rate-limit/';
 const defaultAdminEmail = 'sshibinthomass@gmail.com';
+const defaultAllowedOrigins = ['https://sshibinthomass.github.io', 'http://127.0.0.1:5173', 'http://localhost:5173'];
 const passwordHashIterations = 100_000;
 const sessionLifetimeSeconds = 60 * 60 * 24 * 7;
 
@@ -196,6 +234,15 @@ export async function handleGenerateModelRequest(
   env: WorkerEnv,
   deps: GenerateModelDeps,
 ): Promise<Response> {
+  const response = await routeGenerateModelRequest(request, env, deps);
+  return applyCorsHeaders(response, request, env);
+}
+
+async function routeGenerateModelRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<Response> {
   const url = new URL(request.url);
 
   if (request.method === 'OPTIONS') {
@@ -215,8 +262,10 @@ export async function handleGenerateModelRequest(
 
   if (request.method === 'GET' && url.pathname === '/generate-3d/models') {
     const index = await readGeneratedModelsIndex(env);
+    const auth = await readOptionalApprovedUser(request, env, deps);
+    const visibleModels = index.models.filter((model) => isModelVisibleToUser(model, auth?.user ?? null));
     return jsonResponse({
-      models: index.models.sort((left, right) => right.completed_at.localeCompare(left.completed_at)),
+      models: visibleModels.sort((left, right) => right.completed_at.localeCompare(left.completed_at)),
     });
   }
 
@@ -225,7 +274,7 @@ export async function handleGenerateModelRequest(
     if (auth instanceof Response) {
       return auth;
     }
-    return handleUploadedModelRequest(request, env, deps, url);
+    return handleUploadedModelRequest(request, env, deps, url, auth.user);
   }
 
   if (url.pathname.startsWith('/generate-3d/models/')) {
@@ -234,7 +283,32 @@ export async function handleGenerateModelRequest(
       return auth;
     }
     const modelId = decodeURIComponent(url.pathname.replace('/generate-3d/models/', ''));
-    return handleGeneratedModelManagementRequest(request, env, deps, modelId, url);
+    return handleGeneratedModelManagementRequest(request, env, deps, modelId, url, auth.user);
+  }
+
+  if (request.method === 'GET' && url.pathname === '/generate-3d/jobs') {
+    const auth = await requireAdminUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    return handleAdminJobsList(env);
+  }
+
+  if (request.method === 'POST' && url.pathname === '/generate-3d/jobs/cleanup') {
+    const auth = await requireAdminUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    return handleFailedJobArtifactCleanup(env, deps, auth.user);
+  }
+
+  if (request.method === 'POST' && url.pathname.startsWith('/generate-3d/jobs/') && url.pathname.endsWith('/retry')) {
+    const auth = await requireAdminUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    const jobId = decodeURIComponent(url.pathname.replace('/generate-3d/jobs/', '').replace(/\/retry$/, ''));
+    return handleAdminJobRetry(env, deps, jobId, auth.user);
   }
 
   if (request.method === 'GET' && url.pathname.startsWith('/generate-3d/jobs/')) {
@@ -302,6 +376,7 @@ export async function handleGenerateModelRequest(
     url,
     env,
     deps,
+    auth.user,
     {
       imageBase64: body.value.image_base64,
       imageMimeType: typeof body.value.image_mime_type === 'string' ? body.value.image_mime_type : 'image/png',
@@ -315,6 +390,7 @@ async function startModalGenerationJob(
   url: URL,
   env: WorkerEnv,
   deps: GenerateModelDeps,
+  user: StoredUser,
   input: {
     imageBase64: string;
     imageMimeType: string;
@@ -367,6 +443,8 @@ async function startModalGenerationJob(
     updated_at: now.toISOString(),
     target_object: input.targetObject ?? undefined,
     pipeline: input.pipeline,
+    owner_email: user.email,
+    visibility: 'private',
     preview_url: preview?.previewUrl,
     preview_object_key: preview?.previewObjectKey,
   };
@@ -416,6 +494,20 @@ async function handleAuthRequest(
   }
 
   if (request.method === 'POST' && url.pathname === '/auth/logout') {
+    const token = readBearerToken(request);
+    if (!token) {
+      return jsonResponse({ error: 'Login required.' }, 401);
+    }
+    const payload = await verifySessionToken(token, env, deps.now());
+    if (!payload) {
+      return jsonResponse({ error: 'Login required.' }, 401);
+    }
+    await revokeSession(env, payload.jti);
+    await appendAuditEvent(env, deps, {
+      actor: payload.sub,
+      action: 'auth.logout',
+      status: 'ok',
+    });
     return jsonResponse({ ok: true });
   }
 
@@ -512,20 +604,44 @@ async function handleLoginRequest(request: Request, env: WorkerEnv, deps: Genera
 
   const email = normalizeEmail(body.value.email);
   const password = normalizePassword(body.value.password);
+  const rateLimit = await consumeRateLimit(env, deps, `login:${email ?? request.headers.get('CF-Connecting-IP') ?? 'unknown'}`, 5, 15 * 60);
+  if (!rateLimit.allowed) {
+    return jsonResponse({ error: 'Too many login attempts. Try again later.' }, 429);
+  }
   if (!email || !password) {
+    await appendAuditEvent(env, deps, {
+      actor: email ?? 'unknown',
+      action: 'auth.login',
+      status: 'invalid',
+    });
     return jsonResponse({ error: 'Invalid email or password.' }, 401);
   }
 
   const index = await readUsersIndex(env);
   const user = index.users.find((entry) => entry.email === email);
   if (!user || !(await verifyPassword(password, user.password_salt, user.password_hash))) {
+    await appendAuditEvent(env, deps, {
+      actor: email,
+      action: 'auth.login',
+      status: 'invalid',
+    });
     return jsonResponse({ error: 'Invalid email or password.' }, 401);
   }
 
   if (user.status !== 'active') {
+    await appendAuditEvent(env, deps, {
+      actor: email,
+      action: 'auth.login',
+      status: 'pending',
+    });
     return jsonResponse({ error: 'Account pending admin approval.' }, 403);
   }
 
+  await appendAuditEvent(env, deps, {
+    actor: email,
+    action: 'auth.login',
+    status: 'ok',
+  });
   return jsonResponse({
     user: toPublicUser(user),
     token: await createSessionToken(user, env, deps.now()),
@@ -591,6 +707,7 @@ async function handleUploadedModelRequest(
   env: WorkerEnv,
   deps: GenerateModelDeps,
   url: URL,
+  user: StoredUser,
 ): Promise<Response> {
   if (!env.MODEL_BUCKET) {
     return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
@@ -622,6 +739,8 @@ async function handleUploadedModelRequest(
     object_key: objectKey,
     completed_at: now.toISOString(),
     bytes: modelBytes.byteLength,
+    owner_email: user.email,
+    visibility: 'private',
     source: 'uploaded',
   };
 
@@ -639,6 +758,7 @@ async function handleGeneratedModelManagementRequest(
   deps: GenerateModelDeps,
   modelId: string,
   url: URL,
+  user: StoredUser,
 ): Promise<Response> {
   if (!modelId) {
     return jsonResponse({ error: 'model_id is required.' }, 400);
@@ -655,23 +775,36 @@ async function handleGeneratedModelManagementRequest(
     }
 
     const label = normalizeModelLabel(body.value.label);
+    const visibility = normalizeModelVisibility(body.value.visibility);
     const previewBase64 =
       typeof body.value.preview_base64 === 'string' && body.value.preview_base64.length > 0
         ? body.value.preview_base64
         : null;
 
-    if (!label && !previewBase64) {
-      return jsonResponse({ error: 'label or preview_base64 is required.' }, 400);
+    if (body.value.visibility !== undefined && !visibility) {
+      return jsonResponse({ error: 'visibility must be public or private.' }, 400);
+    }
+
+    if (!label && !previewBase64 && !visibility) {
+      return jsonResponse({ error: 'label, preview_base64, or visibility is required.' }, 400);
     }
 
     try {
-      return await updateGeneratedModel(env, deps, modelId, {
+      const response = await updateGeneratedModel(env, deps, modelId, user, {
         label: label ?? undefined,
         previewBase64: previewBase64 ?? undefined,
         previewMimeType:
           typeof body.value.preview_mime_type === 'string' ? body.value.preview_mime_type : 'image/png',
+        visibility: visibility ?? undefined,
         publicOrigin: getPublicOrigin(env, url.origin),
       });
+      await appendAuditEvent(env, deps, {
+        actor: user.email,
+        action: 'model.update',
+        target: modelId,
+        status: response.ok ? 'ok' : 'failed',
+      });
+      return response;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not update generated model.';
       return jsonResponse({ error: message }, 400);
@@ -679,7 +812,14 @@ async function handleGeneratedModelManagementRequest(
   }
 
   if (request.method === 'DELETE') {
-    return deleteGeneratedModel(env, modelId);
+    const response = await deleteGeneratedModel(env, modelId, user);
+    await appendAuditEvent(env, deps, {
+      actor: user.email,
+      action: 'model.delete',
+      target: modelId,
+      status: response.ok ? 'ok' : 'failed',
+    });
+    return response;
   }
 
   return jsonResponse({ error: 'Only PATCH and DELETE requests are supported for generated models.' }, 405);
@@ -689,10 +829,12 @@ async function updateGeneratedModel(
   env: WorkerEnv,
   deps: GenerateModelDeps,
   modelId: string,
+  user: StoredUser,
   update: {
     label?: string;
     previewBase64?: string;
     previewMimeType: string;
+    visibility?: ModelVisibility;
     publicOrigin: string;
   },
 ): Promise<Response> {
@@ -703,6 +845,10 @@ async function updateGeneratedModel(
   }
 
   const existingModel = index.models[modelIndex];
+  if (!canManageGeneratedModel(existingModel, user)) {
+    return jsonResponse({ error: 'Only the owner or an admin can manage this model.' }, 403);
+  }
+
   const replacementPreview = update.previewBase64
     ? await storeUpdatedModelPreview(env, {
         imageBase64: update.previewBase64,
@@ -717,6 +863,7 @@ async function updateGeneratedModel(
     label: update.label ?? existingModel.label,
     preview_url: replacementPreview?.previewUrl ?? existingModel.preview_url,
     preview_object_key: replacementPreview?.previewObjectKey ?? existingModel.preview_object_key,
+    visibility: update.visibility ?? existingModel.visibility ?? 'public',
   };
   const models = [...index.models];
   models[modelIndex] = renamedModel;
@@ -729,6 +876,7 @@ async function updateGeneratedModel(
       label: update.label ?? job.label,
       preview_url: replacementPreview?.previewUrl ?? job.preview_url,
       preview_object_key: replacementPreview?.previewObjectKey ?? job.preview_object_key,
+      visibility: update.visibility ?? job.visibility ?? renamedModel.visibility,
       updated_at: deps.now().toISOString(),
     });
   }
@@ -745,11 +893,15 @@ async function updateGeneratedModel(
   return jsonResponse(renamedModel);
 }
 
-async function deleteGeneratedModel(env: WorkerEnv, modelId: string): Promise<Response> {
+async function deleteGeneratedModel(env: WorkerEnv, modelId: string, user: StoredUser): Promise<Response> {
   const index = await readGeneratedModelsIndex(env);
   const model = index.models.find((entry) => entry.id === modelId);
   if (!model) {
     return jsonResponse({ error: 'Generated model not found.' }, 404);
+  }
+
+  if (!canManageGeneratedModel(model, user)) {
+    return jsonResponse({ error: 'Only the owner or an admin can manage this model.' }, 403);
   }
 
   await writeJsonObject(env, generatedModelsIndexKey, {
@@ -765,6 +917,76 @@ async function deleteGeneratedModel(env: WorkerEnv, modelId: string): Promise<Re
   }
 
   return jsonResponse({ deleted: true, id: modelId });
+}
+
+async function handleAdminJobsList(env: WorkerEnv): Promise<Response> {
+  const jobs = await readKnownJobs(env);
+  return jsonResponse({
+    jobs: jobs.sort((left, right) => right.updated_at.localeCompare(left.updated_at)).map(toJobResponse),
+  });
+}
+
+async function handleAdminJobRetry(
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  jobId: string,
+  adminUser: StoredUser,
+): Promise<Response> {
+  const job = await readJob(env, jobId);
+  if (!job) {
+    return jsonResponse({ error: 'Job not found.' }, 404);
+  }
+  if (job.status !== 'failed') {
+    return jsonResponse({ error: 'Only failed jobs can be retried.' }, 400);
+  }
+
+  const runningJob: StoredJob = {
+    ...job,
+    status: 'running',
+    error: undefined,
+    failed_at: undefined,
+    updated_at: deps.now().toISOString(),
+  };
+  await saveJob(env, runningJob);
+  await addPendingJob(env, runningJob.id);
+  await appendAuditEvent(env, deps, {
+    actor: adminUser.email,
+    action: 'job.retry',
+    target: jobId,
+    status: 'ok',
+  });
+  return jsonResponse(toJobResponse(runningJob));
+}
+
+async function handleFailedJobArtifactCleanup(
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  adminUser: StoredUser,
+): Promise<Response> {
+  const jobs = await readKnownJobs(env);
+  let cleaned = 0;
+
+  for (const job of jobs) {
+    if (job.model_url || !job.preview_object_key || !env.MODEL_BUCKET.delete) {
+      continue;
+    }
+
+    await env.MODEL_BUCKET.delete(job.preview_object_key);
+    cleaned += 1;
+    await saveJob(env, {
+      ...job,
+      preview_url: undefined,
+      preview_object_key: undefined,
+      updated_at: deps.now().toISOString(),
+    });
+  }
+
+  await appendAuditEvent(env, deps, {
+    actor: adminUser.email,
+    action: 'job.cleanup',
+    status: `cleaned:${cleaned}`,
+  });
+  return jsonResponse({ cleaned });
 }
 
 async function pollModalJob(
@@ -1013,6 +1235,10 @@ function normalizeModelLabel(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
+function normalizeModelVisibility(value: unknown): ModelVisibility | null {
+  return value === 'public' || value === 'private' ? value : null;
+}
+
 function normalizeEmail(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -1070,6 +1296,9 @@ async function requireApprovedUser(
   if (!payload) {
     return jsonResponse({ error: 'Login required.' }, 401);
   }
+  if (await isSessionRevoked(env, payload.jti)) {
+    return jsonResponse({ error: 'Login required.' }, 401);
+  }
 
   const index = await readUsersIndex(env);
   const user = index.users.find((entry) => entry.email === payload.sub);
@@ -1099,6 +1328,43 @@ async function requireAdminUser(
   }
 
   return auth;
+}
+
+async function readOptionalApprovedUser(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<{ user: StoredUser } | null> {
+  const token = readBearerToken(request);
+  if (!token || !env.AUTH_SECRET) {
+    return null;
+  }
+
+  const payload = await verifySessionToken(token, env, deps.now());
+  if (!payload || (await isSessionRevoked(env, payload.jti))) {
+    return null;
+  }
+
+  const index = await readUsersIndex(env);
+  const user = index.users.find((entry) => entry.email === payload.sub);
+  return user?.status === 'active' ? { user } : null;
+}
+
+function isModelVisibleToUser(model: GeneratedModelEntry, user: StoredUser | null): boolean {
+  if (user?.role === 'admin') {
+    return true;
+  }
+  if ((model.visibility ?? 'public') === 'public') {
+    return true;
+  }
+  return Boolean(user && model.owner_email === user.email);
+}
+
+function canManageGeneratedModel(model: GeneratedModelEntry, user: StoredUser): boolean {
+  if (user.role === 'admin') {
+    return true;
+  }
+  return Boolean(model.owner_email && model.owner_email === user.email);
 }
 
 function readBearerToken(request: Request): string | null {
@@ -1143,10 +1409,23 @@ async function readJob(env: WorkerEnv, jobId: string): Promise<StoredJob | null>
 
 async function saveJob(env: WorkerEnv, job: StoredJob): Promise<void> {
   await writeJsonObject(env, jobStorageKey(job.id), job);
+  await rememberJob(env, job.id);
 }
 
 async function readJobsIndex(env: WorkerEnv): Promise<JobsIndex> {
   return readJsonObject<JobsIndex>(env, pendingJobsIndexKey, { pending: [] });
+}
+
+async function readJobsHistoryIndex(env: WorkerEnv): Promise<JobsHistoryIndex> {
+  return readJsonObject<JobsHistoryIndex>(env, jobHistoryIndexKey, { jobs: [] });
+}
+
+async function rememberJob(env: WorkerEnv, jobId: string): Promise<void> {
+  const history = await readJobsHistoryIndex(env);
+  if (history.jobs.includes(jobId)) {
+    return;
+  }
+  await writeJsonObject(env, jobHistoryIndexKey, { jobs: [jobId, ...history.jobs].slice(0, 500) });
 }
 
 async function addPendingJob(env: WorkerEnv, jobId: string): Promise<void> {
@@ -1161,6 +1440,13 @@ async function removePendingJob(env: WorkerEnv, jobId: string): Promise<void> {
   const index = await readJobsIndex(env);
   const nextPending = index.pending.filter((pendingJobId) => pendingJobId !== jobId);
   await writeJsonObject(env, pendingJobsIndexKey, { pending: nextPending });
+}
+
+async function readKnownJobs(env: WorkerEnv): Promise<StoredJob[]> {
+  const [pending, history] = await Promise.all([readJobsIndex(env), readJobsHistoryIndex(env)]);
+  const jobIds = [...new Set([...history.jobs, ...pending.pending])];
+  const jobs = await Promise.all(jobIds.map((jobId) => readJob(env, jobId)));
+  return jobs.filter((job): job is StoredJob => Boolean(job));
 }
 
 async function readGeneratedModelsIndex(env: WorkerEnv): Promise<GeneratedModelsIndex> {
@@ -1180,6 +1466,75 @@ async function writeUsersIndex(env: WorkerEnv, index: UsersIndex): Promise<void>
   });
 }
 
+async function readRevokedSessionsIndex(env: WorkerEnv): Promise<RevokedSessionsIndex> {
+  return readJsonObject<RevokedSessionsIndex>(env, revokedSessionsIndexKey, { revoked: [] });
+}
+
+async function revokeSession(env: WorkerEnv, sessionId: string): Promise<void> {
+  const index = await readRevokedSessionsIndex(env);
+  if (index.revoked.includes(sessionId)) {
+    return;
+  }
+  await writeJsonObject(env, revokedSessionsIndexKey, { revoked: [sessionId, ...index.revoked].slice(0, 1000) });
+}
+
+async function isSessionRevoked(env: WorkerEnv, sessionId: string): Promise<boolean> {
+  const index = await readRevokedSessionsIndex(env);
+  return index.revoked.includes(sessionId);
+}
+
+async function consumeRateLimit(
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  key: string,
+  maxAttempts: number,
+  windowSeconds: number,
+): Promise<{ allowed: boolean }> {
+  const storageKey = `${rateLimitKeyPrefix}${safeObjectKeyPart(key)}.json`;
+  const now = deps.now();
+  const existing = await readJsonObject<RateLimitEntry | null>(env, storageKey, null);
+  const resetAt = existing ? new Date(existing.reset_at) : null;
+
+  if (!existing || !resetAt || resetAt.getTime() <= now.getTime()) {
+    await writeJsonObject(env, storageKey, {
+      count: 1,
+      reset_at: new Date(now.getTime() + windowSeconds * 1000).toISOString(),
+    } satisfies RateLimitEntry);
+    return { allowed: true };
+  }
+
+  if (existing.count >= maxAttempts) {
+    return { allowed: false };
+  }
+
+  await writeJsonObject(env, storageKey, {
+    count: existing.count + 1,
+    reset_at: existing.reset_at,
+  } satisfies RateLimitEntry);
+  return { allowed: true };
+}
+
+async function appendAuditEvent(
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  event: Omit<AuditEvent, 'created_at'>,
+): Promise<void> {
+  try {
+    const index = await readJsonObject<AuditLogIndex>(env, auditLogIndexKey, { events: [] });
+    await writeJsonObject(env, auditLogIndexKey, {
+      events: [
+        {
+          ...event,
+          created_at: deps.now().toISOString(),
+        },
+        ...index.events,
+      ].slice(0, 200),
+    } satisfies AuditLogIndex);
+  } catch {
+    // Audit logging should not block the user-facing request path.
+  }
+}
+
 async function upsertGeneratedModel(env: WorkerEnv, job: StoredJob): Promise<void> {
   if (!job.model_url || !job.object_key || !job.completed_at || typeof job.bytes !== 'number') {
     return;
@@ -1194,6 +1549,8 @@ async function upsertGeneratedModel(env: WorkerEnv, job: StoredJob): Promise<voi
     preview_object_key: job.preview_object_key,
     completed_at: job.completed_at,
     bytes: job.bytes,
+    owner_email: job.owner_email,
+    visibility: job.visibility ?? 'private',
   };
   await upsertGeneratedModelEntry(env, entry);
 }
@@ -1256,6 +1613,15 @@ function toJobResponse(job: StoredJob): Record<string, unknown> {
     id: job.id,
     label: job.label,
     status: job.status,
+    error: job.error,
+    created_at: job.created_at,
+    updated_at: job.updated_at,
+    completed_at: job.completed_at,
+    failed_at: job.failed_at,
+    owner_email: job.owner_email,
+    visibility: job.visibility,
+    target_object: job.target_object,
+    pipeline: job.pipeline,
     model_url: job.model_url,
     object_key: job.object_key,
     preview_url: job.preview_url,
@@ -1328,6 +1694,51 @@ function jsonResponse(body: unknown, status = 200): Response {
       'Content-Type': 'application/json',
     },
   });
+}
+
+function applyCorsHeaders(response: Response, request: Request, env: WorkerEnv): Response {
+  const headers = new Headers(response.headers);
+  headers.set('Access-Control-Allow-Methods', corsHeaders['Access-Control-Allow-Methods']);
+  headers.set('Access-Control-Allow-Headers', corsHeaders['Access-Control-Allow-Headers']);
+
+  const requestOrigin = request.headers.get('Origin');
+  const allowedOrigin = requestOrigin ? allowedCorsOrigin(env, requestOrigin) : null;
+  if (allowedOrigin) {
+    headers.set('Access-Control-Allow-Origin', allowedOrigin);
+    headers.set('Vary', appendVaryOrigin(headers.get('Vary')));
+  } else if (!requestOrigin) {
+    headers.set('Access-Control-Allow-Origin', '*');
+  } else {
+    headers.delete('Access-Control-Allow-Origin');
+    headers.set('Vary', appendVaryOrigin(headers.get('Vary')));
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function allowedCorsOrigin(env: WorkerEnv, requestOrigin: string): string | null {
+  const allowedOrigins =
+    env.ALLOWED_ORIGINS?.split(',')
+      .map((origin) => origin.trim().replace(/\/+$/, ''))
+      .filter(Boolean) ?? defaultAllowedOrigins;
+  const normalizedOrigin = requestOrigin.replace(/\/+$/, '');
+  return allowedOrigins.includes(normalizedOrigin) ? normalizedOrigin : null;
+}
+
+function appendVaryOrigin(value: string | null): string {
+  if (!value) {
+    return 'Origin';
+  }
+  return value
+    .split(',')
+    .map((part) => part.trim())
+    .some((part) => part.toLowerCase() === 'origin')
+    ? value
+    : `${value}, Origin`;
 }
 
 function jobStorageKey(jobId: string): string {
@@ -1446,6 +1857,7 @@ async function createSessionToken(user: StoredUser, env: WorkerEnv, now: Date): 
   const payload: SessionPayload = {
     sub: user.email,
     role: user.role,
+    jti: randomBase64UrlBytes(18),
     iat: issuedAt,
     exp: issuedAt + sessionLifetimeSeconds,
   };
@@ -1467,7 +1879,7 @@ async function verifySessionToken(token: string, env: WorkerEnv, now: Date): Pro
 
   try {
     const payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(encodedPayload))) as SessionPayload;
-    if (!payload.sub || !payload.exp || payload.exp < Math.floor(now.getTime() / 1000)) {
+    if (!payload.sub || !payload.jti || !payload.exp || payload.exp < Math.floor(now.getTime() / 1000)) {
       return null;
     }
     return payload;
