@@ -87,7 +87,7 @@ describe('ARHud', () => {
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(true);
   });
 
-  it('opens AR View with a bottom thumbnail rail while hiding the dropdown', () => {
+  it('opens AR View with a full-page model picker before placement', () => {
     const root = document.createElement('div');
     new ARHud(root, modelOptions, createHandlers());
 
@@ -98,24 +98,56 @@ describe('ARHud', () => {
     const cameraPanel = root.querySelector('.camera-panel');
     const hudActions = root.querySelector('.hud-actions');
     const modelPicker = root.querySelector('.model-picker');
+    const arModelPicker = root.querySelector('.ar-model-picker');
     const modelRail = root.querySelector('.model-rail');
-    const railItems = [...root.querySelectorAll<HTMLButtonElement>('.model-rail-item')];
+    const modelCards = [...root.querySelectorAll<HTMLButtonElement>('.ar-model-card')];
 
     expect(landing?.classList.contains('hidden')).toBe(true);
     expect(window.location.hash).toBe('#/ar');
     expect(statusPanel?.classList.contains('hidden')).toBe(false);
+    expect(statusPanel?.classList.contains('ar-picker-active')).toBe(true);
     expect(statusPanel?.classList.contains('camera-active')).toBe(false);
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
-    expect(hudActions?.classList.contains('hidden')).toBe(false);
-    expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
+    expect(hudActions?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('select')).toBeInstanceOf(HTMLSelectElement);
     expect(modelPicker?.classList.contains('hidden')).toBe(true);
-    expect(modelRail?.classList.contains('hidden')).toBe(false);
-    expect(railItems.map((button) => button.dataset.modelId)).toEqual(['trellis-fast-output', 'img4-output']);
-    expect(railItems.map((button) => button.getAttribute('aria-label'))).toEqual([
+    expect(arModelPicker?.classList.contains('hidden')).toBe(false);
+    expect(modelRail?.classList.contains('hidden')).toBe(true);
+    expect(modelCards.map((button) => button.dataset.modelId)).toEqual(['trellis-fast-output', 'img4-output']);
+    expect(modelCards.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Select Fast output',
       'Select Image 4 output',
     ]);
+  });
+
+  it('opens placement controls and the bottom thumbnail rail after a model is selected and Place AR is clicked', () => {
+    const root = document.createElement('div');
+    const onModelSelect = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onModelSelect }));
+    const startArCamera = vi.fn();
+    const arButton = document.createElement('button');
+    arButton.textContent = 'Start AR';
+    arButton.addEventListener('click', startArCamera);
+    hud.attachARButton(arButton);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="img4-output"]')?.click();
+
+    const placeArButton = root.querySelector<HTMLButtonElement>('.ar-model-place-button')!;
+    expect(onModelSelect).toHaveBeenCalledWith('img4-output');
+    expect(root.querySelector('.ar-model-card.is-selected')?.textContent).toContain('Image 4 output');
+    expect(placeArButton.disabled).toBe(true);
+
+    hud.updateModelReady(true);
+    placeArButton.click();
+
+    expect(startArCamera).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('.ar-model-picker')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.model-rail')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.model-rail-item.is-selected')?.textContent).toContain('Image 4 output');
   });
 
   it('opens Full Flow from the first screen as a capture page', () => {
@@ -251,7 +283,7 @@ describe('ARHud', () => {
 
     expect(onCloseModelPreview).toHaveBeenCalledTimes(1);
   });
-  it('shows persisted uploaded models in the AR thumbnail rail and model manager', () => {
+  it('shows persisted uploaded models in the full-page AR picker and post-placement rail', () => {
     const root = document.createElement('div');
     const onModelSelect = vi.fn();
     const onDeleteGeneratedModel = vi.fn();
@@ -273,6 +305,22 @@ describe('ARHud', () => {
     ]);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+    const modelCards = [...root.querySelectorAll<HTMLButtonElement>('.ar-model-card')];
+    expect(modelCards.map((button) => button.dataset.modelId)).toEqual([
+      'trellis-fast-output',
+      'img4-output',
+      'generated-fc-123',
+      'generated-upload-123-chair',
+    ]);
+    expect(root.querySelector<HTMLImageElement>('.ar-model-card[data-model-id="generated-fc-123"] img')?.src).toBe(
+      'https://assets.example/previews/generated-chair.png',
+    );
+
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="generated-upload-123-chair"]')?.click();
+    expect(onModelSelect).toHaveBeenCalledWith('generated-upload-123-chair');
+
+    hud.updateModelReady(true);
+    root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
     const railItems = [...root.querySelectorAll<HTMLButtonElement>('.model-rail-item')];
     expect(railItems.map((button) => button.dataset.modelId)).toEqual([
       'trellis-fast-output',
@@ -283,9 +331,6 @@ describe('ARHud', () => {
     expect(root.querySelector<HTMLImageElement>('.model-rail-item[data-model-id="generated-fc-123"] img')?.src).toBe(
       'https://assets.example/previews/generated-chair.png',
     );
-
-    root.querySelector<HTMLButtonElement>('.model-rail-item[data-model-id="generated-upload-123-chair"]')?.click();
-    expect(onModelSelect).toHaveBeenCalledWith('generated-upload-123-chair');
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
     const uploadedRow = root.querySelector<HTMLElement>('.model-manager-row.is-uploaded')!;
@@ -467,7 +512,9 @@ describe('ARHud', () => {
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.status-panel')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.camera-panel')?.classList.contains('hidden')).toBe(true);
-    expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.ar-model-picker')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.model-rail')?.classList.contains('hidden')).toBe(true);
   });
 
   it('returns from a sub page to the home page with the Back button', () => {
@@ -515,11 +562,14 @@ describe('ARHud', () => {
     expect(backButton?.classList.contains('hidden')).toBe(false);
   });
 
-  it('provides a gesture surface that is enabled after opening AR View', () => {
+  it('provides a gesture surface after opening AR placement controls', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="trellis-fast-output"]')?.click();
+    hud.updateModelReady(true);
+    root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
 
     expect(hud.gestureSurface.classList.contains('gesture-surface')).toBe(true);
     expect(hud.gestureSurface.classList.contains('hidden')).toBe(false);
@@ -543,32 +593,38 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Model source: Cloudflare');
   });
 
-  it('lists selectable models in the thumbnail rail without selecting one by default', () => {
+  it('lists selectable models in the full-page AR picker without selecting one by default', () => {
     const root = document.createElement('div');
     new ARHud(root, modelOptions, createHandlers());
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
     const select = root.querySelector('select');
-    const railItems = [...root.querySelectorAll<HTMLButtonElement>('.model-rail-item')];
+    const modelCards = [...root.querySelectorAll<HTMLButtonElement>('.ar-model-card')];
 
     expect(select).toBeInstanceOf(HTMLSelectElement);
     expect((select as HTMLSelectElement).value).toBe('');
-    expect(railItems.map((button) => button.dataset.modelId)).toEqual(['trellis-fast-output', 'img4-output']);
-    expect(root.querySelector('.model-rail-item.is-selected')).toBeNull();
+    expect(root.querySelector('.ar-model-card.is-selected')).toBeNull();
+    expect(modelCards.map((button) => button.dataset.modelId)).toEqual(['trellis-fast-output', 'img4-output']);
+    expect(root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.disabled).toBe(true);
   });
 
-  it('requests a model load only when a thumbnail rail item is selected', () => {
+  it('requests a model load from the full-page picker before placement and from the rail after placement', () => {
     const root = document.createElement('div');
     const onModelSelect = vi.fn();
-    new ARHud(root, modelOptions, createHandlers({ onModelSelect }));
-
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onModelSelect }));
 
     expect(onModelSelect).not.toHaveBeenCalled();
 
-    root.querySelector<HTMLButtonElement>('.model-rail-item[data-model-id="img4-output"]')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="img4-output"]')?.click();
 
     expect(onModelSelect).toHaveBeenCalledWith('img4-output');
+
+    hud.updateModelReady(true);
+    root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
+    root.querySelector<HTMLButtonElement>('.model-rail-item[data-model-id="trellis-fast-output"]')?.click();
+
+    expect(onModelSelect).toHaveBeenLastCalledWith('trellis-fast-output');
   });
 
   it('renders camera capture controls', () => {
@@ -709,7 +765,7 @@ describe('ARHud', () => {
     expect(targetInput?.classList.contains('hidden')).toBe(true);
   });
 
-  it('refreshes generated datetime models in the thumbnail rail without losing built-in models', () => {
+  it('refreshes generated datetime models in the AR picker and post-placement rail without losing built-in models', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
 
@@ -723,14 +779,28 @@ describe('ARHud', () => {
     ]);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+    const pickerItems = [...root.querySelectorAll<HTMLButtonElement>('.ar-model-card')].map((button) => ({
+      label: button.querySelector('.ar-model-card-label')?.textContent,
+      value: button.dataset.modelId,
+    }));
+
+    expect(pickerItems).toEqual([
+      { label: 'Fast output', value: 'trellis-fast-output' },
+      { label: 'Image 4 output', value: 'img4-output' },
+      { label: '2026-06-28 12:00:00 UTC', value: 'generated-fc-123' },
+    ]);
+
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="generated-fc-123"]')?.click();
+    hud.updateModelReady(true);
+    root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
     const railItems = [...root.querySelectorAll<HTMLButtonElement>('.model-rail-item')].map((button) => ({
-      label: button.textContent,
+      label: button.querySelector('.model-rail-label')?.textContent,
       value: button.dataset.modelId,
     }));
 
     expect(railItems).toEqual([
-      { label: '3DFast output', value: 'trellis-fast-output' },
-      { label: '3DImage 4 output', value: 'img4-output' },
+      { label: 'Fast output', value: 'trellis-fast-output' },
+      { label: 'Image 4 output', value: 'img4-output' },
       { label: '2026-06-28 12:00:00 UTC', value: 'generated-fc-123' },
     ]);
   });

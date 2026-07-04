@@ -80,6 +80,7 @@ canvas {
 }
 
 .status-panel.camera-active,
+.status-panel.ar-picker-active,
 .status-panel.object-placed {
   max-width: none;
   margin: 0;
@@ -94,6 +95,10 @@ canvas {
 .status-panel.camera-active > .status-message,
 .status-panel.camera-active > .status-source,
 .status-panel.camera-active > .model-picker,
+.status-panel.ar-picker-active > .status-label,
+.status-panel.ar-picker-active > .status-message,
+.status-panel.ar-picker-active > .status-source,
+.status-panel.ar-picker-active > .model-picker,
 .status-panel.object-placed > .status-label,
 .status-panel.object-placed > .status-message,
 .status-panel.object-placed > .status-source,
@@ -128,6 +133,7 @@ canvas {
 }
 
 .status-panel.camera-active > .page-back,
+.status-panel.ar-picker-active > .page-back,
 .status-panel.object-placed > .page-back {
   position: fixed;
   top: max(14px, env(safe-area-inset-top));
@@ -519,6 +525,118 @@ canvas {
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.ar-model-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  overflow-y: auto;
+  padding: calc(max(18px, env(safe-area-inset-top)) + 74px) 20px calc(max(18px, env(safe-area-inset-bottom)) + 104px);
+  background:
+    linear-gradient(180deg, rgba(7, 16, 22, 0.98), rgba(8, 16, 21, 0.94)),
+    radial-gradient(circle at 85% 12%, rgba(94, 234, 212, 0.14), transparent 34%);
+  pointer-events: auto;
+}
+
+.ar-model-picker-inner {
+  width: min(1040px, 100%);
+  margin: 0 auto;
+}
+
+.ar-model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
+  gap: 14px;
+}
+
+.ar-model-card {
+  display: grid;
+  grid-template-rows: auto minmax(2.6em, auto);
+  gap: 10px;
+  min-width: 0;
+  min-height: 188px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 10px;
+  color: #f8fafc;
+  background: rgba(5, 10, 14, 0.72);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 850;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+  touch-action: manipulation;
+}
+
+.ar-model-card.is-selected {
+  border-color: #5eead4;
+  background: rgba(8, 30, 32, 0.92);
+  box-shadow:
+    0 0 0 2px rgba(94, 234, 212, 0.24),
+    0 14px 34px rgba(0, 0, 0, 0.34);
+}
+
+.ar-model-card-thumb {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.ar-model-card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ar-model-card-label {
+  display: -webkit-box;
+  overflow: hidden;
+  align-self: center;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ar-model-place-bar {
+  position: fixed;
+  right: 16px;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  left: 16px;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.ar-model-place-button {
+  width: min(360px, 100%);
+  min-height: 52px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #031b18;
+  background: #5eead4;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 850;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.ar-model-place-button:disabled {
+  color: rgba(248, 250, 252, 0.48);
+  background: rgba(5, 10, 14, 0.72);
 }
 
 .landing {

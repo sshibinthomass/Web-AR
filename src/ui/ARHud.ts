@@ -49,6 +49,9 @@ export class ARHud {
   private readonly modelPreviewTitle: HTMLElement;
   private readonly modelPreviewStatus: HTMLElement;
   private readonly modelRail: HTMLElement;
+  private readonly arModelPicker: HTMLElement;
+  private readonly arModelList: HTMLElement;
+  private readonly arPlaceButton: HTMLButtonElement;
   private readonly modelManagerMessage: HTMLElement;
   private readonly cameraStatusMessage: HTMLElement;
   private readonly generatedModelMessage: HTMLElement;
@@ -73,6 +76,7 @@ export class ARHud {
   private readonly baseModelOptions: ModelOption[];
   private generatedModelOptions: ModelOption[] = [];
   private uploadedModelOptions: ModelOption[] = [];
+  private arPlacementStarted = false;
   private modelReady = false;
   private activeRoute: HudRoute | null = null;
 
@@ -262,6 +266,21 @@ export class ARHud {
     this.modelRail.setAttribute('aria-label', 'Select model');
     this.overlay.appendChild(this.modelRail);
 
+    this.arModelPicker = document.createElement('section');
+    this.arModelPicker.className = 'ar-model-picker hidden';
+    const arModelPickerInner = document.createElement('div');
+    arModelPickerInner.className = 'ar-model-picker-inner';
+    this.arModelList = document.createElement('div');
+    this.arModelList.className = 'ar-model-grid';
+    const arModelPlaceBar = document.createElement('div');
+    arModelPlaceBar.className = 'ar-model-place-bar';
+    this.arPlaceButton = this.createButton('Select a model', 'ar-model-place-button primary', () => this.openSelectedModelInAR());
+    this.arPlaceButton.disabled = true;
+    arModelPlaceBar.appendChild(this.arPlaceButton);
+    arModelPickerInner.append(this.arModelList, arModelPlaceBar);
+    this.arModelPicker.appendChild(arModelPickerInner);
+    this.overlay.appendChild(this.arModelPicker);
+
     this.hudActions = document.createElement('div');
     this.hudActions.className = 'hud-actions hidden';
     this.overlay.appendChild(this.hudActions);
@@ -282,6 +301,7 @@ export class ARHud {
       this.resetButton,
     );
     this.renderModelRail();
+    this.renderARModelPicker();
 
     window.addEventListener('hashchange', () => this.applyCurrentRoute());
 
@@ -310,11 +330,14 @@ export class ARHud {
 
   updateModelReady(isReady: boolean): void {
     this.modelReady = isReady;
+    this.updateARPlaceButton();
   }
 
   updateSelectedModel(modelId: string): void {
     this.modelSelect.value = modelId;
     this.updateModelRailSelection(modelId);
+    this.updateARModelPickerSelection(modelId);
+    this.updateARPlaceButton();
   }
 
   updateCameraStatus(message: string, canGenerate: boolean): void {
@@ -522,10 +545,12 @@ export class ARHud {
     this.landing.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('full-flow-active');
+    this.statusPanel.classList.remove('ar-picker-active');
     this.statusPanel.classList.remove('camera-active');
     this.cameraPanel.classList.add('hidden');
     this.hudActions.classList.add('hidden');
     this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.fullFlowLoading.classList.remove('hidden');
     const messageElement = this.fullFlowLoading.querySelector('p');
@@ -535,6 +560,7 @@ export class ARHud {
   }
 
   showFullFlowReady(message: string): void {
+    this.arPlacementStarted = true;
     this.navigateTo('ar');
     this.statusMessage.textContent = message;
     this.startAttachedARCamera();
@@ -543,11 +569,13 @@ export class ARHud {
   showFullFlowError(message: string): void {
     this.fullFlowLoading.classList.add('hidden');
     this.statusPanel.classList.add('camera-active');
+    this.statusPanel.classList.remove('ar-picker-active');
     this.statusPanel.classList.remove('full-flow-active');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
     this.hudActions.classList.add('hidden');
     this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.updateCameraStatus(message, false);
   }
@@ -626,13 +654,16 @@ export class ARHud {
 
   private openHomePage(previousRoute: HudRoute | null): void {
     this.closeModelPreviewIfOpen();
+    this.arPlacementStarted = false;
     this.landing.classList.remove('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.add('hidden');
     this.statusPanel.classList.remove('camera-active');
+    this.statusPanel.classList.remove('ar-picker-active');
     this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.add('hidden');
     this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.add('hidden');
     this.cameraPanel.classList.remove('fullscreen');
@@ -645,13 +676,16 @@ export class ARHud {
 
   private openCameraPage(): void {
     this.closeModelPreviewIfOpen();
+    this.arPlacementStarted = false;
     this.landing.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active');
+    this.statusPanel.classList.remove('ar-picker-active');
     this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.add('hidden');
     this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
@@ -667,22 +701,28 @@ export class ARHud {
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.remove('camera-active');
     this.statusPanel.classList.remove('full-flow-active');
-    this.hudActions.classList.remove('hidden');
-    this.modelRail.classList.remove('hidden');
-    this.gestureSurface.classList.remove('hidden');
     this.cameraPanel.classList.add('hidden');
     this.cameraPanel.classList.remove('fullscreen');
     this.fullFlowLoading.classList.add('hidden');
+    if (this.arPlacementStarted) {
+      this.showARPlacementControls();
+      return;
+    }
+
+    this.showARModelPicker();
   }
 
   private openFullFlowPage(): void {
     this.closeModelPreviewIfOpen();
+    this.arPlacementStarted = false;
     this.landing.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active', 'full-flow-active');
+    this.statusPanel.classList.remove('ar-picker-active');
     this.hudActions.classList.add('hidden');
     this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
@@ -694,13 +734,16 @@ export class ARHud {
 
   private openUploadPage(): void {
     this.closeModelPreviewIfOpen();
+    this.arPlacementStarted = false;
     this.landing.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active');
+    this.statusPanel.classList.remove('ar-picker-active');
     this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.add('hidden');
     this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
@@ -710,13 +753,16 @@ export class ARHud {
 
   private openUploadModelPage(): void {
     this.closeModelPreviewIfOpen();
+    this.arPlacementStarted = false;
     this.landing.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active');
+    this.statusPanel.classList.remove('ar-picker-active');
     this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.add('hidden');
     this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
@@ -725,13 +771,16 @@ export class ARHud {
   }
 
   private openModelManagerPage(): void {
+    this.arPlacementStarted = false;
     this.landing.classList.add('hidden');
     this.modelManager.classList.remove('hidden');
     this.statusPanel.classList.add('hidden');
     this.statusPanel.classList.remove('camera-active');
+    this.statusPanel.classList.remove('ar-picker-active');
     this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.add('hidden');
     this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.add('hidden');
     this.cameraPanel.classList.remove('fullscreen');
@@ -769,6 +818,7 @@ export class ARHud {
       this.modelSelect.value = '';
     }
     this.renderModelRail();
+    this.renderARModelPicker();
   }
 
   private allModelOptions(): ModelOption[] {
@@ -909,6 +959,93 @@ export class ARHud {
       item.append(thumbnail, label);
       this.modelRail.appendChild(item);
     });
+  }
+
+  private renderARModelPicker(): void {
+    const selectedModelId = this.modelSelect.value;
+    this.arModelList.replaceChildren();
+
+    this.allModelOptions().forEach((model) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'ar-model-card';
+      item.dataset.modelId = model.id;
+      item.setAttribute('aria-label', `Select ${model.label}`);
+      item.setAttribute('aria-pressed', selectedModelId === model.id ? 'true' : 'false');
+      item.classList.toggle('is-selected', selectedModelId === model.id);
+      item.addEventListener('click', () => this.selectARModelForPlacement(model.id));
+
+      const thumbnail = document.createElement('span');
+      thumbnail.className = 'ar-model-card-thumb';
+      if (model.previewUrl) {
+        const image = document.createElement('img');
+        image.src = model.previewUrl;
+        image.alt = '';
+        image.loading = 'lazy';
+        thumbnail.appendChild(image);
+      } else {
+        thumbnail.textContent = this.modelRailPlaceholderText(model);
+      }
+
+      const label = document.createElement('span');
+      label.className = 'ar-model-card-label';
+      label.textContent = model.label;
+
+      item.append(thumbnail, label);
+      this.arModelList.appendChild(item);
+    });
+
+    this.updateARPlaceButton();
+  }
+
+  private selectARModelForPlacement(modelId: string): void {
+    this.modelSelect.value = modelId;
+    this.updateModelRailSelection(modelId);
+    this.updateARModelPickerSelection(modelId);
+    this.updateARPlaceButton();
+    this.handlers.onModelSelect(modelId);
+  }
+
+  private showARModelPicker(): void {
+    this.statusPanel.classList.add('ar-picker-active');
+    this.hudActions.classList.add('hidden');
+    this.modelRail.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.arModelPicker.classList.remove('hidden');
+    this.renderARModelPicker();
+  }
+
+  private showARPlacementControls(): void {
+    this.statusPanel.classList.remove('ar-picker-active');
+    this.arModelPicker.classList.add('hidden');
+    this.hudActions.classList.remove('hidden');
+    this.modelRail.classList.remove('hidden');
+    this.gestureSurface.classList.remove('hidden');
+    this.renderModelRail();
+  }
+
+  private openSelectedModelInAR(): void {
+    if (!this.modelSelect.value || !this.modelReady) {
+      return;
+    }
+
+    this.arPlacementStarted = true;
+    this.showARPlacementControls();
+    this.startAttachedARCamera();
+  }
+
+  private updateARModelPickerSelection(modelId: string): void {
+    this.arModelList.querySelectorAll<HTMLButtonElement>('.ar-model-card').forEach((item) => {
+      const isSelected = item.dataset.modelId === modelId;
+      item.classList.toggle('is-selected', isSelected);
+      item.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+    });
+  }
+
+  private updateARPlaceButton(): void {
+    const hasSelection = Boolean(this.modelSelect.value);
+    this.arPlaceButton.disabled = !hasSelection || !this.modelReady;
+    this.arPlaceButton.textContent = hasSelection && this.modelReady ? 'Place AR' : hasSelection ? 'Loading...' : 'Select a model';
   }
 
   private updateModelRailSelection(modelId: string): void {
