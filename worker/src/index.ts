@@ -202,7 +202,13 @@ const revokedSessionsIndexKey = 'auth/sessions/revoked.json';
 const auditLogIndexKey = 'security/audit/events.json';
 const rateLimitKeyPrefix = 'security/rate-limit/';
 const defaultAdminEmail = 'sshibinthomass@gmail.com';
-const defaultAllowedOrigins = ['https://sshibinthomass.github.io', 'http://127.0.0.1:5173', 'http://localhost:5173'];
+const defaultAllowedOrigins = [
+  'https://sshibinthomass.github.io',
+  'http://127.0.0.1:5173',
+  'http://localhost:5173',
+  'http://127.0.0.1:5182',
+  'http://localhost:5182',
+];
 const passwordHashIterations = 100_000;
 const sessionLifetimeSeconds = 60 * 60 * 24 * 7;
 

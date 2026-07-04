@@ -1560,6 +1560,366 @@ canvas {
   line-height: 1.35;
 }
 
+.ar-model-picker,
+.model-manager {
+  background:
+    linear-gradient(90deg, rgba(20, 184, 166, 0.12) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(14, 116, 144, 0.08) 1px, transparent 1px),
+    linear-gradient(145deg, #f7fffd 0%, #eef8ff 48%, #fff8e7 100%);
+  background-size:
+    56px 56px,
+    56px 56px,
+    auto;
+}
+
+.ar-model-picker::before,
+.model-manager::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(94, 234, 212, 0.22), transparent 28%),
+    radial-gradient(circle at 82% 12%, rgba(251, 191, 36, 0.16), transparent 30%);
+  pointer-events: none;
+}
+
+.model-manager-inner,
+.ar-model-picker-inner {
+  position: relative;
+}
+
+.model-manager-header h2 {
+  color: #102326;
+}
+
+.model-manager-header p,
+.model-manager-message {
+  color: rgba(16, 35, 38, 0.7);
+}
+
+.model-manager .page-back,
+.status-panel.ar-picker-active > .page-back {
+  border-color: rgba(15, 118, 110, 0.2);
+  color: #102326;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 32px rgba(15, 118, 110, 0.12);
+}
+
+.model-manager-empty,
+.ar-model-empty {
+  border-color: rgba(15, 118, 110, 0.22);
+  color: rgba(16, 35, 38, 0.7);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.ar-model-picker .model-library-controls {
+  border-color: rgba(15, 118, 110, 0.16);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 18px 44px rgba(15, 118, 110, 0.12);
+}
+
+.model-library-search,
+.model-library-filter {
+  color: rgba(16, 35, 38, 0.72);
+}
+
+.model-library-search input,
+.model-library-filter select,
+.model-manager-details input {
+  border-color: rgba(15, 118, 110, 0.18);
+  color: #102326;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.model-library-search input::placeholder {
+  color: rgba(16, 35, 38, 0.42);
+}
+
+.ar-model-card,
+.model-manager-row,
+.model-rail-item {
+  border-color: rgba(15, 118, 110, 0.16);
+  color: #102326;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 16px 42px rgba(15, 118, 110, 0.13);
+}
+
+.ar-model-card:hover,
+.model-manager-row:hover,
+.model-rail-item:hover {
+  border-color: rgba(15, 118, 110, 0.32);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.ar-model-card.is-selected,
+.model-rail-item.is-selected {
+  border-color: rgba(15, 118, 110, 0.62);
+  background:
+    linear-gradient(160deg, rgba(94, 234, 212, 0.32), rgba(255, 255, 255, 0.9) 52%),
+    rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 0 0 2px rgba(15, 118, 110, 0.16),
+    0 18px 46px rgba(15, 118, 110, 0.18);
+}
+
+.ar-model-card-thumb,
+.model-rail-thumb,
+.model-manager-thumbnail {
+  border-color: rgba(15, 118, 110, 0.14);
+  color: rgba(16, 35, 38, 0.62);
+  background:
+    linear-gradient(145deg, rgba(94, 234, 212, 0.18), rgba(255, 255, 255, 0.58)),
+    rgba(255, 255, 255, 0.8);
+}
+
+.ar-model-card-label,
+.model-rail-label,
+.model-manager-name {
+  color: #102326;
+}
+
+.model-manager-badge {
+  border-color: rgba(15, 118, 110, 0.18);
+  color: rgba(16, 35, 38, 0.74);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.model-manager-row.is-generated .model-manager-badge {
+  border-color: rgba(15, 118, 110, 0.24);
+  color: #031b18;
+  background: #5eead4;
+}
+
+.model-manager-row.is-uploaded .model-manager-badge {
+  border-color: rgba(245, 158, 11, 0.34);
+  color: #221402;
+  background: #fbbf24;
+}
+
+.model-manager-row .model-manager-badge.visibility-private {
+  border-color: rgba(220, 38, 38, 0.28);
+  color: #7f1d1d;
+  background: rgba(254, 226, 226, 0.92);
+}
+
+.model-manager-row .model-manager-badge.visibility-public {
+  border-color: rgba(22, 163, 74, 0.28);
+  color: #052e16;
+  background: rgba(187, 247, 208, 0.94);
+}
+
+.model-manager-owner {
+  color: rgba(16, 35, 38, 0.62);
+}
+
+.model-manager-actions button,
+.hud-actions button,
+#ARButton {
+  border-color: rgba(15, 118, 110, 0.2);
+  color: #102326;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 32px rgba(15, 118, 110, 0.12);
+}
+
+.model-manager-actions button.danger {
+  border-color: rgba(220, 38, 38, 0.28);
+  color: #7f1d1d;
+  background: rgba(254, 226, 226, 0.9);
+}
+
+.hud-actions button.primary,
+#ARButton,
+.ar-model-place-button {
+  border-color: rgba(15, 118, 110, 0.28);
+  color: #031b18;
+  background: #5eead4;
+  box-shadow: 0 16px 42px rgba(15, 118, 110, 0.2);
+}
+
+.ar-model-place-button:disabled,
+.hud-actions button:disabled,
+.hud-actions button.primary:disabled {
+  color: rgba(16, 35, 38, 0.44);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.auth-panel,
+.admin-dashboard,
+.camera-panel.fullscreen,
+.full-flow-loading {
+  color: #102326;
+  background:
+    linear-gradient(90deg, rgba(20, 184, 166, 0.12) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(14, 116, 144, 0.08) 1px, transparent 1px),
+    linear-gradient(145deg, #f7fffd 0%, #eef8ff 48%, #fff8e7 100%);
+  background-size:
+    56px 56px,
+    56px 56px,
+    auto;
+}
+
+.auth-panel::before,
+.admin-dashboard::before,
+.camera-panel.fullscreen::before,
+.full-flow-loading::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 16% 16%, rgba(94, 234, 212, 0.22), transparent 28%),
+    radial-gradient(circle at 84% 10%, rgba(251, 191, 36, 0.16), transparent 30%);
+  pointer-events: none;
+}
+
+.auth-panel-inner,
+.admin-dashboard-inner {
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  border-radius: 8px;
+  padding: 22px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 22px 70px rgba(15, 118, 110, 0.16);
+  backdrop-filter: blur(14px);
+}
+
+.auth-panel .page-back,
+.admin-dashboard .page-back,
+.status-panel.camera-active > .page-back,
+.status-panel.full-flow-active > .page-back {
+  border-color: rgba(15, 118, 110, 0.2);
+  color: #102326;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 32px rgba(15, 118, 110, 0.12);
+}
+
+.auth-panel-header h2,
+.admin-dashboard-header h2,
+.admin-dashboard-section-header h3,
+.camera-label {
+  color: #102326;
+}
+
+.auth-message,
+.admin-dashboard-header p,
+.admin-dashboard-message,
+.admin-job-message,
+.camera-status,
+.generated-model-status,
+.camera-panel.fullscreen .camera-status,
+.camera-panel.fullscreen .generated-model-status {
+  color: rgba(16, 35, 38, 0.7);
+}
+
+.auth-message.is-error,
+.admin-job-message.is-error {
+  color: #b91c1c;
+}
+
+.auth-panel label,
+.target-object-field,
+.upload-image-field,
+.camera-panel.fullscreen .upload-image-field,
+.camera-panel.fullscreen .target-object-field {
+  color: rgba(16, 35, 38, 0.74);
+}
+
+.auth-panel input,
+.target-object-field input,
+.upload-image-field input,
+.camera-panel.fullscreen .target-object-field input,
+.camera-panel.fullscreen .upload-image-field input {
+  border-color: rgba(15, 118, 110, 0.18);
+  color: #102326;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.target-object-field input::placeholder {
+  color: rgba(16, 35, 38, 0.42);
+}
+
+.upload-image-field,
+.camera-panel.fullscreen .upload-image-field {
+  border-color: rgba(15, 118, 110, 0.22);
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 18px 46px rgba(15, 118, 110, 0.12);
+}
+
+.camera-panel.fullscreen .camera-preview {
+  border-color: rgba(15, 118, 110, 0.18);
+  background:
+    linear-gradient(145deg, rgba(94, 234, 212, 0.12), rgba(255, 255, 255, 0.55)),
+    rgba(255, 255, 255, 0.72);
+  box-shadow: 0 18px 46px rgba(15, 118, 110, 0.14);
+}
+
+.camera-panel.fullscreen video.camera-preview {
+  background: #02070b;
+}
+
+.camera-actions button,
+.camera-panel.fullscreen .camera-actions button,
+.admin-account-actions button,
+.admin-dashboard-section-header button,
+.admin-job-actions button {
+  border-color: rgba(15, 118, 110, 0.2);
+  color: #102326;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 32px rgba(15, 118, 110, 0.12);
+}
+
+.camera-actions button.primary,
+.camera-panel.fullscreen .camera-actions button.primary,
+.auth-form-actions button.primary,
+.admin-account-actions button.primary,
+.admin-job-actions button.primary {
+  border-color: rgba(15, 118, 110, 0.28);
+  color: #031b18;
+  background: #5eead4;
+}
+
+.camera-actions button:disabled,
+.camera-panel.fullscreen .camera-actions button:disabled {
+  color: rgba(16, 35, 38, 0.44);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.admin-account-row,
+.admin-job-row {
+  border-color: rgba(15, 118, 110, 0.16);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 16px 42px rgba(15, 118, 110, 0.12);
+}
+
+.admin-account-email,
+.admin-job-title {
+  color: #102326;
+}
+
+.admin-account-meta,
+.admin-job-meta {
+  color: rgba(16, 35, 38, 0.66);
+}
+
+.admin-job-error {
+  color: #b91c1c;
+}
+
+.admin-job-actions a {
+  border-color: rgba(15, 118, 110, 0.2);
+  color: #102326;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.full-flow-loading p {
+  color: #102326;
+}
+
+.loading-ring {
+  border-color: rgba(15, 118, 110, 0.16);
+  border-top-color: #0f766e;
+}
+
 @media (max-width: 860px) {
   .landing {
     align-items: flex-start;

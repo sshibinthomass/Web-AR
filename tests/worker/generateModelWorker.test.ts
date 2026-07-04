@@ -1508,4 +1508,17 @@ describe('handleGenerateModelRequest', () => {
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://sshibinthomass.github.io');
     expect(response.headers.get('Vary')).toBe('Origin');
   });
+
+  it('allows the local 5182 Vite origin by default for local visual checks', async () => {
+    const response = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/models', {
+        headers: { Origin: 'http://127.0.0.1:5182' },
+      }),
+      createEnv(),
+      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') },
+    );
+
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('http://127.0.0.1:5182');
+    expect(response.headers.get('Vary')).toBe('Origin');
+  });
 });
