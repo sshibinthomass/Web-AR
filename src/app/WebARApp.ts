@@ -98,6 +98,7 @@ export class WebARApp {
       onPreviewModel: (modelId) => void this.previewModel(modelId),
       onCloseModelPreview: () => this.closeModelPreview(),
       onPreviewLightingChange: (intensity) => this.updateModelPreviewLighting(intensity),
+      onPreviewLightDirectionChange: (degrees) => this.updateModelPreviewLightDirection(degrees),
       onUpdateModelThumbnail: (modelId, file) => void this.updateModelThumbnail(modelId, file),
       onReturnHome: () => void this.returnHome(),
       onLogin: (email, password) => void this.login(email, password),
@@ -665,6 +666,7 @@ export class WebARApp {
 
     try {
       this.modelPreviewViewer.setLightingIntensity(this.hud?.getModelPreviewLightingIntensity() ?? 1);
+      this.modelPreviewViewer.setLightDirectionDegrees(this.hud?.getModelPreviewLightDirectionDegrees() ?? 45);
       await this.modelPreviewViewer.preview(modelOption);
       this.hud?.showModelPreviewReady();
     } catch (error) {
@@ -681,6 +683,10 @@ export class WebARApp {
 
   private updateModelPreviewLighting(intensity: number): void {
     this.modelPreviewViewer?.setLightingIntensity(intensity);
+  }
+
+  private updateModelPreviewLightDirection(degrees: number): void {
+    this.modelPreviewViewer?.setLightDirectionDegrees(degrees);
   }
 
   private async uploadImage(file: File): Promise<void> {

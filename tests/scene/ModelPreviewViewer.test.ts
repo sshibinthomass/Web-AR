@@ -72,6 +72,17 @@ describe('ModelPreviewViewer', () => {
     expect(keyLight?.intensity).toBeCloseTo(3.3);
     expect((shadowFloor?.material as THREE.ShadowMaterial).opacity).toBeGreaterThan(0.22);
     expect(renderer.render).toHaveBeenCalledWith(previewScene, expect.any(THREE.PerspectiveCamera));
+    const brightShadowOpacity = (shadowFloor?.material as THREE.ShadowMaterial).opacity;
+
+    viewer.setLightDirectionDegrees(180);
+
+    expect(keyLight?.position.x).toBeLessThan(-4);
+    expect(Math.abs(keyLight?.position.z ?? 1)).toBeLessThan(0.001);
+    expect(keyLight?.target.position.x).toBeCloseTo(0);
+
+    viewer.setLightingIntensity(0.5);
+
+    expect((shadowFloor?.material as THREE.ShadowMaterial).opacity).toBeLessThan(brightShadowOpacity);
 
     viewer.dispose();
 

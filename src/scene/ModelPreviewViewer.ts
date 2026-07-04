@@ -63,6 +63,10 @@ export class ModelPreviewViewer {
   private shadowFloor: THREE.Mesh | null = null;
   private previewLighting: PreviewLighting | null = null;
   private lightingIntensity = 1;
+  private lightDirectionDegrees = 45;
+  private lightTargetCenter = new THREE.Vector3();
+  private lightOrbitRadius = 5;
+  private lightHeight = 5;
   private frameId: number | null = null;
   private disconnectResize: (() => void) | null = null;
   private requestVersion = 0;
@@ -132,9 +136,11 @@ export class ModelPreviewViewer {
       this.shadowFloor = shadowFloor;
       keyLight.target.position.copy(getBoundsCenter(bounds));
       configurePreviewShadowCamera(keyLight, bounds);
+      this.configureLightDirectionBounds(bounds);
       scene.add(loadedModel);
       scene.add(shadowFloor);
       this.applyLightingIntensity();
+      this.applyLightDirection();
       this.frameCameraToModel(loadedModel, bounds);
       this.startRenderLoop();
     } catch (error) {
@@ -187,6 +193,16 @@ export class ModelPreviewViewer {
 
     this.lightingIntensity = Math.min(1.8, Math.max(0.5, intensity));
     this.applyLightingIntensity();
+    this.renderFrame();
+  }
+
+  setLightDirectionDegrees(degrees: number): void {
+    if (!Number.isFinite(degrees)) {
+      return;
+    }
+
+    this.lightDirectionDegrees = normalizeDegrees(degrees);
+    this.applyLightDirection();
     this.renderFrame();
   }
 
@@ -261,6 +277,35 @@ export class ModelPreviewViewer {
         material.needsUpdate = true;
       }
     }
+  }
+
+  private configureLightDirectionBounds(bounds: THREE.Box3): void {
+    const center = getBoundsCenter(bounds);
+    const size = getBoundsSize(bounds);
+    const maxDimension = Math.max(size.x, size.y, size.z, 1);
+
+    this.lightTargetCenter.copy(center);
+    this.lightOrbitRadius = maxDimension * 4.8;
+    this.lightHeight = maxDimension * 4.6;
+  }
+
+  private applyLightDirection(): void {
+    if (!this.previewLighting) {
+      return;
+    }
+
+    const radians = THREE.MathUtils.degToRad(this.lightDirectionDegrees);
+    const x = Math.cos(radians) * this.lightOrbitRadius;
+    const z = Math.sin(radians) * this.lightOrbitRadius;
+
+    this.previewLighting.keyLight.position.set(
+      this.lightTargetCenter.x + x,
+      this.lightTargetCenter.y + this.lightHeight,
+      this.lightTargetCenter.z + z,
+    );
+    this.previewLighting.keyLight.target.position.copy(this.lightTargetCenter);
+    this.previewLighting.keyLight.target.updateMatrixWorld();
+    this.previewLighting.keyLight.updateMatrixWorld();
   }
 }
 
@@ -351,6 +396,10 @@ function getBoundsSize(bounds: THREE.Box3): THREE.Vector3 {
   const size = new THREE.Vector3();
   bounds.getSize(size);
   return size;
+}
+
+function normalizeDegrees(degrees: number): number {
+  return ((degrees % 360) + 360) % 360;
 }
 
 function disposeObject(root: THREE.Object3D): void {

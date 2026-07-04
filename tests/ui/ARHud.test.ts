@@ -38,6 +38,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onPreviewModel: vi.fn(),
     onCloseModelPreview: vi.fn(),
     onPreviewLightingChange: vi.fn(),
+    onPreviewLightDirectionChange: vi.fn(),
     onUpdateModelThumbnail: vi.fn(),
     onReturnHome: vi.fn(),
     onLogin: vi.fn(),
@@ -489,7 +490,13 @@ describe('ARHud', () => {
     const onPreviewModel = vi.fn();
     const onCloseModelPreview = vi.fn();
     const onPreviewLightingChange = vi.fn();
-    const hud = new ARHud(root, modelOptions, createHandlers({ onPreviewModel, onCloseModelPreview, onPreviewLightingChange }));
+    const onPreviewLightDirectionChange = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({
+      onPreviewModel,
+      onCloseModelPreview,
+      onPreviewLightingChange,
+      onPreviewLightDirectionChange,
+    }));
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
     const firstRow = root.querySelector<HTMLElement>('.model-manager-row')!;
@@ -511,6 +518,13 @@ describe('ARHud', () => {
     expect(onPreviewLightingChange).toHaveBeenCalledWith(1.45);
     expect(root.querySelector('.model-preview-lighting-value')?.textContent).toBe('145%');
     expect(hud.getModelPreviewLightingIntensity()).toBe(1.45);
+    const directionInput = root.querySelector<HTMLInputElement>('.model-preview-direction-input')!;
+    directionInput.value = '225';
+    directionInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    expect(onPreviewLightDirectionChange).toHaveBeenCalledWith(225);
+    expect(root.querySelector('.model-preview-direction-value')?.textContent).toBe('225 deg');
+    expect(hud.getModelPreviewLightDirectionDegrees()).toBe(225);
 
     root.querySelector<HTMLButtonElement>('.model-preview-close')?.click();
 

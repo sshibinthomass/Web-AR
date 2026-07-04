@@ -26,6 +26,7 @@ interface HUDHandlers {
   onPreviewModel(modelId: string): void;
   onCloseModelPreview(): void;
   onPreviewLightingChange(intensity: number): void;
+  onPreviewLightDirectionChange(degrees: number): void;
   onUpdateModelThumbnail(modelId: string, file: File): void;
   onReturnHome(): void;
   onLogin(email: string, password: string): void;
@@ -81,6 +82,8 @@ export class ARHud {
   private readonly modelPreviewStatus: HTMLElement;
   private readonly modelPreviewLightingInput: HTMLInputElement;
   private readonly modelPreviewLightingValue: HTMLOutputElement;
+  private readonly modelPreviewDirectionInput: HTMLInputElement;
+  private readonly modelPreviewDirectionValue: HTMLOutputElement;
   private readonly modelRail: HTMLElement;
   private readonly arModelPicker: HTMLElement;
   private readonly arModelSearchInput: HTMLInputElement;
@@ -326,11 +329,18 @@ export class ARHud {
             <span class="model-preview-kicker">3D preview</span>
             <h3 class="model-preview-title"></h3>
           </div>
-          <label class="model-preview-lighting">
-            <span>Lighting</span>
-            <input class="model-preview-lighting-input" type="range" min="50" max="180" step="5" value="100" aria-label="Preview lighting intensity">
-            <output class="model-preview-lighting-value">100%</output>
-          </label>
+          <div class="model-preview-controls" aria-label="Preview lighting controls">
+            <label class="model-preview-control model-preview-lighting">
+              <span>Lighting</span>
+              <input class="model-preview-lighting-input" type="range" min="50" max="180" step="5" value="100" aria-label="Preview lighting intensity">
+              <output class="model-preview-lighting-value">100%</output>
+            </label>
+            <label class="model-preview-control model-preview-direction">
+              <span>Direction</span>
+              <input class="model-preview-direction-input" type="range" min="0" max="355" step="5" value="45" aria-label="Preview light direction">
+              <output class="model-preview-direction-value">45 deg</output>
+            </label>
+          </div>
           <button class="model-preview-close" type="button">Close</button>
         </div>
         <div class="model-preview-viewport"></div>
@@ -342,7 +352,10 @@ export class ARHud {
     this.modelPreviewStatus = this.modelPreview.querySelector<HTMLElement>('.model-preview-status')!;
     this.modelPreviewLightingInput = this.modelPreview.querySelector<HTMLInputElement>('.model-preview-lighting-input')!;
     this.modelPreviewLightingValue = this.modelPreview.querySelector<HTMLOutputElement>('.model-preview-lighting-value')!;
+    this.modelPreviewDirectionInput = this.modelPreview.querySelector<HTMLInputElement>('.model-preview-direction-input')!;
+    this.modelPreviewDirectionValue = this.modelPreview.querySelector<HTMLOutputElement>('.model-preview-direction-value')!;
     this.modelPreviewLightingInput.addEventListener('input', () => this.handleModelPreviewLightingInput());
+    this.modelPreviewDirectionInput.addEventListener('input', () => this.handleModelPreviewDirectionInput());
     this.modelPreview.querySelector<HTMLButtonElement>('.model-preview-close')?.addEventListener('click', () => {
       this.handlers.onCloseModelPreview();
     });
@@ -751,6 +764,7 @@ export class ARHud {
     this.modelPreviewStatus.textContent = 'Loading preview...';
     this.modelPreviewViewport.replaceChildren();
     this.updateModelPreviewLightingLabel();
+    this.updateModelPreviewDirectionLabel();
     this.modelPreview.classList.remove('hidden');
   }
 
@@ -765,6 +779,10 @@ export class ARHud {
 
   getModelPreviewLightingIntensity(): number {
     return this.parseModelPreviewLightingIntensity();
+  }
+
+  getModelPreviewLightDirectionDegrees(): number {
+    return this.parseModelPreviewLightDirectionDegrees();
   }
 
   hideModelPreview(): void {
@@ -1202,6 +1220,12 @@ export class ARHud {
     this.handlers.onPreviewLightingChange(intensity);
   }
 
+  private handleModelPreviewDirectionInput(): void {
+    const degrees = this.parseModelPreviewLightDirectionDegrees();
+    this.updateModelPreviewDirectionLabel();
+    this.handlers.onPreviewLightDirectionChange(degrees);
+  }
+
   private parseModelPreviewLightingIntensity(): number {
     const value = Number(this.modelPreviewLightingInput.value);
     if (!Number.isFinite(value)) {
@@ -1216,6 +1240,22 @@ export class ARHud {
     this.modelPreviewLightingValue.value = percentage;
     this.modelPreviewLightingValue.textContent = percentage;
     this.modelPreviewLightingInput.setAttribute('aria-valuetext', percentage);
+  }
+
+  private parseModelPreviewLightDirectionDegrees(): number {
+    const value = Number(this.modelPreviewDirectionInput.value);
+    if (!Number.isFinite(value)) {
+      return 45;
+    }
+
+    return ((Math.round(value / 5) * 5) % 360 + 360) % 360;
+  }
+
+  private updateModelPreviewDirectionLabel(): void {
+    const degrees = `${this.parseModelPreviewLightDirectionDegrees()} deg`;
+    this.modelPreviewDirectionValue.value = degrees;
+    this.modelPreviewDirectionValue.textContent = degrees;
+    this.modelPreviewDirectionInput.setAttribute('aria-valuetext', degrees);
   }
 
   private renderModelSelect(): void {
