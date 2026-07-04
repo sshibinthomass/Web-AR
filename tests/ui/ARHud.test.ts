@@ -368,6 +368,22 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('You can place the object now.');
   });
 
+  it('opens the AR camera automatically after Full Flow generation returns', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    const startArCamera = vi.fn();
+    const arButton = document.createElement('button');
+    arButton.textContent = 'Start AR';
+    arButton.addEventListener('click', startArCamera);
+    hud.attachARButton(arButton);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
+    hud.showFullFlowReady('You can place the object now.');
+
+    expect(window.location.hash).toBe('#/ar');
+    expect(startArCamera).toHaveBeenCalledTimes(1);
+  });
+
   it('opens the camera page directly from the camera hash route', () => {
     window.history.replaceState(null, '', '/#/camera');
     const root = document.createElement('div');

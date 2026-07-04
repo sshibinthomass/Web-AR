@@ -473,16 +473,9 @@ export class ARHud {
   }
 
   showFullFlowReady(message: string): void {
-    this.landing.classList.add('hidden');
-    this.statusPanel.classList.remove('hidden');
-    this.statusPanel.classList.remove('camera-active');
-    this.statusPanel.classList.remove('full-flow-active');
-    this.cameraPanel.classList.add('hidden');
-    this.cameraPanel.classList.remove('fullscreen');
-    this.fullFlowLoading.classList.add('hidden');
-    this.hudActions.classList.remove('hidden');
-    this.gestureSurface.classList.remove('hidden');
+    this.navigateTo('ar');
     this.statusMessage.textContent = message;
+    this.startAttachedARCamera();
   }
 
   showFullFlowError(message: string): void {
@@ -823,6 +816,11 @@ export class ARHud {
 
   private generationButtonLabel(): string {
     return this.activeRoute === 'full-flow' ? 'Generate and Place' : 'Generate 3D';
+  }
+
+  private startAttachedARCamera(): void {
+    const arControl = this.arButtonSlot.querySelector<HTMLElement>('button, a');
+    arControl?.click();
   }
 
   private createButton(label: string, className: string, onClick: () => void): HTMLButtonElement {
