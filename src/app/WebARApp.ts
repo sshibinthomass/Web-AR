@@ -12,8 +12,10 @@ import { createScene, type SceneContext } from '../scene/createScene';
 import { loadGLBModel } from '../scene/loadModel';
 import {
   extractImageFor3D,
+  deleteGeneratedModel as deleteGeneratedModelRequest,
   generateModelFromImage,
   listGeneratedModels,
+  renameGeneratedModel as renameGeneratedModelRequest,
   startGeneratedModelJob,
   type GenerationPipeline,
 } from '../services/generatedModelClient';
@@ -24,6 +26,7 @@ import { HitTestManager } from '../xr/HitTestManager';
 import { PlaneTrackingManager } from '../xr/PlaneTrackingManager';
 import { checkXRSupport } from '../xr/XRSupport';
 import { createARSessionButton } from '../xr/XRSessionManager';
+import { getGenerateModelApiUrl } from './config';
 
 export class WebARApp {
   private sceneContext: SceneContext | null = null;
@@ -65,6 +68,8 @@ export class WebARApp {
       onSubmitTarget: (targetObject) => void this.submitCapturedImageToGpt(targetObject),
       onGenerateModel: (targetObject) => void this.generateModel(targetObject),
       onFullFlowCapture: (targetObject) => void this.runFullFlow(targetObject),
+      onRenameGeneratedModel: (modelId, label) => void this.renameGeneratedModel(modelId, label),
+      onDeleteGeneratedModel: (modelId) => void this.deleteGeneratedModel(modelId),
       onReturnHome: () => void this.returnHome(),
     });
     this.hud.updateModelSource('Cloudflare only');
@@ -193,7 +198,7 @@ export class WebARApp {
 
     try {
       const job = await startGeneratedModelJob({
-        apiUrl: import.meta.env.VITE_GENERATE_MODEL_API_URL ?? '',
+        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
         imageBase64: this.capturedImage.imageBase64,
         imageMimeType: this.capturedImage.imageMimeType,
         targetObject,
@@ -224,7 +229,7 @@ export class WebARApp {
 
     try {
       const extractedImage = await extractImageFor3D({
-        apiUrl: import.meta.env.VITE_GENERATE_MODEL_API_URL ?? '',
+        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
         imageBase64: this.capturedImage.imageBase64,
         imageMimeType: this.capturedImage.imageMimeType,
         targetObject,
@@ -258,7 +263,7 @@ export class WebARApp {
       this.hud?.showFullFlowLoading('Building your 3D object in Modal. Keep this page open.');
 
       const generatedModel = await generateModelFromImage({
-        apiUrl: import.meta.env.VITE_GENERATE_MODEL_API_URL ?? '',
+        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
         imageBase64: capturedImage.imageBase64,
         imageMimeType: capturedImage.imageMimeType,
         targetObject,
@@ -293,10 +298,7 @@ export class WebARApp {
   }
 
   private async refreshGeneratedModels(): Promise<void> {
-    const apiUrl = import.meta.env.VITE_GENERATE_MODEL_API_URL ?? '';
-    if (!apiUrl) {
-      return;
-    }
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
 
     try {
       const generatedModels = await listGeneratedModels({ apiUrl });
@@ -304,6 +306,36 @@ export class WebARApp {
       this.hud?.updateGeneratedModels(generatedModels);
     } catch (error) {
       console.warn('Could not refresh generated models.', error);
+    }
+  }
+
+  private async renameGeneratedModel(modelId: string, label: string): Promise<void> {
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+
+    this.hud?.updateModelManagerStatus('Renaming model...');
+
+    try {
+      await renameGeneratedModelRequest({ apiUrl, modelId, label });
+      await this.refreshGeneratedModels();
+      this.hud?.updateModelManagerStatus('Model renamed.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not rename model.';
+      this.hud?.updateModelManagerStatus(`Rename failed: ${message}`);
+    }
+  }
+
+  private async deleteGeneratedModel(modelId: string): Promise<void> {
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+
+    this.hud?.updateModelManagerStatus('Deleting model...');
+
+    try {
+      await deleteGeneratedModelRequest({ apiUrl, modelId });
+      await this.refreshGeneratedModels();
+      this.hud?.updateModelManagerStatus('Model deleted.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not delete model.';
+      this.hud?.updateModelManagerStatus(`Delete failed: ${message}`);
     }
   }
 

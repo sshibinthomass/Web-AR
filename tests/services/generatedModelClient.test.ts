@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   extractImageFor3D,
+  deleteGeneratedModel,
   generateModelFromImage,
   listGeneratedModels,
+  renameGeneratedModel,
   startGeneratedModelJob,
 } from '../../src/services/generatedModelClient';
 
@@ -164,6 +166,7 @@ describe('listGeneratedModels', () => {
               label: '2026-06-28 12:00:00 UTC',
               model_url: 'https://assets.example/generated.glb',
               object_key: 'models/generated/capture.glb',
+              preview_url: 'https://assets.example/previews/capture.png',
             },
           ],
         }),
@@ -185,8 +188,86 @@ describe('listGeneratedModels', () => {
         id: 'generated-fc-123',
         label: '2026-06-28 12:00:00 UTC',
         url: 'https://assets.example/generated.glb',
+        previewUrl: 'https://assets.example/previews/capture.png',
       },
     ]);
+  });
+});
+
+describe('renameGeneratedModel', () => {
+  it('renames a permanent generated model by id', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'fc-123',
+          label: 'Living room chair',
+          model_url: 'https://assets.example/generated-chair.glb',
+          object_key: 'models/generated/generated-chair.glb',
+          preview_url: 'https://assets.example/previews/generated-chair.png',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const model = await renameGeneratedModel({
+      apiUrl: 'https://worker.example/generate-3d',
+      modelId: 'generated-fc-123',
+      label: '  Living room chair  ',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/generate-3d/models/fc-123',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: 'Living room chair' }),
+      }),
+    );
+    expect(model).toEqual({
+      id: 'generated-fc-123',
+      label: 'Living room chair',
+      url: 'https://assets.example/generated-chair.glb',
+      previewUrl: 'https://assets.example/previews/generated-chair.png',
+    });
+  });
+
+  it('requires a non-empty generated model label when renaming', async () => {
+    await expect(
+      renameGeneratedModel({
+        apiUrl: 'https://worker.example/generate-3d',
+        modelId: 'generated-fc-123',
+        label: '   ',
+        fetchImpl: vi.fn(),
+      }),
+    ).rejects.toThrow('Enter a model name before renaming.');
+  });
+});
+
+describe('deleteGeneratedModel', () => {
+  it('deletes a permanent generated model by id', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ deleted: true, id: 'fc-123' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await deleteGeneratedModel({
+      apiUrl: 'https://worker.example/generate-3d',
+      modelId: 'generated-fc-123',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/generate-3d/models/fc-123',
+      expect.objectContaining({
+        method: 'DELETE',
+      }),
+    );
   });
 });
 

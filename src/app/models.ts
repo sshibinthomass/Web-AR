@@ -2,6 +2,7 @@ export type ModelOption = {
   id: string;
   label: string;
   url: string;
+  previewUrl?: string;
 };
 
 const CLOUDFLARE_ASSET_ORIGIN = 'https://web-ar-model-assets.pages.dev';

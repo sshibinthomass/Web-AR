@@ -10,6 +10,7 @@ export interface ModelBucket {
     value: ArrayBuffer | ReadableStream | string,
     options?: { httpMetadata?: { contentType?: string } },
   ): Promise<unknown>;
+  delete?(key: string): Promise<unknown>;
 }
 
 export interface WorkerEnv {
@@ -61,6 +62,8 @@ interface StoredJob {
   pipeline?: GenerationPipeline;
   model_url?: string;
   object_key?: string;
+  preview_url?: string;
+  preview_object_key?: string;
   bytes?: number;
 }
 
@@ -73,6 +76,8 @@ interface GeneratedModelEntry {
   label: string;
   model_url: string;
   object_key: string;
+  preview_url?: string;
+  preview_object_key?: string;
   completed_at: string;
   bytes: number;
 }
@@ -112,7 +117,7 @@ const jobKeyPrefix = 'models/generated/jobs/';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -156,6 +161,11 @@ export async function handleGenerateModelRequest(
     return jsonResponse({
       models: index.models.sort((left, right) => right.completed_at.localeCompare(left.completed_at)),
     });
+  }
+
+  if (url.pathname.startsWith('/generate-3d/models/')) {
+    const modelId = decodeURIComponent(url.pathname.replace('/generate-3d/models/', ''));
+    return handleGeneratedModelManagementRequest(request, env, deps, modelId);
   }
 
   if (request.method === 'GET' && url.pathname.startsWith('/generate-3d/jobs/')) {
@@ -216,6 +226,7 @@ export async function handleGenerateModelRequest(
     deps,
     {
       imageBase64: body.value.image_base64,
+      imageMimeType: typeof body.value.image_mime_type === 'string' ? body.value.image_mime_type : 'image/png',
       targetObject,
       pipeline: url.pathname === '/generate-3d/openai' ? 'openai-to-3d' : 'trellis',
     },
@@ -228,6 +239,7 @@ async function startModalGenerationJob(
   deps: GenerateModelDeps,
   input: {
     imageBase64: string;
+    imageMimeType: string;
     targetObject: string | null;
     pipeline: GenerationPipeline;
   },
@@ -261,6 +273,14 @@ async function startModalGenerationJob(
   }
 
   const now = deps.now();
+  const publicOrigin = getPublicOrigin(env, url.origin);
+  const preview = await storeGeneratedModelPreview(env, {
+    imageBase64: input.imageBase64,
+    imageMimeType: input.imageMimeType,
+    jobId: modalJob.call_id,
+    createdAt: now,
+    publicOrigin,
+  });
   const job: StoredJob = {
     id: modalJob.call_id,
     label: formatJobLabel(now, input.targetObject),
@@ -269,6 +289,8 @@ async function startModalGenerationJob(
     updated_at: now.toISOString(),
     target_object: input.targetObject ?? undefined,
     pipeline: input.pipeline,
+    preview_url: preview?.previewUrl,
+    preview_object_key: preview?.previewObjectKey,
   };
   await saveJob(env, job);
   await addPendingJob(env, job.id);
@@ -282,6 +304,97 @@ async function startModalGenerationJob(
     },
     202,
   );
+}
+
+async function handleGeneratedModelManagementRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  modelId: string,
+): Promise<Response> {
+  if (!modelId) {
+    return jsonResponse({ error: 'model_id is required.' }, 400);
+  }
+
+  if (!env.MODEL_BUCKET) {
+    return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
+  }
+
+  if (request.method === 'PATCH') {
+    let body: { label?: unknown };
+    try {
+      body = (await request.json()) as { label?: unknown };
+    } catch {
+      return jsonResponse({ error: 'Request body must be valid JSON.' }, 400);
+    }
+
+    const label = normalizeModelLabel(body.label);
+    if (!label) {
+      return jsonResponse({ error: 'label is required.' }, 400);
+    }
+
+    return renameGeneratedModel(env, deps, modelId, label);
+  }
+
+  if (request.method === 'DELETE') {
+    return deleteGeneratedModel(env, modelId);
+  }
+
+  return jsonResponse({ error: 'Only PATCH and DELETE requests are supported for generated models.' }, 405);
+}
+
+async function renameGeneratedModel(
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  modelId: string,
+  label: string,
+): Promise<Response> {
+  const index = await readGeneratedModelsIndex(env);
+  const modelIndex = index.models.findIndex((model) => model.id === modelId);
+  if (modelIndex === -1) {
+    return jsonResponse({ error: 'Generated model not found.' }, 404);
+  }
+
+  const renamedModel: GeneratedModelEntry = {
+    ...index.models[modelIndex],
+    label,
+  };
+  const models = [...index.models];
+  models[modelIndex] = renamedModel;
+  await writeJsonObject(env, generatedModelsIndexKey, { models });
+
+  const job = await readJob(env, modelId);
+  if (job) {
+    await saveJob(env, {
+      ...job,
+      label,
+      updated_at: deps.now().toISOString(),
+    });
+  }
+
+  return jsonResponse(renamedModel);
+}
+
+async function deleteGeneratedModel(env: WorkerEnv, modelId: string): Promise<Response> {
+  const index = await readGeneratedModelsIndex(env);
+  const model = index.models.find((entry) => entry.id === modelId);
+  if (!model) {
+    return jsonResponse({ error: 'Generated model not found.' }, 404);
+  }
+
+  await writeJsonObject(env, generatedModelsIndexKey, {
+    models: index.models.filter((entry) => entry.id !== modelId),
+  });
+
+  if (env.MODEL_BUCKET.delete) {
+    await env.MODEL_BUCKET.delete(model.object_key);
+    if (model.preview_object_key) {
+      await env.MODEL_BUCKET.delete(model.preview_object_key);
+    }
+    await env.MODEL_BUCKET.delete(jobStorageKey(modelId));
+  }
+
+  return jsonResponse({ deleted: true, id: modelId });
 }
 
 async function pollModalJob(
@@ -403,6 +516,8 @@ async function processModalJob(
     updated_at: now.toISOString(),
     model_url: `${publicOrigin}/${objectKey}`,
     object_key: objectKey,
+    preview_url: job.preview_url,
+    preview_object_key: job.preview_object_key,
     bytes: glbBytes.byteLength,
   };
   await saveJob(env, completedJob);
@@ -519,6 +634,15 @@ function normalizeTargetObject(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
+function normalizeModelLabel(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 async function readJsonBody(
   request: Request,
 ): Promise<{ ok: true; value: GenerateModelRequestBody } | { ok: false; error: string }> {
@@ -590,6 +714,8 @@ async function upsertGeneratedModel(env: WorkerEnv, job: StoredJob): Promise<voi
     label: job.label,
     model_url: job.model_url,
     object_key: job.object_key,
+    preview_url: job.preview_url,
+    preview_object_key: job.preview_object_key,
     completed_at: job.completed_at,
     bytes: job.bytes,
   };
@@ -651,8 +777,40 @@ function toJobResponse(job: StoredJob): Record<string, unknown> {
     status: job.status,
     model_url: job.model_url,
     object_key: job.object_key,
+    preview_url: job.preview_url,
+    preview_object_key: job.preview_object_key,
     bytes: job.bytes,
   };
+}
+
+async function storeGeneratedModelPreview(
+  env: WorkerEnv,
+  input: {
+    imageBase64: string;
+    imageMimeType: string;
+    jobId: string;
+    createdAt: Date;
+    publicOrigin: string;
+  },
+): Promise<{ previewUrl: string; previewObjectKey: string } | null> {
+  try {
+    const contentType = normalizeImageMimeType(input.imageMimeType);
+    const extension = imageExtensionForMimeType(contentType);
+    const previewObjectKey = `models/generated/previews/capture-${formatTimestamp(input.createdAt)}-${safeObjectKeyPart(
+      input.jobId,
+    )}.${extension}`;
+    await env.MODEL_BUCKET.put(previewObjectKey, base64ToArrayBuffer(stripDataUrlPrefix(input.imageBase64)), {
+      httpMetadata: {
+        contentType,
+      },
+    });
+    return {
+      previewUrl: `${input.publicOrigin}/${previewObjectKey}`,
+      previewObjectKey,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -700,6 +858,36 @@ function formatJobLabel(date: Date, targetObject: string | null): string {
 
 function safeObjectKeyPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80);
+}
+
+function normalizeImageMimeType(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'image/jpeg' || normalized === 'image/png' || normalized === 'image/webp') {
+    return normalized;
+  }
+
+  return 'image/png';
+}
+
+function imageExtensionForMimeType(mimeType: string): string {
+  if (mimeType === 'image/jpeg') {
+    return 'jpg';
+  }
+
+  if (mimeType === 'image/webp') {
+    return 'webp';
+  }
+
+  return 'png';
+}
+
+function stripDataUrlPrefix(value: string): string {
+  const commaIndex = value.indexOf(',');
+  if (value.startsWith('data:') && commaIndex !== -1) {
+    return value.slice(commaIndex + 1);
+  }
+
+  return value;
 }
 
 function base64ToArrayBuffer(value: string): ArrayBuffer {

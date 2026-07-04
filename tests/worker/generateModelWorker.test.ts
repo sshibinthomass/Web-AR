@@ -179,7 +179,7 @@ describe('handleGenerateModelRequest', () => {
 
     const response = await handleGenerateModelRequest(
       jsonRequest({
-        image_base64: 'extracted-image-base64',
+        image_base64: 'aW1hZ2U=',
         image_mime_type: 'image/png',
         target_object: ' laptop ',
       }),
@@ -198,7 +198,7 @@ describe('handleGenerateModelRequest', () => {
           'Modal-Secret': 'modal-secret',
         },
         body: JSON.stringify({
-          image_base64: 'extracted-image-base64',
+          image_base64: 'aW1hZ2U=',
           seed: 42,
           pipeline_type: '512',
           decimation_target: 100000,
@@ -207,8 +207,20 @@ describe('handleGenerateModelRequest', () => {
       }),
     );
     expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/previews/capture-20260628-120000-fc-123.png',
+      expect.any(ArrayBuffer),
+      { httpMetadata: { contentType: 'image/png' } },
+    );
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
       'models/generated/jobs/fc-123.json',
       expect.stringContaining('"label":"laptop - 2026-06-28 12:00:00 UTC"'),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/jobs/fc-123.json',
+      expect.stringContaining(
+        '"preview_url":"https://web-ar-model-assets.pages.dev/models/generated/previews/capture-20260628-120000-fc-123.png"',
+      ),
       { httpMetadata: { contentType: 'application/json' } },
     );
     expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
@@ -449,6 +461,127 @@ describe('handleGenerateModelRequest', () => {
     });
   });
 
+  it('renames a permanently generated model in the model index and job metadata', async () => {
+    const storedObjects = new Map<string, string>();
+    storedObjects.set(
+      'models/generated/index.json',
+      JSON.stringify({
+        models: [
+          {
+            id: 'fc-123',
+            label: 'chair - 2026-07-04 12:00:00 UTC',
+            model_url: 'https://assets.example/generated-chair.glb',
+            object_key: 'models/generated/generated-chair.glb',
+            preview_url: 'https://assets.example/previews/generated-chair.png',
+            preview_object_key: 'models/generated/previews/generated-chair.png',
+            completed_at: '2026-07-04T12:00:00.000Z',
+            bytes: 4,
+          },
+        ],
+      }),
+    );
+    storedObjects.set(
+      'models/generated/jobs/fc-123.json',
+      JSON.stringify({
+        id: 'fc-123',
+        label: 'chair - 2026-07-04 12:00:00 UTC',
+        status: 'completed',
+        completed_at: '2026-07-04T12:00:00.000Z',
+        updated_at: '2026-07-04T12:00:00.000Z',
+      }),
+    );
+    const env = createEnv({
+      MODEL_BUCKET: {
+        get: vi.fn((key: string) => {
+          const value = storedObjects.get(key);
+          return Promise.resolve(value ? { body: value, httpMetadata: { contentType: 'application/json' } } : null);
+        }),
+        put: vi.fn((key: string, value: ArrayBuffer | ReadableStream | string) => {
+          if (typeof value === 'string') {
+            storedObjects.set(key, value);
+          }
+          return Promise.resolve(undefined);
+        }),
+      },
+    });
+
+    const response = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/models/fc-123', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: '  Living room chair  ' }),
+      }),
+      env,
+      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:30:00Z') },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ id: 'fc-123', label: 'Living room chair' });
+    expect(JSON.parse(storedObjects.get('models/generated/index.json')!)).toEqual({
+      models: [expect.objectContaining({ id: 'fc-123', label: 'Living room chair' })],
+    });
+    expect(JSON.parse(storedObjects.get('models/generated/jobs/fc-123.json')!)).toMatchObject({
+      label: 'Living room chair',
+      updated_at: '2026-07-04T12:30:00.000Z',
+    });
+  });
+
+  it('deletes a permanently generated model from the dropdown index and stored objects', async () => {
+    const storedObjects = new Map<string, string>();
+    storedObjects.set(
+      'models/generated/index.json',
+      JSON.stringify({
+        models: [
+          {
+            id: 'fc-123',
+            label: 'Living room chair',
+            model_url: 'https://assets.example/generated-chair.glb',
+            object_key: 'models/generated/generated-chair.glb',
+            preview_url: 'https://assets.example/previews/generated-chair.png',
+            preview_object_key: 'models/generated/previews/generated-chair.png',
+            completed_at: '2026-07-04T12:00:00.000Z',
+            bytes: 4,
+          },
+        ],
+      }),
+    );
+    storedObjects.set('models/generated/jobs/fc-123.json', JSON.stringify({ id: 'fc-123' }));
+    const deleteMock = vi.fn((key: string) => {
+      storedObjects.delete(key);
+      return Promise.resolve(undefined);
+    });
+    const env = createEnv({
+      MODEL_BUCKET: {
+        get: vi.fn((key: string) => {
+          const value = storedObjects.get(key);
+          return Promise.resolve(value ? { body: value, httpMetadata: { contentType: 'application/json' } } : null);
+        }),
+        put: vi.fn((key: string, value: ArrayBuffer | ReadableStream | string) => {
+          if (typeof value === 'string') {
+            storedObjects.set(key, value);
+          }
+          return Promise.resolve(undefined);
+        }),
+        delete: deleteMock,
+      },
+    });
+
+    const response = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/models/fc-123', {
+        method: 'DELETE',
+      }),
+      env,
+      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:30:00Z') },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ deleted: true, id: 'fc-123' });
+    expect(JSON.parse(storedObjects.get('models/generated/index.json')!)).toEqual({ models: [] });
+    expect(deleteMock).toHaveBeenCalledWith('models/generated/generated-chair.glb');
+    expect(deleteMock).toHaveBeenCalledWith('models/generated/previews/generated-chair.png');
+    expect(deleteMock).toHaveBeenCalledWith('models/generated/jobs/fc-123.json');
+  });
+
   it('scheduled polling completes pending Modal jobs and indexes them permanently', async () => {
     const storedObjects = new Map<string, string>();
     storedObjects.set('models/generated/jobs/index.json', JSON.stringify({ pending: ['fc-123'] }));
@@ -460,6 +593,8 @@ describe('handleGenerateModelRequest', () => {
         status: 'running',
         created_at: '2026-06-28T12:00:00.000Z',
         updated_at: '2026-06-28T12:00:00.000Z',
+        preview_url: 'https://web-ar-model-assets.pages.dev/models/generated/previews/capture-20260628-120000-fc-123.jpeg',
+        preview_object_key: 'models/generated/previews/capture-20260628-120000-fc-123.jpeg',
       }),
     );
     storedObjects.set('models/generated/index.json', JSON.stringify({ models: [] }));
@@ -503,6 +638,8 @@ describe('handleGenerateModelRequest', () => {
           id: 'fc-123',
           label: '2026-06-28 12:00:00 UTC',
           model_url: 'https://web-ar-model-assets.pages.dev/models/generated/capture-20260628-120000-fc-123.glb',
+          preview_url: 'https://web-ar-model-assets.pages.dev/models/generated/previews/capture-20260628-120000-fc-123.jpeg',
+          preview_object_key: 'models/generated/previews/capture-20260628-120000-fc-123.jpeg',
         }),
       ],
     });

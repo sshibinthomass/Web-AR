@@ -37,6 +37,19 @@ interface ListGeneratedModelsInput {
   fetchImpl?: typeof fetch;
 }
 
+interface RenameGeneratedModelInput {
+  apiUrl: string;
+  modelId: string;
+  label: string;
+  fetchImpl?: typeof fetch;
+}
+
+interface DeleteGeneratedModelInput {
+  apiUrl: string;
+  modelId: string;
+  fetchImpl?: typeof fetch;
+}
+
 interface WorkerSuccessResponse {
   model_url: string;
   object_key: string;
@@ -65,6 +78,7 @@ interface WorkerGeneratedModelEntry {
   label: string;
   model_url: string;
   object_key: string;
+  preview_url?: string;
 }
 
 interface WorkerGeneratedModelsResponse {
@@ -156,11 +170,57 @@ export async function listGeneratedModels({
   const modelList = body as WorkerGeneratedModelsResponse;
   return (modelList.models ?? [])
     .filter((model: WorkerGeneratedModelEntry) => model.id && model.label && model.model_url)
-    .map((model: WorkerGeneratedModelEntry) => ({
-      id: `generated-${model.id}`,
-      label: model.label,
-      url: model.model_url,
-    }));
+    .map(mapGeneratedModelEntry);
+}
+
+export async function renameGeneratedModel({
+  apiUrl,
+  modelId,
+  label,
+  fetchImpl = fetch,
+}: RenameGeneratedModelInput): Promise<ModelOption> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const trimmedLabel = label.trim();
+  if (!trimmedLabel) {
+    throw new Error('Enter a model name before renaming.');
+  }
+
+  const response = await fetchImpl(generatedModelItemUrl(apiUrl, modelId), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label: trimmedLabel }),
+  });
+  const body = (await response.json()) as WorkerGeneratedModelEntry | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Model rename failed with HTTP ${response.status}.`);
+  }
+
+  if (!('id' in body) || !body.id || !body.label || !body.model_url) {
+    throw new Error('Worker response did not include the renamed model.');
+  }
+
+  return mapGeneratedModelEntry(body);
+}
+
+export async function deleteGeneratedModel({
+  apiUrl,
+  modelId,
+  fetchImpl = fetch,
+}: DeleteGeneratedModelInput): Promise<void> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const response = await fetchImpl(generatedModelItemUrl(apiUrl, modelId), {
+    method: 'DELETE',
+  });
+  const body = (await response.json()) as { deleted?: boolean } | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Model delete failed with HTTP ${response.status}.`);
+  }
 }
 
 export async function generateModelFromImage({
@@ -266,6 +326,23 @@ function generateModelUrlForPipeline(apiUrl: string, generationPipeline: Generat
   }
 
   return apiUrl;
+}
+
+function mapGeneratedModelEntry(model: WorkerGeneratedModelEntry): ModelOption {
+  const option: ModelOption = {
+    id: `generated-${model.id}`,
+    label: model.label,
+    url: model.model_url,
+  };
+  if (model.preview_url) {
+    option.previewUrl = model.preview_url;
+  }
+  return option;
+}
+
+function generatedModelItemUrl(apiUrl: string, modelId: string): string {
+  const workerModelId = modelId.startsWith('generated-') ? modelId.slice('generated-'.length) : modelId;
+  return `${apiUrl.replace(/\/+$/, '')}/models/${encodeURIComponent(workerModelId)}`;
 }
 
 function delay(milliseconds: number): Promise<void> {

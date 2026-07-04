@@ -28,6 +28,8 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onSubmitTarget: vi.fn(),
     onGenerateModel: vi.fn(),
     onFullFlowCapture: vi.fn(),
+    onRenameGeneratedModel: vi.fn(),
+    onDeleteGeneratedModel: vi.fn(),
     onReturnHome: vi.fn(),
     ...overrides,
   };
@@ -49,7 +51,7 @@ describe('ARHud', () => {
     const cameraPanel = root.querySelector('.camera-panel');
     const hudActions = root.querySelector('.hud-actions');
 
-    expect(choiceButtons).toEqual(['Camera', 'AR View', 'Full Flow']);
+    expect(choiceButtons).toEqual(['Camera', 'AR View', 'Full Flow', 'Models']);
     expect(statusPanel?.classList.contains('hidden')).toBe(true);
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
     expect(hudActions?.classList.contains('hidden')).toBe(true);
@@ -111,6 +113,78 @@ describe('ARHud', () => {
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.camera-panel')?.classList.contains('fullscreen')).toBe(true);
     expect(root.textContent).toContain('Capture');
+  });
+
+  it('opens a model manager from the first screen with every dropdown model listed', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-fc-123',
+        label: 'chair - 2026-07-04 12:00:00 UTC',
+        url: 'https://assets.example/generated-chair.glb',
+        previewUrl: 'https://assets.example/previews/generated-chair.png',
+      },
+    ]);
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
+
+    const manager = root.querySelector('.model-manager');
+    const rows = [...root.querySelectorAll('.model-manager-row')];
+
+    expect(window.location.hash).toBe('#/models');
+    expect(manager?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
+    expect(rows).toHaveLength(3);
+    expect(root.textContent).toContain('Fast output');
+    expect(root.textContent).toContain('Image 4 output');
+    expect(root.textContent).toContain('chair - 2026-07-04 12:00:00 UTC');
+    expect(root.querySelector<HTMLImageElement>('.model-manager-thumbnail img')?.src).toBe(
+      'https://assets.example/previews/generated-chair.png',
+    );
+    expect([...root.querySelectorAll('.model-manager-row.is-generated button')].map((button) => button.textContent)).toEqual([
+      'Rename',
+      'Delete',
+    ]);
+    expect(root.textContent).toContain('Built-in');
+  });
+
+  it('renames and deletes generated models from the model manager', () => {
+    const root = document.createElement('div');
+    const onRenameGeneratedModel = vi.fn();
+    const onDeleteGeneratedModel = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onRenameGeneratedModel, onDeleteGeneratedModel }));
+
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-fc-123',
+        label: 'chair - 2026-07-04 12:00:00 UTC',
+        url: 'https://assets.example/generated-chair.glb',
+        previewUrl: 'https://assets.example/previews/generated-chair.png',
+      },
+    ]);
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
+
+    const generatedRow = root.querySelector('.model-manager-row.is-generated')!;
+    const nameInput = generatedRow.querySelector<HTMLInputElement>('input[name="modelLabel"]')!;
+    nameInput.value = '  Living room chair  ';
+
+    generatedRow.querySelectorAll('button')[0].click();
+    generatedRow.querySelectorAll('button')[1].click();
+
+    expect(onRenameGeneratedModel).toHaveBeenCalledWith('generated-fc-123', 'Living room chair');
+    expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-fc-123');
+  });
+
+  it('opens the model manager page directly from the models hash route', () => {
+    window.history.replaceState(null, '', '/#/models');
+    const root = document.createElement('div');
+
+    new ARHud(root, modelOptions, createHandlers());
+
+    expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.model-manager')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.status-panel')?.classList.contains('hidden')).toBe(true);
   });
 
   it('offers direct or GPT-assisted Full Flow generation after capture', () => {
@@ -402,6 +476,7 @@ describe('ARHud', () => {
         id: 'generated-fc-123',
         label: '2026-06-28 12:00:00 UTC',
         url: 'https://assets.example/generated.glb',
+        previewUrl: 'https://assets.example/previews/generated.png',
       },
     ]);
 

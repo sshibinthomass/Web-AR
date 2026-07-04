@@ -14,10 +14,12 @@ interface HUDHandlers {
   onSubmitTarget(targetObject: string): void;
   onGenerateModel(targetObject: string): void;
   onFullFlowCapture(targetObject: string): void;
+  onRenameGeneratedModel(modelId: string, label: string): void;
+  onDeleteGeneratedModel(modelId: string): void;
   onReturnHome(): void;
 }
 
-type HudRoute = 'home' | 'camera' | 'ar' | 'full-flow';
+type HudRoute = 'home' | 'camera' | 'ar' | 'full-flow' | 'models';
 
 export class ARHud {
   readonly overlay: HTMLElement;
@@ -33,6 +35,9 @@ export class ARHud {
   private readonly sourceMessage: HTMLElement;
   private readonly cameraPanel: HTMLElement;
   private readonly fullFlowLoading: HTMLElement;
+  private readonly modelManager: HTMLElement;
+  private readonly modelList: HTMLElement;
+  private readonly modelManagerMessage: HTMLElement;
   private readonly cameraStatusMessage: HTMLElement;
   private readonly generatedModelMessage: HTMLElement;
   private readonly targetObjectLabel: HTMLElement;
@@ -47,6 +52,7 @@ export class ARHud {
   private readonly submitButton: HTMLButtonElement;
   private readonly generateButton: HTMLButtonElement;
   private readonly baseModelOptions: ModelOption[];
+  private generatedModelOptions: ModelOption[] = [];
   private modelReady = false;
   private activeRoute: HudRoute | null = null;
 
@@ -74,9 +80,31 @@ export class ARHud {
       this.createButton('Camera', 'primary', () => this.navigateTo('camera')),
       this.createButton('AR View', '', () => this.navigateTo('ar')),
       this.createButton('Full Flow', '', () => this.navigateTo('full-flow')),
+      this.createButton('Models', '', () => this.navigateTo('models')),
     );
     this.landing.querySelector('.landing-inner')?.appendChild(modePicker);
     shell.appendChild(this.landing);
+
+    this.modelManager = document.createElement('section');
+    this.modelManager.className = 'model-manager hidden';
+    const modelManagerInner = document.createElement('div');
+    modelManagerInner.className = 'model-manager-inner';
+    const modelManagerBackButton = this.createButton('Back', 'page-back', () => this.navigateTo('home'));
+    const modelManagerHeader = document.createElement('div');
+    modelManagerHeader.className = 'model-manager-header';
+    const modelManagerTitle = document.createElement('h2');
+    modelManagerTitle.textContent = 'Models';
+    const modelManagerDescription = document.createElement('p');
+    modelManagerDescription.textContent = 'Rename or delete generated models from the dropdown.';
+    modelManagerHeader.append(modelManagerTitle, modelManagerDescription);
+    this.modelList = document.createElement('div');
+    this.modelList.className = 'model-manager-list';
+    this.modelManagerMessage = document.createElement('p');
+    this.modelManagerMessage.className = 'model-manager-message';
+    this.modelManagerMessage.textContent = 'Generated models are saved in Cloudflare storage.';
+    modelManagerInner.append(modelManagerBackButton, modelManagerHeader, this.modelList, this.modelManagerMessage);
+    this.modelManager.appendChild(modelManagerInner);
+    shell.appendChild(this.modelManager);
 
     this.overlay = document.createElement('div');
     this.overlay.className = 'xr-overlay';
@@ -266,6 +294,7 @@ export class ARHud {
   }
 
   updateGeneratedModels(generatedModels: ModelOption[]): void {
+    this.generatedModelOptions = [...generatedModels];
     const selectedModelId = this.modelSelect.value;
     this.modelSelect.replaceChildren(new Option('Select model', '', true, !selectedModelId));
     [...this.baseModelOptions, ...generatedModels].forEach((model) => {
@@ -273,7 +302,14 @@ export class ARHud {
     });
     if ([...this.modelSelect.options].some((option) => option.value === selectedModelId)) {
       this.modelSelect.value = selectedModelId;
+    } else {
+      this.modelSelect.value = '';
     }
+    this.renderModelManagerList();
+  }
+
+  updateModelManagerStatus(message: string): void {
+    this.modelManagerMessage.textContent = message;
   }
 
   setCameraPanelVisible(isVisible: boolean): void {
@@ -339,6 +375,8 @@ export class ARHud {
         return 'ar';
       case '#/full-flow':
         return 'full-flow';
+      case '#/models':
+        return 'models';
       default:
         return 'home';
     }
@@ -367,11 +405,17 @@ export class ARHud {
       return;
     }
 
+    if (route === 'models') {
+      this.openModelManagerPage();
+      return;
+    }
+
     this.openHomePage(previousRoute);
   }
 
   private openHomePage(previousRoute: HudRoute | null): void {
     this.landing.classList.remove('hidden');
+    this.modelManager.classList.add('hidden');
     this.statusPanel.classList.add('hidden');
     this.statusPanel.classList.remove('camera-active');
     this.statusPanel.classList.remove('full-flow-active');
@@ -388,6 +432,7 @@ export class ARHud {
 
   private openCameraPage(): void {
     this.landing.classList.add('hidden');
+    this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active');
     this.statusPanel.classList.remove('full-flow-active');
@@ -402,6 +447,7 @@ export class ARHud {
 
   private openARPage(): void {
     this.landing.classList.add('hidden');
+    this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.remove('camera-active');
     this.statusPanel.classList.remove('full-flow-active');
@@ -414,6 +460,7 @@ export class ARHud {
 
   private openFullFlowPage(): void {
     this.landing.classList.add('hidden');
+    this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active', 'full-flow-active');
     this.hudActions.classList.add('hidden');
@@ -424,6 +471,20 @@ export class ARHud {
     this.showLiveCameraPreview();
     this.updateCameraStatus('Capture an image to build and place a 3D object.', false);
     this.handlers.onStartCamera();
+  }
+
+  private openModelManagerPage(): void {
+    this.landing.classList.add('hidden');
+    this.modelManager.classList.remove('hidden');
+    this.statusPanel.classList.add('hidden');
+    this.statusPanel.classList.remove('camera-active');
+    this.statusPanel.classList.remove('full-flow-active');
+    this.hudActions.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.cameraPanel.classList.add('hidden');
+    this.cameraPanel.classList.remove('fullscreen');
+    this.fullFlowLoading.classList.add('hidden');
+    this.renderModelManagerList();
   }
 
   private handleCaptureClick(): void {
@@ -442,6 +503,89 @@ export class ARHud {
     }
 
     this.handlers.onGenerateModel(targetObject);
+  }
+
+  private renderModelManagerList(): void {
+    this.modelList.replaceChildren();
+    [...this.baseModelOptions, ...this.generatedModelOptions].forEach((model) => {
+      const isGenerated = model.id.startsWith('generated-');
+      const row = document.createElement('article');
+      row.className = `model-manager-row${isGenerated ? ' is-generated' : ''}`;
+      row.dataset.modelId = model.id;
+
+      if (isGenerated) {
+        row.appendChild(this.createModelThumbnail(model));
+      }
+
+      const details = document.createElement('div');
+      details.className = 'model-manager-details';
+      const badge = document.createElement('span');
+      badge.className = 'model-manager-badge';
+      badge.textContent = isGenerated ? 'Generated' : 'Built-in';
+      details.appendChild(badge);
+
+      if (isGenerated) {
+        const input = document.createElement('input');
+        input.name = 'modelLabel';
+        input.type = 'text';
+        input.autocomplete = 'off';
+        input.value = model.label;
+        input.setAttribute('aria-label', `Name for ${model.label}`);
+        details.appendChild(input);
+      } else {
+        const label = document.createElement('p');
+        label.className = 'model-manager-name';
+        label.textContent = model.label;
+        details.appendChild(label);
+      }
+
+      row.appendChild(details);
+
+      if (isGenerated) {
+        const actions = document.createElement('div');
+        actions.className = 'model-manager-actions';
+        const renameButton = this.createButton('Rename', '', () => {
+          const input = row.querySelector<HTMLInputElement>('input[name="modelLabel"]');
+          this.handleModelRename(model.id, input?.value ?? '');
+        });
+        const deleteButton = this.createButton('Delete', 'danger', () => {
+          this.handlers.onDeleteGeneratedModel(model.id);
+        });
+        actions.append(renameButton, deleteButton);
+        row.appendChild(actions);
+      }
+
+      this.modelList.appendChild(row);
+    });
+  }
+
+  private createModelThumbnail(model: ModelOption): HTMLElement {
+    const thumbnail = document.createElement('div');
+    thumbnail.className = 'model-manager-thumbnail';
+
+    if (model.previewUrl) {
+      const image = document.createElement('img');
+      image.src = model.previewUrl;
+      image.alt = `${model.label} camera preview`;
+      image.loading = 'lazy';
+      thumbnail.appendChild(image);
+      return thumbnail;
+    }
+
+    const placeholder = document.createElement('span');
+    placeholder.textContent = 'No image';
+    thumbnail.appendChild(placeholder);
+    return thumbnail;
+  }
+
+  private handleModelRename(modelId: string, label: string): void {
+    const trimmedLabel = label.trim();
+    if (!trimmedLabel) {
+      this.updateModelManagerStatus('Enter a model name before renaming.');
+      return;
+    }
+
+    this.handlers.onRenameGeneratedModel(modelId, trimmedLabel);
   }
 
   private generationButtonLabel(): string {
