@@ -461,6 +461,77 @@ describe('handleGenerateModelRequest', () => {
     });
   });
 
+  it('stores uploaded GLB bytes and indexes them permanently', async () => {
+    const storedObjects = new Map<string, string | ArrayBuffer>();
+    storedObjects.set('models/generated/index.json', JSON.stringify({ models: [] }));
+    const env = createEnv({
+      MODEL_BUCKET: {
+        get: vi.fn((key: string) => {
+          const value = storedObjects.get(key);
+          return Promise.resolve(
+            value
+              ? {
+                  body: value,
+                  httpMetadata: {
+                    contentType: typeof value === 'string' ? 'application/json' : 'model/gltf-binary',
+                  },
+                }
+              : null,
+          );
+        }),
+        put: vi.fn((key: string, value: ArrayBuffer | ReadableStream | string) => {
+          if (typeof value === 'string' || value instanceof ArrayBuffer) {
+            storedObjects.set(key, value);
+          }
+          return Promise.resolve(undefined);
+        }),
+      },
+    });
+
+    const response = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/models/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_name: 'Living Room Chair.glb',
+          label: '  Living Room Chair  ',
+          model_mime_type: 'model/gltf-binary',
+          model_base64: 'Z2xURg==',
+        }),
+      }),
+      env,
+      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') },
+    );
+
+    const objectKey = 'models/generated/uploads/upload-20260704-120000-living-room-chair.glb';
+    expect(response.status).toBe(201);
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(objectKey, expect.any(ArrayBuffer), {
+      httpMetadata: { contentType: 'model/gltf-binary' },
+    });
+    expect(await response.json()).toEqual({
+      id: 'upload-20260704-120000-living-room-chair',
+      label: 'Living Room Chair',
+      model_url: `https://web-ar-model-assets.pages.dev/${objectKey}`,
+      object_key: objectKey,
+      completed_at: '2026-07-04T12:00:00.000Z',
+      bytes: 4,
+      source: 'uploaded',
+    });
+    expect(JSON.parse(storedObjects.get('models/generated/index.json') as string)).toEqual({
+      models: [
+        {
+          id: 'upload-20260704-120000-living-room-chair',
+          label: 'Living Room Chair',
+          model_url: `https://web-ar-model-assets.pages.dev/${objectKey}`,
+          object_key: objectKey,
+          completed_at: '2026-07-04T12:00:00.000Z',
+          bytes: 4,
+          source: 'uploaded',
+        },
+      ],
+    });
+  });
+
   it('renames a permanently generated model in the model index and job metadata', async () => {
     const storedObjects = new Map<string, string>();
     storedObjects.set(

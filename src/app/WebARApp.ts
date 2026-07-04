@@ -23,6 +23,7 @@ import {
   listGeneratedModels,
   renameGeneratedModel as renameGeneratedModelRequest,
   startGeneratedModelJob,
+  storeUploadedModel as storeUploadedModelRequest,
   type GenerationPipeline,
 } from '../services/generatedModelClient';
 import { AppState } from '../state/AppState';
@@ -33,7 +34,6 @@ import { PlaneTrackingManager } from '../xr/PlaneTrackingManager';
 import { checkXRSupport } from '../xr/XRSupport';
 import { createARSessionButton } from '../xr/XRSessionManager';
 import { getGenerateModelApiUrl } from './config';
-import { createUploadedModelOption } from './uploadedModels';
 
 export class WebARApp {
   private sceneContext: SceneContext | null = null;
@@ -55,6 +55,7 @@ export class WebARApp {
   private availableModels = [...MODEL_OPTIONS];
   private generatedModelOptions: ModelOption[] = [];
   private uploadedModelOptions: ModelOption[] = [];
+  private pendingUploadModelFile: File | null = null;
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -79,6 +80,7 @@ export class WebARApp {
       onSubmitTarget: (targetObject) => void this.submitCapturedImageToGpt(targetObject),
       onGenerateModel: (targetObject) => void this.generateModel(targetObject),
       onFullFlowCapture: (targetObject) => void this.runFullFlow(targetObject),
+      onStoreUploadedModel: () => void this.storeUploadedModel(),
       onRenameGeneratedModel: (modelId, label) => void this.renameGeneratedModel(modelId, label),
       onDeleteGeneratedModel: (modelId) => void this.deleteGeneratedModel(modelId),
       onDeleteUploadedModel: (modelId) => this.deleteUploadedModel(modelId),
@@ -116,7 +118,7 @@ export class WebARApp {
       return;
     }
 
-    const isUploadedModel = modelOption.id.startsWith('uploaded-');
+    const isUploadedModel = modelOption.source === 'uploaded' || modelOption.id.startsWith('uploaded-');
     const sourceLabel = isUploadedModel ? 'uploaded file' : 'Cloudflare';
     await this.loadModelFromUrl(modelOption.url, modelOption.label, {
       loadingMessage: `Loading ${modelOption.label} from ${sourceLabel}...`,
@@ -303,6 +305,7 @@ export class WebARApp {
     this.cameraStream = null;
     this.capturedImage = null;
     this.capturedImageGenerationPipeline = 'openai-to-3d';
+    this.pendingUploadModelFile = null;
     this.clearCapturedImagePreview();
 
     const session = this.sceneContext?.renderer.xr.getSession();
@@ -328,16 +331,42 @@ export class WebARApp {
       if (!file.name.toLowerCase().endsWith('.glb')) {
         throw new Error('Choose a .glb model file.');
       }
-      const objectUrl = URL.createObjectURL(file);
-      const uploadedModel = createUploadedModelOption(file, objectUrl);
-      this.uploadedModelOptions = [...this.uploadedModelOptions, uploadedModel];
-      this.syncAvailableModels();
-      this.hud?.updateSelectedModel(uploadedModel.id);
-      this.hud?.updateUploadedModelStatus(`${uploadedModel.label} added to AR View and Models.`);
-      await this.loadSelectedModel(uploadedModel.id);
+      this.pendingUploadModelFile = file;
+      this.hud?.updateUploadModelStatus(`${file.name} ready to store. Press Store Model to save it.`, true);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not upload model.';
-      this.hud?.updateUploadedModelStatus(`Model upload failed: ${message}`);
+      this.pendingUploadModelFile = null;
+      this.hud?.updateUploadModelStatus(`Model upload failed: ${message}`, false);
+    }
+  }
+
+  private async storeUploadedModel(): Promise<void> {
+    if (!this.pendingUploadModelFile) {
+      this.hud?.updateUploadModelStatus('Choose a .glb model before storing.', false);
+      return;
+    }
+
+    const file = this.pendingUploadModelFile;
+    this.hud?.updateUploadModelStatus(`Storing ${file.name}...`, false);
+
+    try {
+      const storedModel = await storeUploadedModelRequest({
+        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        file,
+      });
+      this.pendingUploadModelFile = null;
+      this.generatedModelOptions = [
+        storedModel,
+        ...this.generatedModelOptions.filter((model) => model.id !== storedModel.id),
+      ];
+      this.syncAvailableModels();
+      this.hud?.updateSelectedModel(storedModel.id);
+      this.hud?.updateUploadModelStatus(`${storedModel.label} stored. It is available in AR View and Models.`, false);
+      await this.loadSelectedModel(storedModel.id);
+      void this.refreshGeneratedModels();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not store model.';
+      this.hud?.updateUploadModelStatus(`Store failed: ${message}`, true);
     }
   }
 

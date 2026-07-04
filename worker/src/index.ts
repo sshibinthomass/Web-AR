@@ -47,6 +47,13 @@ interface GenerateModelRequestBody {
   target_object?: unknown;
 }
 
+interface UploadModelRequestBody {
+  file_name?: unknown;
+  label?: unknown;
+  model_base64?: unknown;
+  model_mime_type?: unknown;
+}
+
 type GenerationPipeline = 'trellis' | 'openai-to-3d';
 
 interface StoredJob {
@@ -80,6 +87,7 @@ interface GeneratedModelEntry {
   preview_object_key?: string;
   completed_at: string;
   bytes: number;
+  source?: 'uploaded';
 }
 
 interface GeneratedModelsIndex {
@@ -161,6 +169,10 @@ export async function handleGenerateModelRequest(
     return jsonResponse({
       models: index.models.sort((left, right) => right.completed_at.localeCompare(left.completed_at)),
     });
+  }
+
+  if (request.method === 'POST' && url.pathname === '/generate-3d/models/upload') {
+    return handleUploadedModelRequest(request, env, deps, url);
   }
 
   if (url.pathname.startsWith('/generate-3d/models/')) {
@@ -304,6 +316,53 @@ async function startModalGenerationJob(
     },
     202,
   );
+}
+
+async function handleUploadedModelRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  url: URL,
+): Promise<Response> {
+  if (!env.MODEL_BUCKET) {
+    return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
+  }
+
+  const body = await readJsonBody<UploadModelRequestBody>(request);
+  if (!body.ok) {
+    return jsonResponse({ error: body.error }, 400);
+  }
+
+  if (typeof body.value.model_base64 !== 'string' || body.value.model_base64.length === 0) {
+    return jsonResponse({ error: 'model_base64 is required.' }, 400);
+  }
+
+  const fileName = typeof body.value.file_name === 'string' ? body.value.file_name : 'uploaded-model.glb';
+  if (!fileName.toLowerCase().endsWith('.glb')) {
+    return jsonResponse({ error: 'Choose a .glb model file.' }, 400);
+  }
+
+  const label = normalizeModelLabel(body.value.label) ?? uploadedModelLabel(fileName);
+  const now = deps.now();
+  const id = `upload-${formatTimestamp(now)}-${slugifyModelLabel(label)}`;
+  const objectKey = `models/generated/uploads/${id}.glb`;
+  const modelBytes = base64ToArrayBuffer(stripDataUrlPrefix(body.value.model_base64));
+  const entry: GeneratedModelEntry = {
+    id,
+    label,
+    model_url: `${getPublicOrigin(env, url.origin)}/${objectKey}`,
+    object_key: objectKey,
+    completed_at: now.toISOString(),
+    bytes: modelBytes.byteLength,
+    source: 'uploaded',
+  };
+
+  await env.MODEL_BUCKET.put(objectKey, modelBytes, {
+    httpMetadata: { contentType: normalizeModelMimeType(body.value.model_mime_type) },
+  });
+  await upsertGeneratedModelEntry(env, entry);
+
+  return jsonResponse(entry, 201);
 }
 
 async function handleGeneratedModelManagementRequest(
@@ -643,11 +702,11 @@ function normalizeModelLabel(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
-async function readJsonBody(
+async function readJsonBody<T = GenerateModelRequestBody>(
   request: Request,
-): Promise<{ ok: true; value: GenerateModelRequestBody } | { ok: false; error: string }> {
+): Promise<{ ok: true; value: T } | { ok: false; error: string }> {
   try {
-    const value = (await request.json()) as GenerateModelRequestBody;
+    const value = (await request.json()) as T;
     return { ok: true, value };
   } catch {
     return { ok: false, error: 'Request body must be valid JSON.' };
@@ -708,7 +767,6 @@ async function upsertGeneratedModel(env: WorkerEnv, job: StoredJob): Promise<voi
     return;
   }
 
-  const index = await readGeneratedModelsIndex(env);
   const entry: GeneratedModelEntry = {
     id: job.id,
     label: job.label,
@@ -719,6 +777,11 @@ async function upsertGeneratedModel(env: WorkerEnv, job: StoredJob): Promise<voi
     completed_at: job.completed_at,
     bytes: job.bytes,
   };
+  await upsertGeneratedModelEntry(env, entry);
+}
+
+async function upsertGeneratedModelEntry(env: WorkerEnv, entry: GeneratedModelEntry): Promise<void> {
+  const index = await readGeneratedModelsIndex(env);
   const models = [entry, ...index.models.filter((model) => model.id !== entry.id)].sort((left, right) =>
     right.completed_at.localeCompare(left.completed_at),
   );
@@ -858,6 +921,25 @@ function formatJobLabel(date: Date, targetObject: string | null): string {
 
 function safeObjectKeyPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80);
+}
+
+function slugifyModelLabel(value: string): string {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'model'
+  );
+}
+
+function uploadedModelLabel(fileName: string): string {
+  return fileName.replace(/\.glb$/i, '').trim() || 'Uploaded model';
+}
+
+function normalizeModelMimeType(_value: unknown): string {
+  return 'model/gltf-binary';
 }
 
 function normalizeImageMimeType(value: string): string {

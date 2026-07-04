@@ -16,6 +16,7 @@ interface HUDHandlers {
   onSubmitTarget(targetObject: string): void;
   onGenerateModel(targetObject: string): void;
   onFullFlowCapture(targetObject: string): void;
+  onStoreUploadedModel(): void;
   onRenameGeneratedModel(modelId: string, label: string): void;
   onDeleteGeneratedModel(modelId: string): void;
   onDeleteUploadedModel(modelId: string): void;
@@ -59,6 +60,7 @@ export class ARHud {
   private readonly captureButton: HTMLButtonElement;
   private readonly submitButton: HTMLButtonElement;
   private readonly generateButton: HTMLButtonElement;
+  private readonly storeModelButton: HTMLButtonElement;
   private readonly cameraActions: HTMLElement;
   private readonly baseModelOptions: ModelOption[];
   private generatedModelOptions: ModelOption[] = [];
@@ -217,7 +219,10 @@ export class ARHud {
     this.submitButton.disabled = true;
     this.generateButton = this.createButton('Generate 3D', 'primary', () => this.handleGenerateClick());
     this.generateButton.disabled = true;
-    cameraActions.append(this.captureButton, this.submitButton, this.generateButton);
+    this.storeModelButton = this.createButton('Store Model', 'primary', this.handlers.onStoreUploadedModel);
+    this.storeModelButton.classList.add('hidden');
+    this.storeModelButton.disabled = true;
+    cameraActions.append(this.captureButton, this.submitButton, this.generateButton, this.storeModelButton);
     cameraPanel.appendChild(cameraActions);
     this.statusPanel.appendChild(cameraPanel);
     this.overlay.appendChild(this.statusPanel);
@@ -303,6 +308,8 @@ export class ARHud {
     this.generateButton.classList.remove('hidden');
     this.generateButton.textContent = this.generationButtonLabel();
     this.generateButton.disabled = true;
+    this.storeModelButton.classList.add('hidden');
+    this.storeModelButton.disabled = true;
   }
 
   showUploadImagePicker(): void {
@@ -326,6 +333,8 @@ export class ARHud {
     this.generateButton.classList.remove('hidden');
     this.generateButton.textContent = this.generationButtonLabel();
     this.generateButton.disabled = true;
+    this.storeModelButton.classList.add('hidden');
+    this.storeModelButton.disabled = true;
     this.updateCameraStatus('Upload an image to create a 3D model.', false);
   }
 
@@ -348,8 +357,10 @@ export class ARHud {
     this.submitButton.disabled = true;
     this.generateButton.classList.add('hidden');
     this.generateButton.disabled = true;
+    this.storeModelButton.classList.remove('hidden');
+    this.storeModelButton.disabled = true;
     this.generatedModelMessage.classList.add('hidden');
-    this.updateCameraStatus('Choose a .glb model to add it to AR View.', false);
+    this.updateUploadModelStatus('Choose a .glb model, then store it for AR View and Models.', false);
   }
 
   showCapturedImagePreview(imageUrl: string): void {
@@ -367,6 +378,8 @@ export class ARHud {
     this.submitButton.classList.remove('hidden');
     this.generateButton.classList.remove('hidden');
     this.generateButton.textContent = this.generationButtonLabel();
+    this.storeModelButton.classList.add('hidden');
+    this.storeModelButton.disabled = true;
     this.updateCameraStatus('Image captured. Submit to GPT or generate a 3D model directly.', true);
   }
 
@@ -385,6 +398,8 @@ export class ARHud {
     this.submitButton.classList.remove('hidden');
     this.generateButton.classList.remove('hidden');
     this.generateButton.textContent = this.generationButtonLabel();
+    this.storeModelButton.classList.add('hidden');
+    this.storeModelButton.disabled = true;
     this.updateCameraStatus('Image uploaded. Submit to GPT or generate a 3D model directly.', true);
   }
 
@@ -404,6 +419,8 @@ export class ARHud {
     this.submitButton.disabled = true;
     this.generateButton.classList.remove('hidden');
     this.generateButton.textContent = this.generationButtonLabel();
+    this.storeModelButton.classList.add('hidden');
+    this.storeModelButton.disabled = true;
     this.updateCameraStatus('GPT extraction complete. Generate the 3D model when ready.', true);
   }
 
@@ -427,8 +444,13 @@ export class ARHud {
     this.modelManagerMessage.textContent = message;
   }
 
-  updateUploadedModelStatus(message: string): void {
+  updateUploadModelStatus(message: string, canStore = false): void {
     this.cameraStatusMessage.textContent = message;
+    this.storeModelButton.disabled = !canStore;
+  }
+
+  updateUploadedModelStatus(message: string): void {
+    this.updateUploadModelStatus(message, false);
   }
 
   setCameraPanelVisible(isVisible: boolean): void {
@@ -732,7 +754,7 @@ export class ARHud {
           actions.append(renameButton);
         }
         const deleteButton = this.createButton('Delete', 'danger', () => {
-          if (isUploaded) {
+          if (isUploaded && model.id.startsWith('uploaded-')) {
             this.handlers.onDeleteUploadedModel(model.id);
             return;
           }
@@ -760,12 +782,15 @@ export class ARHud {
     }
 
     const placeholder = document.createElement('span');
-    placeholder.textContent = model.id.startsWith('uploaded-') ? 'GLB' : 'No image';
+    placeholder.textContent = this.modelKind(model) === 'uploaded' ? 'GLB' : 'No image';
     thumbnail.appendChild(placeholder);
     return thumbnail;
   }
 
   private modelKind(model: ModelOption): 'built-in' | 'generated' | 'uploaded' {
+    if (model.source === 'uploaded') {
+      return 'uploaded';
+    }
     if (model.id.startsWith('generated-')) {
       return 'generated';
     }

@@ -50,6 +50,12 @@ interface DeleteGeneratedModelInput {
   fetchImpl?: typeof fetch;
 }
 
+interface StoreUploadedModelInput {
+  apiUrl: string;
+  file: File;
+  fetchImpl?: typeof fetch;
+}
+
 interface WorkerSuccessResponse {
   model_url: string;
   object_key: string;
@@ -79,6 +85,7 @@ interface WorkerGeneratedModelEntry {
   model_url: string;
   object_key: string;
   preview_url?: string;
+  source?: string;
 }
 
 interface WorkerGeneratedModelsResponse {
@@ -200,6 +207,41 @@ export async function renameGeneratedModel({
 
   if (!('id' in body) || !body.id || !body.label || !body.model_url) {
     throw new Error('Worker response did not include the renamed model.');
+  }
+
+  return mapGeneratedModelEntry(body);
+}
+
+export async function storeUploadedModel({
+  apiUrl,
+  file,
+  fetchImpl = fetch,
+}: StoreUploadedModelInput): Promise<ModelOption> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  if (!file.name.toLowerCase().endsWith('.glb')) {
+    throw new Error('Choose a .glb model file.');
+  }
+
+  const response = await fetchImpl(`${apiUrl.replace(/\/+$/, '')}/models/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      file_name: file.name,
+      label: uploadedModelLabel(file.name),
+      model_mime_type: file.type || 'model/gltf-binary',
+      model_base64: arrayBufferToBase64(await file.arrayBuffer()),
+    }),
+  });
+  const body = (await response.json()) as WorkerGeneratedModelEntry | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Model upload failed with HTTP ${response.status}.`);
+  }
+
+  if (!('id' in body) || !body.id || !body.label || !body.model_url) {
+    throw new Error('Worker response did not include the stored model.');
   }
 
   return mapGeneratedModelEntry(body);
@@ -337,12 +379,29 @@ function mapGeneratedModelEntry(model: WorkerGeneratedModelEntry): ModelOption {
   if (model.preview_url) {
     option.previewUrl = model.preview_url;
   }
+  if (model.source === 'uploaded') {
+    option.source = 'uploaded';
+  }
   return option;
 }
 
 function generatedModelItemUrl(apiUrl: string, modelId: string): string {
   const workerModelId = modelId.startsWith('generated-') ? modelId.slice('generated-'.length) : modelId;
   return `${apiUrl.replace(/\/+$/, '')}/models/${encodeURIComponent(workerModelId)}`;
+}
+
+function uploadedModelLabel(fileName: string): string {
+  return fileName.replace(/\.glb$/i, '').trim() || 'Uploaded model';
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+  return btoa(binary);
 }
 
 function delay(milliseconds: number): Promise<void> {

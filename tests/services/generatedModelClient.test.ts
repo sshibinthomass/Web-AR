@@ -6,6 +6,7 @@ import {
   listGeneratedModels,
   renameGeneratedModel,
   startGeneratedModelJob,
+  storeUploadedModel,
 } from '../../src/services/generatedModelClient';
 
 describe('extractImageFor3D', () => {
@@ -191,6 +192,55 @@ describe('listGeneratedModels', () => {
         previewUrl: 'https://assets.example/previews/capture.png',
       },
     ]);
+  });
+});
+
+describe('storeUploadedModel', () => {
+  it('uploads a GLB to Worker storage and returns the stored model option', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'upload-20260704-120000-living-room-chair',
+          label: 'Living Room Chair',
+          model_url: 'https://assets.example/models/generated/uploads/upload-20260704-120000-living-room-chair.glb',
+          object_key: 'models/generated/uploads/upload-20260704-120000-living-room-chair.glb',
+          source: 'uploaded',
+        }),
+        {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+    const file = new File([new Uint8Array([0x67, 0x6c, 0x54, 0x46])], 'Living Room Chair.glb', {
+      type: 'model/gltf-binary',
+    });
+
+    const model = await storeUploadedModel({
+      apiUrl: 'https://worker.example/generate-3d',
+      file,
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/generate-3d/models/upload',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_name: 'Living Room Chair.glb',
+          label: 'Living Room Chair',
+          model_mime_type: 'model/gltf-binary',
+          model_base64: 'Z2xURg==',
+        }),
+      }),
+    );
+    expect(model).toEqual({
+      id: 'generated-upload-20260704-120000-living-room-chair',
+      label: 'Living Room Chair',
+      url: 'https://assets.example/models/generated/uploads/upload-20260704-120000-living-room-chair.glb',
+      source: 'uploaded',
+    });
   });
 });
 
