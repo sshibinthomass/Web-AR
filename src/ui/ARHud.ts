@@ -48,6 +48,7 @@ export class ARHud {
   private readonly modelPreview: HTMLElement;
   private readonly modelPreviewTitle: HTMLElement;
   private readonly modelPreviewStatus: HTMLElement;
+  private readonly modelRail: HTMLElement;
   private readonly modelManagerMessage: HTMLElement;
   private readonly cameraStatusMessage: HTMLElement;
   private readonly generatedModelMessage: HTMLElement;
@@ -178,7 +179,7 @@ export class ARHud {
     this.statusPanel.appendChild(this.fullFlowLoading);
 
     const modelPicker = document.createElement('label');
-    modelPicker.className = 'model-picker';
+    modelPicker.className = 'model-picker hidden';
     modelPicker.innerHTML = '<span>Model</span>';
     this.modelSelect = document.createElement('select');
     this.modelSelect.append(new Option('Select model', '', true, true));
@@ -256,6 +257,11 @@ export class ARHud {
     this.statusPanel.appendChild(cameraPanel);
     this.overlay.appendChild(this.statusPanel);
 
+    this.modelRail = document.createElement('nav');
+    this.modelRail.className = 'model-rail hidden';
+    this.modelRail.setAttribute('aria-label', 'Select model');
+    this.overlay.appendChild(this.modelRail);
+
     this.hudActions = document.createElement('div');
     this.hudActions.className = 'hud-actions hidden';
     this.overlay.appendChild(this.hudActions);
@@ -275,6 +281,7 @@ export class ARHud {
       this.resetScaleButton,
       this.resetButton,
     );
+    this.renderModelRail();
 
     window.addEventListener('hashchange', () => this.applyCurrentRoute());
 
@@ -306,6 +313,7 @@ export class ARHud {
 
   updateSelectedModel(modelId: string): void {
     this.modelSelect.value = modelId;
+    this.updateModelRailSelection(modelId);
   }
 
   updateCameraStatus(message: string, canGenerate: boolean): void {
@@ -516,6 +524,7 @@ export class ARHud {
     this.statusPanel.classList.remove('camera-active');
     this.cameraPanel.classList.add('hidden');
     this.hudActions.classList.add('hidden');
+    this.modelRail.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.fullFlowLoading.classList.remove('hidden');
     const messageElement = this.fullFlowLoading.querySelector('p');
@@ -537,6 +546,7 @@ export class ARHud {
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
     this.hudActions.classList.add('hidden');
+    this.modelRail.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.updateCameraStatus(message, false);
   }
@@ -621,6 +631,7 @@ export class ARHud {
     this.statusPanel.classList.remove('camera-active');
     this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.add('hidden');
+    this.modelRail.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.add('hidden');
     this.cameraPanel.classList.remove('fullscreen');
@@ -639,6 +650,7 @@ export class ARHud {
     this.statusPanel.classList.add('camera-active');
     this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.add('hidden');
+    this.modelRail.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
@@ -655,6 +667,7 @@ export class ARHud {
     this.statusPanel.classList.remove('camera-active');
     this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.remove('hidden');
+    this.modelRail.classList.remove('hidden');
     this.gestureSurface.classList.remove('hidden');
     this.cameraPanel.classList.add('hidden');
     this.cameraPanel.classList.remove('fullscreen');
@@ -668,6 +681,7 @@ export class ARHud {
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active', 'full-flow-active');
     this.hudActions.classList.add('hidden');
+    this.modelRail.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
@@ -685,6 +699,7 @@ export class ARHud {
     this.statusPanel.classList.add('camera-active');
     this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.add('hidden');
+    this.modelRail.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
@@ -700,6 +715,7 @@ export class ARHud {
     this.statusPanel.classList.add('camera-active');
     this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.add('hidden');
+    this.modelRail.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
@@ -714,6 +730,7 @@ export class ARHud {
     this.statusPanel.classList.remove('camera-active');
     this.statusPanel.classList.remove('full-flow-active');
     this.hudActions.classList.add('hidden');
+    this.modelRail.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.add('hidden');
     this.cameraPanel.classList.remove('fullscreen');
@@ -750,6 +767,7 @@ export class ARHud {
     } else {
       this.modelSelect.value = '';
     }
+    this.renderModelRail();
   }
 
   private allModelOptions(): ModelOption[] {
@@ -851,6 +869,57 @@ export class ARHud {
 
       this.modelList.appendChild(row);
     });
+  }
+
+  private renderModelRail(): void {
+    const selectedModelId = this.modelSelect.value;
+    this.modelRail.replaceChildren();
+
+    this.allModelOptions().forEach((model) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'model-rail-item';
+      item.dataset.modelId = model.id;
+      item.setAttribute('aria-label', `Select ${model.label}`);
+      item.setAttribute('aria-pressed', selectedModelId === model.id ? 'true' : 'false');
+      item.classList.toggle('is-selected', selectedModelId === model.id);
+      item.addEventListener('click', () => {
+        this.modelSelect.value = model.id;
+        this.updateModelRailSelection(model.id);
+        this.handlers.onModelSelect(model.id);
+      });
+
+      const thumbnail = document.createElement('span');
+      thumbnail.className = 'model-rail-thumb';
+      if (model.previewUrl) {
+        const image = document.createElement('img');
+        image.src = model.previewUrl;
+        image.alt = '';
+        image.loading = 'lazy';
+        thumbnail.appendChild(image);
+      } else {
+        thumbnail.textContent = this.modelRailPlaceholderText(model);
+      }
+
+      const label = document.createElement('span');
+      label.className = 'model-rail-label';
+      label.textContent = model.label;
+
+      item.append(thumbnail, label);
+      this.modelRail.appendChild(item);
+    });
+  }
+
+  private updateModelRailSelection(modelId: string): void {
+    this.modelRail.querySelectorAll<HTMLButtonElement>('.model-rail-item').forEach((item) => {
+      const isSelected = item.dataset.modelId === modelId;
+      item.classList.toggle('is-selected', isSelected);
+      item.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+    });
+  }
+
+  private modelRailPlaceholderText(model: ModelOption): string {
+    return this.modelKind(model) === 'uploaded' ? 'GLB' : '3D';
   }
 
   private createModelThumbnail(model: ModelOption): HTMLElement {
