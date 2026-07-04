@@ -65,7 +65,6 @@ export class ARHud {
   private readonly modelSelect: HTMLSelectElement;
   private readonly backButton: HTMLButtonElement;
   private readonly placeButton: HTMLButtonElement;
-  private readonly editButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
   private readonly resetScaleButton: HTMLButtonElement;
   private readonly captureButton: HTMLButtonElement;
@@ -290,13 +289,11 @@ export class ARHud {
     this.hudActions.appendChild(this.arButtonSlot);
 
     this.placeButton = this.createButton('Place', 'primary', this.handlers.onPlace);
-    this.editButton = this.createButton('Edit', '', this.handlers.onEdit);
     this.resetScaleButton = this.createButton('Scale 1x', '', this.handlers.onResetScale);
     this.resetButton = this.createButton('Reset', '', this.handlers.onReset);
 
     this.hudActions.append(
       this.placeButton,
-      this.editButton,
       this.resetScaleButton,
       this.resetButton,
     );
@@ -319,7 +316,6 @@ export class ARHud {
     const hasPlacedObject = mode === 'placed' || mode === 'editing';
     this.statusPanel.classList.toggle('object-placed', hasPlacedObject);
     this.placeButton.disabled = !this.modelReady || (mode !== 'scanning' && mode !== 'readyToPlace');
-    this.editButton.disabled = !hasPlacedObject;
     this.resetScaleButton.disabled = !hasPlacedObject;
     this.resetButton.disabled = !hasPlacedObject;
   }

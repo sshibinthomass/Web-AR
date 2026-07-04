@@ -148,6 +148,11 @@ describe('ARHud', () => {
     expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.model-rail-item.is-selected')?.textContent).toContain('Image 4 output');
+    expect([...root.querySelectorAll('.hud-actions > button')].map((button) => button.textContent)).toEqual([
+      'Place',
+      'Scale 1x',
+      'Reset',
+    ]);
   });
 
   it('opens Full Flow from the first screen as a capture page', () => {
