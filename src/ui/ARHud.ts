@@ -285,7 +285,8 @@ export class ARHud {
     this.overlay.appendChild(this.hudActions);
 
     this.arButtonSlot = document.createElement('div');
-    this.arButtonSlot.className = 'ar-button-slot';
+    this.arButtonSlot.className = 'ar-button-slot hidden';
+    this.arButtonSlot.setAttribute('aria-hidden', 'true');
     this.hudActions.appendChild(this.arButtonSlot);
 
     this.placeButton = this.createButton('Place', 'primary', this.handlers.onPlace);
@@ -308,6 +309,8 @@ export class ARHud {
 
   attachARButton(button: HTMLElement): void {
     this.arButtonSlot.replaceChildren(button);
+    this.arButtonSlot.classList.add('hidden');
+    this.arButtonSlot.setAttribute('aria-hidden', 'true');
   }
 
   update(mode: AppMode, customMessage?: string): void {

@@ -130,6 +130,7 @@ describe('ARHud', () => {
     arButton.textContent = 'Start AR';
     arButton.addEventListener('click', startArCamera);
     hud.attachARButton(arButton);
+    expect(root.querySelector('.ar-button-slot')?.classList.contains('hidden')).toBe(true);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
     root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="img4-output"]')?.click();
@@ -488,6 +489,7 @@ describe('ARHud', () => {
     arButton.textContent = 'Start AR';
     arButton.addEventListener('click', startArCamera);
     hud.attachARButton(arButton);
+    expect(root.querySelector('.ar-button-slot')?.classList.contains('hidden')).toBe(true);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Full Flow')?.click();
     hud.showFullFlowReady('You can place the object now.');
