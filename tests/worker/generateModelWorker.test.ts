@@ -597,6 +597,107 @@ describe('handleGenerateModelRequest', () => {
     });
   });
 
+  it('updates a generated model thumbnail in the model index and job metadata', async () => {
+    const storedObjects = new Map<string, string | ArrayBuffer>();
+    storedObjects.set(
+      'models/generated/index.json',
+      JSON.stringify({
+        models: [
+          {
+            id: 'fc-123',
+            label: 'Living room chair',
+            model_url: 'https://assets.example/generated-chair.glb',
+            object_key: 'models/generated/generated-chair.glb',
+            preview_url: 'https://assets.example/previews/old-chair.png',
+            preview_object_key: 'models/generated/previews/old-chair.png',
+            completed_at: '2026-07-04T12:00:00.000Z',
+            bytes: 4,
+          },
+        ],
+      }),
+    );
+    storedObjects.set(
+      'models/generated/jobs/fc-123.json',
+      JSON.stringify({
+        id: 'fc-123',
+        label: 'Living room chair',
+        status: 'completed',
+        preview_url: 'https://assets.example/previews/old-chair.png',
+        preview_object_key: 'models/generated/previews/old-chair.png',
+        completed_at: '2026-07-04T12:00:00.000Z',
+        updated_at: '2026-07-04T12:00:00.000Z',
+      }),
+    );
+    const deleteMock = vi.fn((key: string) => {
+      storedObjects.delete(key);
+      return Promise.resolve(undefined);
+    });
+    const env = createEnv({
+      MODEL_BUCKET: {
+        get: vi.fn((key: string) => {
+          const value = storedObjects.get(key);
+          return Promise.resolve(
+            value
+              ? {
+                  body: value,
+                  httpMetadata: {
+                    contentType: typeof value === 'string' ? 'application/json' : 'image/webp',
+                  },
+                }
+              : null,
+          );
+        }),
+        put: vi.fn((key: string, value: ArrayBuffer | ReadableStream | string) => {
+          if (typeof value === 'string' || value instanceof ArrayBuffer) {
+            storedObjects.set(key, value);
+          }
+          return Promise.resolve(undefined);
+        }),
+        delete: deleteMock,
+      },
+    });
+
+    const response = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/models/fc-123', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          preview_base64: 'dGh1bWI=',
+          preview_mime_type: 'image/webp',
+        }),
+      }),
+      env,
+      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:30:00Z') },
+    );
+
+    const thumbnailKey = 'models/generated/previews/thumbnail-20260704-123000-fc-123.webp';
+    const thumbnailUrl = `https://web-ar-model-assets.pages.dev/${thumbnailKey}`;
+    expect(response.status).toBe(200);
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(thumbnailKey, expect.any(ArrayBuffer), {
+      httpMetadata: { contentType: 'image/webp' },
+    });
+    expect(await response.json()).toMatchObject({
+      id: 'fc-123',
+      preview_url: thumbnailUrl,
+      preview_object_key: thumbnailKey,
+    });
+    expect(JSON.parse(storedObjects.get('models/generated/index.json') as string)).toEqual({
+      models: [
+        expect.objectContaining({
+          id: 'fc-123',
+          preview_url: thumbnailUrl,
+          preview_object_key: thumbnailKey,
+        }),
+      ],
+    });
+    expect(JSON.parse(storedObjects.get('models/generated/jobs/fc-123.json') as string)).toMatchObject({
+      preview_url: thumbnailUrl,
+      preview_object_key: thumbnailKey,
+      updated_at: '2026-07-04T12:30:00.000Z',
+    });
+    expect(deleteMock).toHaveBeenCalledWith('models/generated/previews/old-chair.png');
+  });
+
   it('deletes a permanently generated model from the dropdown index and stored objects', async () => {
     const storedObjects = new Map<string, string>();
     storedObjects.set(

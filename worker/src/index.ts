@@ -54,6 +54,12 @@ interface UploadModelRequestBody {
   model_mime_type?: unknown;
 }
 
+interface ModelPatchRequestBody {
+  label?: unknown;
+  preview_base64?: unknown;
+  preview_mime_type?: unknown;
+}
+
 type GenerationPipeline = 'trellis' | 'openai-to-3d';
 
 interface StoredJob {
@@ -177,7 +183,7 @@ export async function handleGenerateModelRequest(
 
   if (url.pathname.startsWith('/generate-3d/models/')) {
     const modelId = decodeURIComponent(url.pathname.replace('/generate-3d/models/', ''));
-    return handleGeneratedModelManagementRequest(request, env, deps, modelId);
+    return handleGeneratedModelManagementRequest(request, env, deps, modelId, url);
   }
 
   if (request.method === 'GET' && url.pathname.startsWith('/generate-3d/jobs/')) {
@@ -370,6 +376,7 @@ async function handleGeneratedModelManagementRequest(
   env: WorkerEnv,
   deps: GenerateModelDeps,
   modelId: string,
+  url: URL,
 ): Promise<Response> {
   if (!modelId) {
     return jsonResponse({ error: 'model_id is required.' }, 400);
@@ -380,19 +387,33 @@ async function handleGeneratedModelManagementRequest(
   }
 
   if (request.method === 'PATCH') {
-    let body: { label?: unknown };
+    const body = await readJsonBody<ModelPatchRequestBody>(request);
+    if (!body.ok) {
+      return jsonResponse({ error: body.error }, 400);
+    }
+
+    const label = normalizeModelLabel(body.value.label);
+    const previewBase64 =
+      typeof body.value.preview_base64 === 'string' && body.value.preview_base64.length > 0
+        ? body.value.preview_base64
+        : null;
+
+    if (!label && !previewBase64) {
+      return jsonResponse({ error: 'label or preview_base64 is required.' }, 400);
+    }
+
     try {
-      body = (await request.json()) as { label?: unknown };
-    } catch {
-      return jsonResponse({ error: 'Request body must be valid JSON.' }, 400);
+      return await updateGeneratedModel(env, deps, modelId, {
+        label: label ?? undefined,
+        previewBase64: previewBase64 ?? undefined,
+        previewMimeType:
+          typeof body.value.preview_mime_type === 'string' ? body.value.preview_mime_type : 'image/png',
+        publicOrigin: getPublicOrigin(env, url.origin),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not update generated model.';
+      return jsonResponse({ error: message }, 400);
     }
-
-    const label = normalizeModelLabel(body.label);
-    if (!label) {
-      return jsonResponse({ error: 'label is required.' }, 400);
-    }
-
-    return renameGeneratedModel(env, deps, modelId, label);
   }
 
   if (request.method === 'DELETE') {
@@ -402,11 +423,16 @@ async function handleGeneratedModelManagementRequest(
   return jsonResponse({ error: 'Only PATCH and DELETE requests are supported for generated models.' }, 405);
 }
 
-async function renameGeneratedModel(
+async function updateGeneratedModel(
   env: WorkerEnv,
   deps: GenerateModelDeps,
   modelId: string,
-  label: string,
+  update: {
+    label?: string;
+    previewBase64?: string;
+    previewMimeType: string;
+    publicOrigin: string;
+  },
 ): Promise<Response> {
   const index = await readGeneratedModelsIndex(env);
   const modelIndex = index.models.findIndex((model) => model.id === modelId);
@@ -414,9 +440,21 @@ async function renameGeneratedModel(
     return jsonResponse({ error: 'Generated model not found.' }, 404);
   }
 
+  const existingModel = index.models[modelIndex];
+  const replacementPreview = update.previewBase64
+    ? await storeUpdatedModelPreview(env, {
+        imageBase64: update.previewBase64,
+        imageMimeType: update.previewMimeType,
+        modelId,
+        publicOrigin: update.publicOrigin,
+        updatedAt: deps.now(),
+      })
+    : null;
   const renamedModel: GeneratedModelEntry = {
-    ...index.models[modelIndex],
-    label,
+    ...existingModel,
+    label: update.label ?? existingModel.label,
+    preview_url: replacementPreview?.previewUrl ?? existingModel.preview_url,
+    preview_object_key: replacementPreview?.previewObjectKey ?? existingModel.preview_object_key,
   };
   const models = [...index.models];
   models[modelIndex] = renamedModel;
@@ -426,9 +464,20 @@ async function renameGeneratedModel(
   if (job) {
     await saveJob(env, {
       ...job,
-      label,
+      label: update.label ?? job.label,
+      preview_url: replacementPreview?.previewUrl ?? job.preview_url,
+      preview_object_key: replacementPreview?.previewObjectKey ?? job.preview_object_key,
       updated_at: deps.now().toISOString(),
     });
+  }
+
+  if (
+    replacementPreview &&
+    env.MODEL_BUCKET.delete &&
+    existingModel.preview_object_key &&
+    existingModel.preview_object_key !== replacementPreview.previewObjectKey
+  ) {
+    await env.MODEL_BUCKET.delete(existingModel.preview_object_key);
   }
 
   return jsonResponse(renamedModel);
@@ -874,6 +923,32 @@ async function storeGeneratedModelPreview(
   } catch {
     return null;
   }
+}
+
+async function storeUpdatedModelPreview(
+  env: WorkerEnv,
+  input: {
+    imageBase64: string;
+    imageMimeType: string;
+    modelId: string;
+    publicOrigin: string;
+    updatedAt: Date;
+  },
+): Promise<{ previewUrl: string; previewObjectKey: string }> {
+  const contentType = normalizeImageMimeType(input.imageMimeType);
+  const extension = imageExtensionForMimeType(contentType);
+  const previewObjectKey = `models/generated/previews/thumbnail-${formatTimestamp(input.updatedAt)}-${safeObjectKeyPart(
+    input.modelId,
+  )}.${extension}`;
+  await env.MODEL_BUCKET.put(previewObjectKey, base64ToArrayBuffer(stripDataUrlPrefix(input.imageBase64)), {
+    httpMetadata: {
+      contentType,
+    },
+  });
+  return {
+    previewUrl: `${input.publicOrigin}/${previewObjectKey}`,
+    previewObjectKey,
+  };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

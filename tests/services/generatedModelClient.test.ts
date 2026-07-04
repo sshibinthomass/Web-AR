@@ -7,6 +7,7 @@ import {
   renameGeneratedModel,
   startGeneratedModelJob,
   storeUploadedModel,
+  updateGeneratedModelThumbnail,
 } from '../../src/services/generatedModelClient';
 
 describe('extractImageFor3D', () => {
@@ -294,6 +295,57 @@ describe('renameGeneratedModel', () => {
         fetchImpl: vi.fn(),
       }),
     ).rejects.toThrow('Enter a model name before renaming.');
+  });
+});
+
+describe('updateGeneratedModelThumbnail', () => {
+  it('uploads a compressed thumbnail for a permanent generated model', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'fc-123',
+          label: 'Living room chair',
+          model_url: 'https://assets.example/generated-chair.glb',
+          object_key: 'models/generated/generated-chair.glb',
+          preview_url: 'https://assets.example/previews/generated-chair.webp',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const model = await updateGeneratedModelThumbnail({
+      apiUrl: 'https://worker.example/generate-3d',
+      modelId: 'generated-fc-123',
+      thumbnail: {
+        base64: 'compressed-thumbnail-base64',
+        bytes: 256,
+        height: 256,
+        mimeType: 'image/webp',
+        width: 512,
+      },
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/generate-3d/models/fc-123',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          preview_base64: 'compressed-thumbnail-base64',
+          preview_mime_type: 'image/webp',
+        }),
+      }),
+    );
+    expect(model).toEqual({
+      id: 'generated-fc-123',
+      label: 'Living room chair',
+      url: 'https://assets.example/generated-chair.glb',
+      previewUrl: 'https://assets.example/previews/generated-chair.webp',
+    });
   });
 });
 

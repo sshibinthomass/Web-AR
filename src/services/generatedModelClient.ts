@@ -1,4 +1,5 @@
 import type { ModelOption } from '../app/models';
+import type { CompressedThumbnail } from '../capture/thumbnailCompression';
 
 export interface GenerateModelInput {
   apiUrl: string;
@@ -41,6 +42,13 @@ interface RenameGeneratedModelInput {
   apiUrl: string;
   modelId: string;
   label: string;
+  fetchImpl?: typeof fetch;
+}
+
+interface UpdateGeneratedModelThumbnailInput {
+  apiUrl: string;
+  modelId: string;
+  thumbnail: CompressedThumbnail;
   fetchImpl?: typeof fetch;
 }
 
@@ -207,6 +215,40 @@ export async function renameGeneratedModel({
 
   if (!('id' in body) || !body.id || !body.label || !body.model_url) {
     throw new Error('Worker response did not include the renamed model.');
+  }
+
+  return mapGeneratedModelEntry(body);
+}
+
+export async function updateGeneratedModelThumbnail({
+  apiUrl,
+  modelId,
+  thumbnail,
+  fetchImpl = fetch,
+}: UpdateGeneratedModelThumbnailInput): Promise<ModelOption> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  if (!thumbnail.base64 || !thumbnail.mimeType.startsWith('image/')) {
+    throw new Error('Choose an image file for the thumbnail.');
+  }
+
+  const response = await fetchImpl(generatedModelItemUrl(apiUrl, modelId), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      preview_base64: thumbnail.base64,
+      preview_mime_type: thumbnail.mimeType,
+    }),
+  });
+  const body = (await response.json()) as WorkerGeneratedModelEntry | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Thumbnail update failed with HTTP ${response.status}.`);
+  }
+
+  if (!('id' in body) || !body.id || !body.label || !body.model_url) {
+    throw new Error('Worker response did not include the updated model.');
   }
 
   return mapGeneratedModelEntry(body);

@@ -22,6 +22,7 @@ interface HUDHandlers {
   onDeleteUploadedModel(modelId: string): void;
   onPreviewModel(modelId: string): void;
   onCloseModelPreview(): void;
+  onUpdateModelThumbnail(modelId: string, file: File): void;
   onReturnHome(): void;
 }
 
@@ -762,6 +763,7 @@ export class ARHud {
       const modelKind = this.modelKind(model);
       const isGenerated = modelKind === 'generated';
       const isUploaded = modelKind === 'uploaded';
+      const canUpdateThumbnail = model.id.startsWith('generated-');
       const row = document.createElement('article');
       row.className = `model-manager-row has-preview${isGenerated ? ' is-generated' : ''}${isUploaded ? ' is-uploaded' : ''}`;
       row.dataset.modelId = model.id;
@@ -814,6 +816,20 @@ export class ARHud {
       const actions = document.createElement('div');
       actions.className = 'model-manager-actions';
       actions.append(this.createButton('Preview', '', () => this.handlers.onPreviewModel(model.id)));
+      if (canUpdateThumbnail) {
+        const thumbnailInput = document.createElement('input');
+        thumbnailInput.type = 'file';
+        thumbnailInput.accept = 'image/*';
+        thumbnailInput.className = 'model-manager-thumbnail-input hidden';
+        thumbnailInput.setAttribute('aria-label', `Thumbnail for ${model.label}`);
+        thumbnailInput.addEventListener('change', () => this.handleModelThumbnailChange(model.id, thumbnailInput));
+        actions.append(
+          thumbnailInput,
+          this.createButton('Thumbnail', '', () => {
+            thumbnailInput.click();
+          }),
+        );
+      }
       if (isGenerated) {
         const renameButton = this.createButton('Rename', '', () => {
           const input = row.querySelector<HTMLInputElement>('input[name="modelLabel"]');
@@ -888,6 +904,21 @@ export class ARHud {
     }
 
     this.handlers.onRenameGeneratedModel(modelId, trimmedLabel);
+  }
+
+  private handleModelThumbnailChange(modelId: string, input: HTMLInputElement): void {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      this.updateModelManagerStatus('Choose an image file for the thumbnail.');
+      return;
+    }
+
+    this.handlers.onUpdateModelThumbnail(modelId, file);
   }
 
   private closeModelPreviewIfOpen(): void {

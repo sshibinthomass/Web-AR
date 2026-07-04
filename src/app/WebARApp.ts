@@ -14,6 +14,7 @@ import {
   stopCameraPreview,
   type CapturedImage,
 } from '../capture/cameraCapture';
+import { compressThumbnailImage } from '../capture/thumbnailCompression';
 import { createScene, type SceneContext } from '../scene/createScene';
 import { loadGLBModel } from '../scene/loadModel';
 import { ModelPreviewViewer } from '../scene/ModelPreviewViewer';
@@ -25,6 +26,7 @@ import {
   renameGeneratedModel as renameGeneratedModelRequest,
   startGeneratedModelJob,
   storeUploadedModel as storeUploadedModelRequest,
+  updateGeneratedModelThumbnail as updateGeneratedModelThumbnailRequest,
   type GenerationPipeline,
 } from '../services/generatedModelClient';
 import { AppState } from '../state/AppState';
@@ -88,6 +90,7 @@ export class WebARApp {
       onDeleteUploadedModel: (modelId) => this.deleteUploadedModel(modelId),
       onPreviewModel: (modelId) => void this.previewModel(modelId),
       onCloseModelPreview: () => this.closeModelPreview(),
+      onUpdateModelThumbnail: (modelId, file) => void this.updateModelThumbnail(modelId, file),
       onReturnHome: () => void this.returnHome(),
     });
     this.hud.updateModelSource('Cloudflare only');
@@ -458,6 +461,27 @@ export class WebARApp {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not delete model.';
       this.hud?.updateModelManagerStatus(`Delete failed: ${message}`);
+    }
+  }
+
+  private async updateModelThumbnail(modelId: string, file: File): Promise<void> {
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+
+    this.hud?.updateModelManagerStatus('Compressing thumbnail...');
+
+    try {
+      const thumbnail = await compressThumbnailImage(file);
+      this.hud?.updateModelManagerStatus('Uploading compressed thumbnail...');
+      const updatedModel = await updateGeneratedModelThumbnailRequest({ apiUrl, modelId, thumbnail });
+      this.generatedModelOptions = this.generatedModelOptions.map((model) =>
+        model.id === updatedModel.id ? updatedModel : model,
+      );
+      this.syncAvailableModels();
+      await this.refreshGeneratedModels();
+      this.hud?.updateModelManagerStatus(`Thumbnail updated (${Math.max(1, Math.ceil(thumbnail.bytes / 1024))} KB).`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not update thumbnail.';
+      this.hud?.updateModelManagerStatus(`Thumbnail update failed: ${message}`);
     }
   }
 

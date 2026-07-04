@@ -36,6 +36,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onDeleteUploadedModel: vi.fn(),
     onPreviewModel: vi.fn(),
     onCloseModelPreview: vi.fn(),
+    onUpdateModelThumbnail: vi.fn(),
     onReturnHome: vi.fn(),
     ...overrides,
   };
@@ -210,6 +211,7 @@ describe('ARHud', () => {
     );
     expect([...root.querySelectorAll('.model-manager-row.is-generated button')].map((button) => button.textContent)).toEqual([
       'Preview',
+      'Thumbnail',
       'Rename',
       'Delete',
     ]);
@@ -283,8 +285,33 @@ describe('ARHud', () => {
     expect(uploadedRow.textContent).toContain('Uploaded');
     expect(uploadedRow.textContent).toContain('chair');
     expect(uploadedRow.querySelector('.model-manager-thumbnail')?.textContent).toBe('GLB');
+    expect([...uploadedRow.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Preview', 'Thumbnail', 'Delete']);
     [...uploadedRow.querySelectorAll('button')].find((button) => button.textContent === 'Delete')?.click();
     expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-upload-123-chair');
+  });
+
+  it('uploads a replacement thumbnail from the model manager', () => {
+    const root = document.createElement('div');
+    const onUpdateModelThumbnail = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onUpdateModelThumbnail }));
+
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-fc-123',
+        label: 'chair - 2026-07-04 12:00:00 UTC',
+        url: 'https://assets.example/generated-chair.glb',
+      },
+    ]);
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
+
+    const generatedRow = root.querySelector('.model-manager-row.is-generated')!;
+    const thumbnailInput = generatedRow.querySelector<HTMLInputElement>('input[type="file"][accept="image/*"]')!;
+    const file = new File(['image bytes'], 'chair.png', { type: 'image/png' });
+    Object.defineProperty(thumbnailInput, 'files', { value: [file], configurable: true });
+
+    thumbnailInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(onUpdateModelThumbnail).toHaveBeenCalledWith('generated-fc-123', file);
   });
 
   it('renames and deletes generated models from the model manager', () => {
@@ -307,8 +334,8 @@ describe('ARHud', () => {
     const nameInput = generatedRow.querySelector<HTMLInputElement>('input[name="modelLabel"]')!;
     nameInput.value = '  Living room chair  ';
 
-    generatedRow.querySelectorAll('button')[1].click();
-    generatedRow.querySelectorAll('button')[2].click();
+    [...generatedRow.querySelectorAll('button')].find((button) => button.textContent === 'Rename')?.click();
+    [...generatedRow.querySelectorAll('button')].find((button) => button.textContent === 'Delete')?.click();
 
     expect(onRenameGeneratedModel).toHaveBeenCalledWith('generated-fc-123', 'Living room chair');
     expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-fc-123');
