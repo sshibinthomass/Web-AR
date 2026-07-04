@@ -79,7 +79,8 @@ canvas {
   pointer-events: auto;
 }
 
-.status-panel.camera-active {
+.status-panel.camera-active,
+.status-panel.object-placed {
   max-width: none;
   margin: 0;
   padding: 0;
@@ -92,7 +93,11 @@ canvas {
 .status-panel.camera-active > .status-label,
 .status-panel.camera-active > .status-message,
 .status-panel.camera-active > .status-source,
-.status-panel.camera-active > .model-picker {
+.status-panel.camera-active > .model-picker,
+.status-panel.object-placed > .status-label,
+.status-panel.object-placed > .status-message,
+.status-panel.object-placed > .status-source,
+.status-panel.object-placed > .model-picker {
   display: none;
 }
 
@@ -122,7 +127,8 @@ canvas {
   touch-action: manipulation;
 }
 
-.status-panel.camera-active > .page-back {
+.status-panel.camera-active > .page-back,
+.status-panel.object-placed > .page-back {
   position: fixed;
   top: max(14px, env(safe-area-inset-top));
   left: 14px;

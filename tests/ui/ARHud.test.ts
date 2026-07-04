@@ -499,6 +499,22 @@ describe('ARHud', () => {
     expect((placeButton as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('collapses AR status to only the Back button after an object is placed', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+    hud.update('placed');
+
+    const statusPanel = root.querySelector('.status-panel');
+    const backButton = root.querySelector<HTMLButtonElement>('.status-panel > .page-back');
+
+    expect(statusPanel?.classList.contains('object-placed')).toBe(true);
+    expect(statusPanel?.classList.contains('hidden')).toBe(false);
+    expect(backButton).toBeInstanceOf(HTMLButtonElement);
+    expect(backButton?.classList.contains('hidden')).toBe(false);
+  });
+
   it('provides a gesture surface that is enabled after opening AR View', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());

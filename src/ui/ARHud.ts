@@ -297,6 +297,7 @@ export class ARHud {
     this.statusMessage.textContent = customMessage ?? this.messageForMode(mode);
 
     const hasPlacedObject = mode === 'placed' || mode === 'editing';
+    this.statusPanel.classList.toggle('object-placed', hasPlacedObject);
     this.placeButton.disabled = !this.modelReady || (mode !== 'scanning' && mode !== 'readyToPlace');
     this.editButton.disabled = !hasPlacedObject;
     this.resetScaleButton.disabled = !hasPlacedObject;
