@@ -116,19 +116,59 @@ export class ARHud {
     this.landing.className = 'landing';
     this.landing.innerHTML = `
       <div class="landing-inner">
-        <h1>WebXR Floor Placement</h1>
-        <p>Capture a real object for 3D generation, or open AR to place an existing model.</p>
+        <div class="landing-copy">
+          <p class="landing-kicker">AR model studio</p>
+          <h1>Anima You 3D</h1>
+          <p>Create 3D models from real objects, manage your saved library, and place them in AR.</p>
+          <div class="landing-flow" aria-label="Camera to 3D Model to AR">
+            <div class="landing-flow-step">
+              <span>01</span>
+              <strong>Camera</strong>
+              <small>Capture a real object</small>
+            </div>
+            <div class="landing-flow-step">
+              <span>02</span>
+              <strong>3D Model</strong>
+              <small>Generate or upload GLB</small>
+            </div>
+            <div class="landing-flow-step">
+              <span>03</span>
+              <strong>AR</strong>
+              <small>Place it in your room</small>
+            </div>
+          </div>
+        </div>
+        <div class="landing-preview" aria-hidden="true">
+          <div class="preview-stage">
+            <span class="preview-floor"></span>
+            <span class="preview-anchor"></span>
+            <span class="preview-object"></span>
+          </div>
+          <p><strong>Guest preview</strong><span>Open saved models and place them in AR.</span></p>
+        </div>
       </div>
     `;
     const modePicker = document.createElement('div');
     modePicker.className = 'mode-picker';
     modePicker.append(
-      this.createButton('Camera', 'primary', () => this.navigateTo('camera')),
-      this.createButton('Upload Image', '', () => this.navigateTo('upload')),
-      this.createButton('Upload Model', '', () => this.navigateTo('upload-model')),
-      this.createButton('AR View', '', () => this.navigateTo('ar')),
-      this.createButton('Full Flow', '', () => this.navigateTo('full-flow')),
-      this.createButton('Models', '', () => this.navigateTo('models')),
+      this.createModeGroup(
+        'Available as guest',
+        'View saved 3D models or place them in AR without signing in.',
+        [
+          this.createModeAction(this.createButton('AR View', 'primary', () => this.navigateTo('ar')), 'AR'),
+          this.createModeAction(this.createButton('Models', '', () => this.navigateTo('models')), '3D'),
+        ],
+      ),
+      this.createModeGroup(
+        'Login required',
+        'Create, upload, and manage models with an approved account.',
+        [
+          this.createModeAction(this.createButton('Camera', '', () => this.navigateTo('camera')), 'CAM'),
+          this.createModeAction(this.createButton('Upload Image', '', () => this.navigateTo('upload')), 'IMG'),
+          this.createModeAction(this.createButton('Upload Model', '', () => this.navigateTo('upload-model')), 'GLB'),
+          this.createModeAction(this.createButton('Full Flow', '', () => this.navigateTo('full-flow')), 'AI'),
+        ],
+      ),
     );
     this.authActions = document.createElement('div');
     this.authActions.className = 'auth-actions';
@@ -1476,6 +1516,30 @@ export class ARHud {
     }
 
     arControl?.click();
+  }
+
+  private createModeGroup(title: string, description: string, actions: HTMLElement[]): HTMLElement {
+    const group = document.createElement('section');
+    group.className = 'mode-group';
+    group.innerHTML = `
+      <div class="mode-group-heading">
+        <h2>${title}</h2>
+        <p>${description}</p>
+      </div>
+    `;
+    const actionList = document.createElement('div');
+    actionList.className = 'mode-action-list';
+    actionList.append(...actions);
+    group.appendChild(actionList);
+    return group;
+  }
+
+  private createModeAction(button: HTMLButtonElement, icon: string): HTMLElement {
+    const action = document.createElement('div');
+    action.className = 'mode-action';
+    button.dataset.icon = icon;
+    action.appendChild(button);
+    return action;
   }
 
   private createButton(label: string, className: string, onClick: () => void): HTMLButtonElement {

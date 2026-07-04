@@ -1,6 +1,6 @@
 :root {
-  color: #f8fafc;
-  background: #0f172a;
+  color: #102326;
+  background: #f4fbfa;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
@@ -25,8 +25,13 @@ body,
 
 body {
   background:
-    radial-gradient(circle at 50% 18%, rgba(20, 184, 166, 0.18), transparent 34%),
-    linear-gradient(145deg, #101820 0%, #162226 48%, #241f33 100%);
+    linear-gradient(90deg, rgba(20, 184, 166, 0.12) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(14, 116, 144, 0.08) 1px, transparent 1px),
+    linear-gradient(145deg, #f7fffd 0%, #eef8ff 48%, #fff8e7 100%);
+  background-size:
+    56px 56px,
+    56px 56px,
+    auto;
 }
 
 canvas {
@@ -644,60 +649,321 @@ canvas {
   inset: 0;
   display: flex;
   align-items: center;
-  padding: 24px 24px 190px;
+  padding: clamp(22px, 5vw, 64px) 24px max(56px, env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background:
+    linear-gradient(90deg, rgba(20, 184, 166, 0.12) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(14, 116, 144, 0.08) 1px, transparent 1px),
+    linear-gradient(145deg, #f7fffd 0%, #eef8ff 48%, #fff8e7 100%);
+  background-size:
+    56px 56px,
+    56px 56px,
+    auto;
   pointer-events: auto;
 }
 
 .landing-inner {
-  width: min(640px, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 620px) minmax(300px, 440px);
+  gap: clamp(24px, 5vw, 72px);
+  align-items: center;
+  width: min(1180px, 100%);
+}
+
+.landing-copy {
+  align-self: end;
+}
+
+.landing-kicker {
+  margin: 0 0 12px;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .landing h1 {
   margin: 0 0 12px;
-  color: #ffffff;
-  font-size: clamp(32px, 9vw, 68px);
-  line-height: 0.96;
+  color: #102326;
+  font-size: 78px;
+  line-height: 0.92;
   letter-spacing: 0;
 }
 
 .landing p {
   max-width: 56ch;
   margin: 0;
-  color: rgba(255, 255, 255, 0.78);
+  color: rgba(16, 35, 38, 0.78);
   font-size: 16px;
   line-height: 1.5;
 }
 
-.mode-picker {
+.landing-flow {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  max-width: 620px;
   margin-top: 22px;
 }
 
-.mode-picker button {
+.landing-flow-step {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  min-height: 116px;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  border-radius: 8px;
+  padding: 14px;
+  color: #102326;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 14px 36px rgba(15, 118, 110, 0.1);
+}
+
+.landing-flow-step::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -13px;
+  z-index: 1;
+  width: 16px;
+  height: 2px;
+  background: #0f766e;
+}
+
+.landing-flow-step:last-child::after {
+  display: none;
+}
+
+.landing-flow-step span {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: #ffffff;
+  background: #0f766e;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.landing-flow-step strong {
+  color: #102326;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.landing-flow-step small {
+  color: rgba(16, 35, 38, 0.68);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.landing-preview {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  min-height: 390px;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  border-radius: 8px;
+  overflow: hidden;
+  background:
+    linear-gradient(160deg, rgba(94, 234, 212, 0.3), transparent 38%),
+    linear-gradient(20deg, rgba(251, 191, 36, 0.2), transparent 42%),
+    rgba(255, 255, 255, 0.82);
+  box-shadow: 0 22px 70px rgba(15, 118, 110, 0.16);
+}
+
+.landing-preview::before {
+  content: "";
+  position: absolute;
+  inset: 18px;
+  border: 1px solid rgba(15, 118, 110, 0.14);
+  border-radius: 6px;
+}
+
+.preview-stage {
+  position: absolute;
+  inset: 28px 24px 82px;
+  perspective: 700px;
+}
+
+.preview-floor {
+  position: absolute;
+  right: -26px;
+  bottom: 4px;
+  left: -26px;
+  height: 58%;
+  transform: rotateX(68deg);
+  transform-origin: bottom;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  background:
+    linear-gradient(rgba(15, 118, 110, 0.16) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 118, 110, 0.14) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.preview-anchor {
+  position: absolute;
+  right: 28%;
+  bottom: 21%;
+  width: 110px;
+  height: 110px;
+  border: 2px solid rgba(245, 158, 11, 0.78);
+  border-radius: 999px;
+  transform: rotateX(68deg);
+  transform-origin: bottom;
+  box-shadow: 0 0 32px rgba(245, 158, 11, 0.2);
+}
+
+.preview-object {
+  position: absolute;
+  right: 31%;
+  bottom: 33%;
+  width: 96px;
+  height: 128px;
+  transform: skewY(-8deg) rotate(-8deg);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px 8px 18px 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.24), transparent 35%),
+    linear-gradient(155deg, #5eead4 0%, #22c55e 45%, #a78bfa 100%);
+  box-shadow:
+    24px 38px 46px rgba(0, 0, 0, 0.3),
+    inset -18px -22px 36px rgba(0, 0, 0, 0.24);
+}
+
+.preview-object::before {
+  content: "";
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(3, 27, 24, 0.34);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.landing-preview p {
+  position: absolute;
+  right: 24px;
+  bottom: 20px;
+  left: 24px;
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  color: rgba(16, 35, 38, 0.7);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.landing-preview strong {
+  color: #102326;
+}
+
+.landing-preview span {
+  color: rgba(16, 35, 38, 0.62);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mode-picker {
+  display: grid;
+  grid-column: 1;
+  gap: 14px;
+  max-width: 640px;
+  margin-top: 22px;
+}
+
+.mode-group {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 16px 42px rgba(15, 118, 110, 0.1);
+  backdrop-filter: blur(14px);
+}
+
+.mode-group-heading {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.mode-group h2 {
+  margin: 0;
+  color: #102326;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.mode-group p {
+  max-width: 34ch;
+  margin: 0;
+  color: rgba(16, 35, 38, 0.64);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.mode-action-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mode-action button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
   min-height: 54px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(15, 118, 110, 0.2);
   border-radius: 8px;
   padding: 12px 14px;
-  color: #f8fafc;
-  background: rgba(5, 10, 14, 0.78);
+  color: #102326;
+  background: rgba(255, 255, 255, 0.86);
   font: inherit;
   font-size: 15px;
   font-weight: 800;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(14px);
   touch-action: manipulation;
 }
 
-.mode-picker button.primary {
+.mode-action button::before {
+  content: attr(data-icon);
+  display: inline-grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 8px;
+  color: #041715;
+  background: rgba(94, 234, 212, 0.92);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.mode-action button.primary {
   color: #031b18;
   background: #5eead4;
+  border-color: rgba(94, 234, 212, 0.92);
+}
+
+.mode-action button.primary::before {
+  color: #f8fafc;
+  background: #0b1214;
 }
 
 .auth-actions {
   display: flex;
+  grid-column: 1;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
@@ -709,7 +975,7 @@ canvas {
   flex: 1 1 180px;
   min-width: 0;
   margin: 0;
-  color: rgba(255, 255, 255, 0.72);
+  color: rgba(16, 35, 38, 0.7);
   font-size: 13px;
   font-weight: 800;
   overflow-wrap: anywhere;
@@ -719,11 +985,11 @@ canvas {
 .auth-form-actions button,
 .admin-account-actions button {
   min-height: 42px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(15, 118, 110, 0.2);
   border-radius: 8px;
   padding: 9px 12px;
-  color: #f8fafc;
-  background: rgba(5, 10, 14, 0.78);
+  color: #102326;
+  background: rgba(255, 255, 255, 0.86);
   font: inherit;
   font-size: 13px;
   font-weight: 800;
@@ -1125,6 +1391,58 @@ canvas {
   line-height: 1.35;
 }
 
+@media (max-width: 860px) {
+  .landing {
+    align-items: flex-start;
+    padding-top: max(28px, env(safe-area-inset-top));
+  }
+
+  .landing-inner {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .landing-copy,
+  .mode-picker,
+  .auth-actions {
+    grid-column: 1;
+  }
+
+  .landing-preview {
+    grid-column: 1;
+    grid-row: auto;
+    min-height: 180px;
+  }
+
+  .preview-stage {
+    inset: 18px 16px 62px;
+  }
+
+  .preview-object {
+    right: 35%;
+    bottom: 25%;
+    width: 68px;
+    height: 88px;
+  }
+
+  .preview-anchor {
+    right: 28%;
+    bottom: 14%;
+    width: 90px;
+    height: 90px;
+  }
+
+  .mode-group-heading {
+    display: grid;
+    gap: 4px;
+  }
+
+  .mode-group p {
+    max-width: none;
+    text-align: left;
+  }
+}
+
 @media (min-width: 620px) {
   .model-rail {
     justify-content: center;
@@ -1141,8 +1459,61 @@ canvas {
 }
 
 @media (max-width: 420px) {
-  .mode-picker {
+  .landing {
+    padding-bottom: 28px;
+  }
+
+  .landing-inner {
+    gap: 14px;
+  }
+
+  .landing h1 {
+    font-size: 38px;
+  }
+
+  .landing-preview {
+    min-height: 120px;
+  }
+
+  .preview-stage {
+    inset: 8px 14px 36px;
+  }
+
+  .preview-object {
+    width: 44px;
+    height: 60px;
+  }
+
+  .preview-object::before {
+    top: 8px;
+    left: 10px;
+    width: 20px;
+    height: 20px;
+  }
+
+  .preview-anchor {
+    width: 58px;
+    height: 58px;
+  }
+
+  .landing-preview p {
+    right: 16px;
+    bottom: 8px;
+    left: 16px;
+    font-size: 12px;
+  }
+
+  .mode-group {
+    padding: 12px;
+  }
+
+  .mode-action-list {
     grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .mode-action button {
+    min-height: 50px;
   }
 
   .model-rail {

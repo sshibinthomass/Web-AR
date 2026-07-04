@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Local Android WebXR app for placing and transforming a GLB model on the floor.",
+  "description": "Local Android WebXR app for creating, managing, and placing 3D models in AR.",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

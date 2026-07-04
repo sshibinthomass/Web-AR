@@ -1,6 +1,6 @@
-# WebXR Floor Placement
+# Anima You 3D
 
-Local Android WebXR app for selecting a Cloudflare-hosted GLB model, generating a new model from a camera image through Modal, placing the GLB on the floor, and transforming it in AR.
+Local Android WebXR app for creating, managing, and placing 3D models in AR.
 
 ## Requirements
 

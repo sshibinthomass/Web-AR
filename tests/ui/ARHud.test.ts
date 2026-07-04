@@ -65,18 +65,29 @@ describe('ARHud', () => {
     window.history.replaceState(null, '', '/');
   });
 
-  it('starts on a first screen with Camera and AR View choices', () => {
+  it('starts on a branded first screen with public and login-required actions grouped', () => {
     const root = document.createElement('div');
     new ARHud(root, modelOptions, createHandlers());
 
-    const choiceButtons = [...root.querySelectorAll('.mode-picker button')].map(
+    const choiceButtons = [...root.querySelectorAll('.mode-action button')].map(
       (button) => button.textContent,
     );
     const statusPanel = root.querySelector('.status-panel');
     const cameraPanel = root.querySelector('.camera-panel');
     const hudActions = root.querySelector('.hud-actions');
 
-    expect(choiceButtons).toEqual(['Camera', 'Upload Image', 'Upload Model', 'AR View', 'Full Flow', 'Models']);
+    expect(root.querySelector('.landing h1')?.textContent).toBe('Anima You 3D');
+    const landingFlow = root.querySelector('.landing-flow');
+    expect(landingFlow).not.toBeNull();
+    expect([...root.querySelectorAll('.landing-flow-step strong')].map((step) => step.textContent)).toEqual([
+      'Camera',
+      '3D Model',
+      'AR',
+    ]);
+    expect(root.textContent).toContain('Available as guest');
+    expect(root.textContent).toContain('Login required');
+    expect(root.querySelector('.landing-preview')).not.toBeNull();
+    expect(choiceButtons).toEqual(['AR View', 'Models', 'Camera', 'Upload Image', 'Upload Model', 'Full Flow']);
     expect(statusPanel?.classList.contains('hidden')).toBe(true);
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
     expect(hudActions?.classList.contains('hidden')).toBe(true);
