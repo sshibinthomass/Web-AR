@@ -25,7 +25,8 @@ describe('ModelPreviewViewer', () => {
       dispose: vi.fn(),
     };
     const loadedModel = new THREE.Group();
-    loadedModel.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)));
+    const loadedMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+    loadedModel.add(loadedMesh);
     const loadModel = vi.fn().mockResolvedValue(loadedModel);
     const createControls = vi.fn(() => controls);
     const disconnectResize = vi.fn();
@@ -52,6 +53,16 @@ describe('ModelPreviewViewer', () => {
     expect(controls.enableDamping).toBe(true);
     expect(controls.enablePan).toBe(false);
     expect(loadedModel.parent).toBeInstanceOf(THREE.Scene);
+    const previewScene = loadedModel.parent as THREE.Scene;
+    expect(previewScene.background).toBeInstanceOf(THREE.Color);
+    expect((previewScene.background as THREE.Color).getHex()).toBe(0xffffff);
+    expect(loadedMesh.castShadow).toBe(true);
+    expect(loadedMesh.receiveShadow).toBe(true);
+    const shadowFloor = previewScene.children.find((child) => child.name === 'Preview soft shadow floor') as THREE.Mesh | undefined;
+    expect(shadowFloor).toBeInstanceOf(THREE.Mesh);
+    expect(shadowFloor?.receiveShadow).toBe(true);
+    expect(shadowFloor?.material).toBeInstanceOf(THREE.ShadowMaterial);
+    expect(previewScene.children.some((child) => child instanceof THREE.DirectionalLight && child.castShadow)).toBe(true);
 
     viewer.dispose();
 

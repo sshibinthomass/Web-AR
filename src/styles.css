@@ -1471,7 +1471,10 @@ canvas {
   display: grid;
   place-items: center;
   padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom));
-  background: rgba(2, 7, 11, 0.82);
+  background:
+    radial-gradient(circle at 18% 14%, rgba(94, 234, 212, 0.2), transparent 28%),
+    radial-gradient(circle at 84% 10%, rgba(251, 191, 36, 0.14), transparent 30%),
+    rgba(247, 255, 253, 0.92);
   pointer-events: auto;
 }
 
@@ -1482,10 +1485,11 @@ canvas {
   height: min(720px, 100%);
   min-height: 420px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(15, 118, 110, 0.16);
   border-radius: 8px;
-  background: #050a0e;
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.48);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 22px 70px rgba(15, 118, 110, 0.18);
+  backdrop-filter: blur(14px);
 }
 
 .model-preview-bar {
@@ -1495,7 +1499,7 @@ canvas {
   gap: 12px;
   min-width: 0;
   padding: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(15, 118, 110, 0.14);
 }
 
 .model-preview-heading {
@@ -1504,7 +1508,7 @@ canvas {
 
 .model-preview-kicker {
   display: block;
-  color: rgba(94, 234, 212, 0.86);
+  color: rgba(15, 118, 110, 0.86);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0;
@@ -1513,7 +1517,7 @@ canvas {
 
 .model-preview-title {
   margin: 3px 0 0;
-  color: #ffffff;
+  color: #102326;
   font-size: 18px;
   line-height: 1.2;
   letter-spacing: 0;
@@ -1523,11 +1527,12 @@ canvas {
 .model-preview-close {
   flex: 0 0 auto;
   min-height: 40px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(15, 118, 110, 0.2);
   border-radius: 8px;
   padding: 9px 12px;
-  color: #f8fafc;
-  background: rgba(255, 255, 255, 0.08);
+  color: #102326;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 12px 32px rgba(15, 118, 110, 0.12);
   font: inherit;
   font-size: 13px;
   font-weight: 800;
@@ -1538,9 +1543,13 @@ canvas {
   position: relative;
   min-height: 0;
   background:
-    linear-gradient(145deg, rgba(8, 18, 22, 0.98), rgba(17, 20, 31, 0.98)),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 44px),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 44px);
+    linear-gradient(90deg, rgba(20, 184, 166, 0.08) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(14, 116, 144, 0.06) 1px, transparent 1px),
+    #ffffff;
+  background-size:
+    48px 48px,
+    48px 48px,
+    auto;
 }
 
 .model-preview-viewport canvas {
@@ -1554,8 +1563,8 @@ canvas {
   min-height: 38px;
   margin: 0;
   padding: 10px 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.76);
+  border-top: 1px solid rgba(15, 118, 110, 0.14);
+  color: rgba(16, 35, 38, 0.7);
   font-size: 13px;
   line-height: 1.35;
 }

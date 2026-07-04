@@ -45,6 +45,7 @@ export class ModelPreviewViewer {
   private renderer: PreviewRenderer | null = null;
   private controls: PreviewControls | null = null;
   private model: THREE.Object3D | null = null;
+  private shadowFloor: THREE.Mesh | null = null;
   private frameId: number | null = null;
   private disconnectResize: (() => void) | null = null;
   private requestVersion = 0;
@@ -67,7 +68,7 @@ export class ModelPreviewViewer {
     this.requestVersion = version;
 
     const scene = new THREE.Scene();
-    scene.background = null;
+    scene.background = new THREE.Color(0xffffff);
     const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
     const renderer = this.createRenderer();
     const controls = this.createControls(camera, renderer.domElement);
@@ -75,12 +76,18 @@ export class ModelPreviewViewer {
     controls.enableDamping = true;
     controls.enablePan = false;
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x1e293b, 1.45));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xd8e8e4, 1.5));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
-    keyLight.position.set(2.5, 4, 3);
+    keyLight.position.set(3.5, 5, 4);
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.set(2048, 2048);
+    keyLight.shadow.bias = -0.00015;
+    keyLight.shadow.normalBias = 0.025;
     scene.add(keyLight);
-    const rimLight = new THREE.DirectionalLight(0x8bd8ff, 1.15);
-    rimLight.position.set(-3, 2, -2);
+    scene.add(keyLight.target);
+    const rimLight = new THREE.DirectionalLight(0x7ddfd5, 0.95);
+    rimLight.position.set(-3, 2.5, -2.5);
     scene.add(rimLight);
 
     this.scene = scene;
@@ -99,8 +106,14 @@ export class ModelPreviewViewer {
       }
 
       this.model = loadedModel;
+      const bounds = prepareModelForPreview(loadedModel);
+      const shadowFloor = createShadowFloor(bounds);
+      this.shadowFloor = shadowFloor;
+      keyLight.target.position.copy(getBoundsCenter(bounds));
+      configurePreviewShadowCamera(keyLight, bounds);
       scene.add(loadedModel);
-      this.frameCameraToModel(loadedModel);
+      scene.add(shadowFloor);
+      this.frameCameraToModel(loadedModel, bounds);
       this.startRenderLoop();
     } catch (error) {
       this.dispose();
@@ -127,6 +140,13 @@ export class ModelPreviewViewer {
       this.model = null;
     }
 
+    if (this.shadowFloor) {
+      this.shadowFloor.geometry.dispose();
+      const materials = Array.isArray(this.shadowFloor.material) ? this.shadowFloor.material : [this.shadowFloor.material];
+      materials.forEach((material) => material.dispose());
+      this.shadowFloor = null;
+    }
+
     this.scene?.clear();
     this.scene = null;
     this.camera = null;
@@ -151,12 +171,12 @@ export class ModelPreviewViewer {
     this.renderFrame();
   }
 
-  private frameCameraToModel(model: THREE.Object3D): void {
+  private frameCameraToModel(model: THREE.Object3D, existingBounds?: THREE.Box3): void {
     if (!this.camera || !this.controls) {
       return;
     }
 
-    const bounds = new THREE.Box3().setFromObject(model);
+    const bounds = existingBounds ?? new THREE.Box3().setFromObject(model);
     const center = new THREE.Vector3();
     const size = new THREE.Vector3();
     bounds.getCenter(center);
@@ -195,9 +215,13 @@ export class ModelPreviewViewer {
 }
 
 function createDefaultRenderer(): PreviewRenderer {
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.setClearColor(0x000000, 0);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.04;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setClearColor(0xffffff, 1);
   return renderer;
 }
 
@@ -215,6 +239,68 @@ function observeElementResize(element: HTMLElement, callback: () => void): () =>
 
   globalThis.addEventListener('resize', callback);
   return () => globalThis.removeEventListener('resize', callback);
+}
+
+function prepareModelForPreview(root: THREE.Object3D): THREE.Box3 {
+  root.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+    }
+  });
+
+  const bounds = new THREE.Box3().setFromObject(root);
+  if (bounds.isEmpty()) {
+    bounds.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(1, 1, 1));
+  }
+  return bounds;
+}
+
+function createShadowFloor(bounds: THREE.Box3): THREE.Mesh {
+  const center = getBoundsCenter(bounds);
+  const size = getBoundsSize(bounds);
+  const maxDimension = Math.max(size.x, size.z, size.y, 1);
+  const floorGeometry = new THREE.PlaneGeometry(maxDimension * 3.2, maxDimension * 3.2);
+  const floorMaterial = new THREE.ShadowMaterial({
+    color: 0x0f766e,
+    opacity: 0.22,
+    transparent: true,
+  });
+  const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+  floor.name = 'Preview soft shadow floor';
+  floor.receiveShadow = true;
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(center.x, bounds.min.y - Math.max(maxDimension * 0.018, 0.01), center.z);
+  return floor;
+}
+
+function configurePreviewShadowCamera(light: THREE.DirectionalLight, bounds: THREE.Box3): void {
+  const center = getBoundsCenter(bounds);
+  const size = getBoundsSize(bounds);
+  const maxDimension = Math.max(size.x, size.y, size.z, 1);
+  const halfRange = maxDimension * 1.9;
+  const shadowCamera = light.shadow.camera;
+
+  shadowCamera.left = -halfRange;
+  shadowCamera.right = halfRange;
+  shadowCamera.top = halfRange;
+  shadowCamera.bottom = -halfRange;
+  shadowCamera.near = 0.05;
+  shadowCamera.far = maxDimension * 9;
+  light.target.position.copy(center);
+  light.shadow.camera.updateProjectionMatrix();
+}
+
+function getBoundsCenter(bounds: THREE.Box3): THREE.Vector3 {
+  const center = new THREE.Vector3();
+  bounds.getCenter(center);
+  return center;
+}
+
+function getBoundsSize(bounds: THREE.Box3): THREE.Vector3 {
+  const size = new THREE.Vector3();
+  bounds.getSize(size);
+  return size;
 }
 
 function disposeObject(root: THREE.Object3D): void {
