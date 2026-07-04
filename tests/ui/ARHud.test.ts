@@ -34,6 +34,8 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onRenameGeneratedModel: vi.fn(),
     onDeleteGeneratedModel: vi.fn(),
     onDeleteUploadedModel: vi.fn(),
+    onPreviewModel: vi.fn(),
+    onCloseModelPreview: vi.fn(),
     onReturnHome: vi.fn(),
     ...overrides,
   };
@@ -207,12 +209,36 @@ describe('ARHud', () => {
       'https://assets.example/previews/generated-chair.png',
     );
     expect([...root.querySelectorAll('.model-manager-row.is-generated button')].map((button) => button.textContent)).toEqual([
+      'Preview',
       'Rename',
       'Delete',
     ]);
     expect(root.textContent).toContain('Built-in');
   });
+  it('opens a non-AR 3D preview when a model row is clicked', () => {
+    const root = document.createElement('div');
+    const onPreviewModel = vi.fn();
+    const onCloseModelPreview = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onPreviewModel, onCloseModelPreview }));
 
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
+    const firstRow = root.querySelector<HTMLElement>('.model-manager-row')!;
+
+    firstRow.click();
+    hud.showModelPreviewLoading('Fast output');
+    hud.showModelPreviewReady();
+
+    const preview = root.querySelector('.model-preview');
+
+    expect(onPreviewModel).toHaveBeenCalledWith('trellis-fast-output');
+    expect(preview?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.model-preview-title')?.textContent).toBe('Fast output');
+    expect(root.querySelector('.model-preview-status')?.textContent).toBe('Preview ready.');
+
+    root.querySelector<HTMLButtonElement>('.model-preview-close')?.click();
+
+    expect(onCloseModelPreview).toHaveBeenCalledTimes(1);
+  });
   it('shows persisted uploaded models in the AR dropdown and model manager', () => {
     const root = document.createElement('div');
     const onModelSelect = vi.fn();
@@ -257,7 +283,7 @@ describe('ARHud', () => {
     expect(uploadedRow.textContent).toContain('Uploaded');
     expect(uploadedRow.textContent).toContain('chair');
     expect(uploadedRow.querySelector('.model-manager-thumbnail')?.textContent).toBe('GLB');
-    uploadedRow.querySelector('button')?.click();
+    [...uploadedRow.querySelectorAll('button')].find((button) => button.textContent === 'Delete')?.click();
     expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-upload-123-chair');
   });
 
@@ -281,8 +307,8 @@ describe('ARHud', () => {
     const nameInput = generatedRow.querySelector<HTMLInputElement>('input[name="modelLabel"]')!;
     nameInput.value = '  Living room chair  ';
 
-    generatedRow.querySelectorAll('button')[0].click();
     generatedRow.querySelectorAll('button')[1].click();
+    generatedRow.querySelectorAll('button')[2].click();
 
     expect(onRenameGeneratedModel).toHaveBeenCalledWith('generated-fc-123', 'Living room chair');
     expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-fc-123');

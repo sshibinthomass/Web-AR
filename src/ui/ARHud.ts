@@ -20,6 +20,8 @@ interface HUDHandlers {
   onRenameGeneratedModel(modelId: string, label: string): void;
   onDeleteGeneratedModel(modelId: string): void;
   onDeleteUploadedModel(modelId: string): void;
+  onPreviewModel(modelId: string): void;
+  onCloseModelPreview(): void;
   onReturnHome(): void;
 }
 
@@ -31,6 +33,7 @@ export class ARHud {
   readonly arButtonSlot: HTMLElement;
   readonly cameraPreviewVideo: HTMLVideoElement;
   readonly cameraPreviewImage: HTMLImageElement;
+  readonly modelPreviewViewport: HTMLElement;
 
   private readonly landing: HTMLElement;
   private readonly statusPanel: HTMLElement;
@@ -41,6 +44,9 @@ export class ARHud {
   private readonly fullFlowLoading: HTMLElement;
   private readonly modelManager: HTMLElement;
   private readonly modelList: HTMLElement;
+  private readonly modelPreview: HTMLElement;
+  private readonly modelPreviewTitle: HTMLElement;
+  private readonly modelPreviewStatus: HTMLElement;
   private readonly modelManagerMessage: HTMLElement;
   private readonly cameraStatusMessage: HTMLElement;
   private readonly generatedModelMessage: HTMLElement;
@@ -118,6 +124,28 @@ export class ARHud {
     this.modelManagerMessage.textContent = 'Generated models are saved in Cloudflare storage.';
     modelManagerInner.append(modelManagerBackButton, modelManagerHeader, this.modelList, this.modelManagerMessage);
     this.modelManager.appendChild(modelManagerInner);
+    this.modelPreview = document.createElement('section');
+    this.modelPreview.className = 'model-preview hidden';
+    this.modelPreview.innerHTML = `
+      <div class="model-preview-panel">
+        <div class="model-preview-bar">
+          <div class="model-preview-heading">
+            <span class="model-preview-kicker">3D preview</span>
+            <h3 class="model-preview-title"></h3>
+          </div>
+          <button class="model-preview-close" type="button">Close</button>
+        </div>
+        <div class="model-preview-viewport"></div>
+        <p class="model-preview-status">Loading preview...</p>
+      </div>
+    `;
+    this.modelPreviewViewport = this.modelPreview.querySelector<HTMLElement>('.model-preview-viewport')!;
+    this.modelPreviewTitle = this.modelPreview.querySelector<HTMLElement>('.model-preview-title')!;
+    this.modelPreviewStatus = this.modelPreview.querySelector<HTMLElement>('.model-preview-status')!;
+    this.modelPreview.querySelector<HTMLButtonElement>('.model-preview-close')?.addEventListener('click', () => {
+      this.handlers.onCloseModelPreview();
+    });
+    this.modelManager.appendChild(this.modelPreview);
     shell.appendChild(this.modelManager);
 
     this.overlay = document.createElement('div');
@@ -453,6 +481,29 @@ export class ARHud {
     this.updateUploadModelStatus(message, false);
   }
 
+  showModelPreviewLoading(modelLabel: string): void {
+    this.modelPreviewTitle.textContent = modelLabel;
+    this.modelPreviewStatus.textContent = 'Loading preview...';
+    this.modelPreviewViewport.replaceChildren();
+    this.modelPreview.classList.remove('hidden');
+  }
+
+  showModelPreviewReady(): void {
+    this.modelPreviewStatus.textContent = 'Preview ready.';
+  }
+
+  showModelPreviewError(message: string): void {
+    this.modelPreviewStatus.textContent = message;
+    this.modelPreview.classList.remove('hidden');
+  }
+
+  hideModelPreview(): void {
+    this.modelPreview.classList.add('hidden');
+    this.modelPreviewTitle.textContent = '';
+    this.modelPreviewStatus.textContent = 'Loading preview...';
+    this.modelPreviewViewport.replaceChildren();
+  }
+
   setCameraPanelVisible(isVisible: boolean): void {
     this.cameraPanel.classList.toggle('hidden', !isVisible);
   }
@@ -562,6 +613,7 @@ export class ARHud {
   }
 
   private openHomePage(previousRoute: HudRoute | null): void {
+    this.closeModelPreviewIfOpen();
     this.landing.classList.remove('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.add('hidden');
@@ -579,6 +631,7 @@ export class ARHud {
   }
 
   private openCameraPage(): void {
+    this.closeModelPreviewIfOpen();
     this.landing.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -594,6 +647,7 @@ export class ARHud {
   }
 
   private openARPage(): void {
+    this.closeModelPreviewIfOpen();
     this.landing.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -607,6 +661,7 @@ export class ARHud {
   }
 
   private openFullFlowPage(): void {
+    this.closeModelPreviewIfOpen();
     this.landing.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -622,6 +677,7 @@ export class ARHud {
   }
 
   private openUploadPage(): void {
+    this.closeModelPreviewIfOpen();
     this.landing.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -636,6 +692,7 @@ export class ARHud {
   }
 
   private openUploadModelPage(): void {
+    this.closeModelPreviewIfOpen();
     this.landing.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -698,6 +755,7 @@ export class ARHud {
     return [...this.baseModelOptions, ...this.generatedModelOptions, ...this.uploadedModelOptions];
   }
 
+
   private renderModelManagerList(): void {
     this.modelList.replaceChildren();
     this.allModelOptions().forEach((model) => {
@@ -705,12 +763,29 @@ export class ARHud {
       const isGenerated = modelKind === 'generated';
       const isUploaded = modelKind === 'uploaded';
       const row = document.createElement('article');
-      row.className = `model-manager-row${isGenerated ? ' is-generated' : ''}${isUploaded ? ' is-uploaded' : ''}`;
+      row.className = `model-manager-row has-preview${isGenerated ? ' is-generated' : ''}${isUploaded ? ' is-uploaded' : ''}`;
       row.dataset.modelId = model.id;
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.setAttribute('aria-label', `Preview ${model.label}`);
+      row.addEventListener('click', (event) => {
+        if (this.isModelManagerControl(event.target)) {
+          return;
+        }
+        this.handlers.onPreviewModel(model.id);
+      });
+      row.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+          return;
+        }
+        if (this.isModelManagerControl(event.target)) {
+          return;
+        }
+        event.preventDefault();
+        this.handlers.onPreviewModel(model.id);
+      });
 
-      if (isGenerated || isUploaded) {
-        row.appendChild(this.createModelThumbnail(model));
-      }
+      row.appendChild(this.createModelThumbnail(model));
 
       const details = document.createElement('div');
       details.className = 'model-manager-details';
@@ -736,16 +811,17 @@ export class ARHud {
 
       row.appendChild(details);
 
+      const actions = document.createElement('div');
+      actions.className = 'model-manager-actions';
+      actions.append(this.createButton('Preview', '', () => this.handlers.onPreviewModel(model.id)));
+      if (isGenerated) {
+        const renameButton = this.createButton('Rename', '', () => {
+          const input = row.querySelector<HTMLInputElement>('input[name="modelLabel"]');
+          this.handleModelRename(model.id, input?.value ?? '');
+        });
+        actions.append(renameButton);
+      }
       if (isGenerated || isUploaded) {
-        const actions = document.createElement('div');
-        actions.className = 'model-manager-actions';
-        if (isGenerated) {
-          const renameButton = this.createButton('Rename', '', () => {
-            const input = row.querySelector<HTMLInputElement>('input[name="modelLabel"]');
-            this.handleModelRename(model.id, input?.value ?? '');
-          });
-          actions.append(renameButton);
-        }
         const deleteButton = this.createButton('Delete', 'danger', () => {
           if (isUploaded && model.id.startsWith('uploaded-')) {
             this.handlers.onDeleteUploadedModel(model.id);
@@ -754,8 +830,8 @@ export class ARHud {
           this.handlers.onDeleteGeneratedModel(model.id);
         });
         actions.append(deleteButton);
-        row.appendChild(actions);
       }
+      row.appendChild(actions);
 
       this.modelList.appendChild(row);
     });
@@ -812,6 +888,17 @@ export class ARHud {
     }
 
     this.handlers.onRenameGeneratedModel(modelId, trimmedLabel);
+  }
+
+  private closeModelPreviewIfOpen(): void {
+    if (!this.modelPreview.classList.contains('hidden')) {
+      this.handlers.onCloseModelPreview();
+    }
+  }
+
+
+  private isModelManagerControl(target: EventTarget | null): boolean {
+    return target instanceof HTMLElement && Boolean(target.closest('button, input, select, textarea, a, label'));
   }
 
   private generationButtonLabel(): string {

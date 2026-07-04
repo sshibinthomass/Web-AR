@@ -16,6 +16,7 @@ import {
 } from '../capture/cameraCapture';
 import { createScene, type SceneContext } from '../scene/createScene';
 import { loadGLBModel } from '../scene/loadModel';
+import { ModelPreviewViewer } from '../scene/ModelPreviewViewer';
 import {
   extractImageFor3D,
   deleteGeneratedModel as deleteGeneratedModelRequest,
@@ -56,6 +57,7 @@ export class WebARApp {
   private generatedModelOptions: ModelOption[] = [];
   private uploadedModelOptions: ModelOption[] = [];
   private pendingUploadModelFile: File | null = null;
+  private modelPreviewViewer: ModelPreviewViewer | null = null;
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -84,6 +86,8 @@ export class WebARApp {
       onRenameGeneratedModel: (modelId, label) => void this.renameGeneratedModel(modelId, label),
       onDeleteGeneratedModel: (modelId) => void this.deleteGeneratedModel(modelId),
       onDeleteUploadedModel: (modelId) => this.deleteUploadedModel(modelId),
+      onPreviewModel: (modelId) => void this.previewModel(modelId),
+      onCloseModelPreview: () => this.closeModelPreview(),
       onReturnHome: () => void this.returnHome(),
     });
     this.hud.updateModelSource('Cloudflare only');
@@ -307,6 +311,7 @@ export class WebARApp {
     this.capturedImageGenerationPipeline = 'openai-to-3d';
     this.pendingUploadModelFile = null;
     this.clearCapturedImagePreview();
+    this.closeModelPreview();
 
     const session = this.sceneContext?.renderer.xr.getSession();
     if (session) {
@@ -384,6 +389,32 @@ export class WebARApp {
     this.availableModels = [...MODEL_OPTIONS, ...this.generatedModelOptions, ...this.uploadedModelOptions];
     this.hud?.updateGeneratedModels(this.generatedModelOptions);
     this.hud?.updateUploadedModels(this.uploadedModelOptions);
+  }
+
+  private async previewModel(modelId: string): Promise<void> {
+    const modelOption = this.availableModels.find((model) => model.id === modelId);
+    const previewViewport = this.hud?.modelPreviewViewport;
+    if (!modelOption || !previewViewport) {
+      this.hud?.showModelPreviewError('Model preview is unavailable.');
+      return;
+    }
+
+    this.hud?.showModelPreviewLoading(modelOption.label);
+    this.modelPreviewViewer ??= new ModelPreviewViewer(previewViewport);
+
+    try {
+      await this.modelPreviewViewer.preview(modelOption);
+      this.hud?.showModelPreviewReady();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown model preview error.';
+      this.hud?.showModelPreviewError(`Preview failed: ${message}`);
+    }
+  }
+
+  private closeModelPreview(): void {
+    this.modelPreviewViewer?.dispose();
+    this.modelPreviewViewer = null;
+    this.hud?.hideModelPreview();
   }
 
   private async uploadImage(file: File): Promise<void> {
