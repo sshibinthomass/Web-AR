@@ -404,7 +404,7 @@ canvas {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   max-width: 620px;
   margin: 0 auto;
   pointer-events: auto;
@@ -426,9 +426,31 @@ canvas {
   backdrop-filter: blur(14px);
 }
 
+.hud-actions button.hud-action-icon {
+  display: grid;
+  flex: 0 0 44px;
+  place-items: center;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  touch-action: manipulation;
+}
+
+.hud-actions button.hud-action-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
 .hud-actions button:disabled {
   color: rgba(248, 250, 252, 0.48);
   background: rgba(5, 10, 14, 0.38);
+}
+
+.hud-actions button.danger {
+  border-color: rgba(248, 113, 113, 0.52);
+  color: #fee2e2;
+  background: rgba(127, 29, 29, 0.44);
 }
 
 .hud-actions button.primary,
@@ -1933,6 +1955,12 @@ canvas {
   color: #031b18;
   background: #5eead4;
   box-shadow: 0 16px 42px rgba(15, 118, 110, 0.2);
+}
+
+.hud-actions button.danger {
+  border-color: rgba(220, 38, 38, 0.28);
+  color: #7f1d1d;
+  background: rgba(254, 226, 226, 0.9);
 }
 
 .ar-model-place-button:disabled,

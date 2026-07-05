@@ -18,6 +18,17 @@ describe('AR overlay styles', () => {
     expect(styles).not.toContain('+ 116px');
   });
 
+  it('keeps AR action buttons compact enough for a phone-width icon tray', () => {
+    const hudActionsRule = cssRule('.hud-actions');
+    const iconRule = cssRule('.hud-actions button.hud-action-icon');
+
+    expect(hudActionsRule).toContain('gap: 6px;');
+    expect(iconRule).toContain('flex: 0 0 44px;');
+    expect(iconRule).toContain('width: 44px;');
+    expect(iconRule).toContain('min-height: 44px;');
+    expect(iconRule).toContain('padding: 0;');
+  });
+
   it('keeps the AR model search controls in the page flow above model cards', () => {
     const pickerRule = cssRule('.ar-model-picker');
     const controlsRule = cssRule('.ar-model-picker .model-library-controls');

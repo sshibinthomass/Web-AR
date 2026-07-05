@@ -271,13 +271,16 @@ describe('ARHud', () => {
     expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.model-rail-item.is-selected')?.textContent).toContain('Image 4 output');
-    expect([...root.querySelectorAll('.hud-actions > button')].map((button) => button.textContent)).toEqual([
+    const actionButtons = [...root.querySelectorAll<HTMLButtonElement>('.hud-actions > button')];
+    expect(actionButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Place',
       'Scale 1x',
       'Rotate Left',
       'Rotate Right',
       'Reset',
     ]);
+    expect(actionButtons.every((button) => button.classList.contains('hud-action-icon'))).toBe(true);
+    expect(actionButtons.every((button) => button.querySelector('svg'))).toBe(true);
   });
 
   it('opens Full Flow from the first screen as a capture page', () => {
@@ -340,7 +343,8 @@ describe('ARHud', () => {
     expect(root.querySelector('.status-panel')?.classList.contains('layout-active')).toBe(true);
     expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
-    expect([...root.querySelectorAll('.hud-actions > button')].map((button) => button.textContent)).toEqual([
+    const actionButtons = [...root.querySelectorAll<HTMLButtonElement>('.hud-actions > button')];
+    expect(actionButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Place',
       'Scale 1x',
       'Rotate Left',
@@ -349,6 +353,8 @@ describe('ARHud', () => {
       'Add Object',
       'Delete Object',
     ]);
+    expect(actionButtons.every((button) => button.classList.contains('hud-action-icon'))).toBe(true);
+    expect(actionButtons.every((button) => button.querySelector('svg'))).toBe(true);
     expect(root.textContent).toContain('Place multiple objects in this session.');
     expect(onAddLayoutObject).toHaveBeenCalledTimes(1);
     expect(onDeleteLayoutObject).toHaveBeenCalledTimes(1);
@@ -1023,14 +1029,18 @@ describe('ARHud', () => {
     root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
 
     const rotateLeftButton = [...root.querySelectorAll<HTMLButtonElement>('.hud-actions > button')].find(
-      (button) => button.textContent === 'Rotate Left',
+      (button) => button.getAttribute('aria-label') === 'Rotate Left',
     );
     const rotateRightButton = [...root.querySelectorAll<HTMLButtonElement>('.hud-actions > button')].find(
-      (button) => button.textContent === 'Rotate Right',
+      (button) => button.getAttribute('aria-label') === 'Rotate Right',
     );
 
     expect(rotateLeftButton).toBeInstanceOf(HTMLButtonElement);
     expect(rotateRightButton).toBeInstanceOf(HTMLButtonElement);
+    expect(rotateLeftButton?.classList.contains('hud-action-icon')).toBe(true);
+    expect(rotateRightButton?.classList.contains('hud-action-icon')).toBe(true);
+    expect(rotateLeftButton?.querySelector('svg')).toBeInstanceOf(SVGSVGElement);
+    expect(rotateRightButton?.querySelector('svg')).toBeInstanceOf(SVGSVGElement);
     expect(rotateLeftButton?.disabled).toBe(true);
     expect(rotateRightButton?.disabled).toBe(true);
 
