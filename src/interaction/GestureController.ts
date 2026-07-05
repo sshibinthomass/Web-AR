@@ -4,6 +4,7 @@ import {
 } from '../utils/math';
 
 interface GestureHandlers {
+  onGestureStart?(point: Point2): void;
   onTap(point: Point2): void;
   onDrag(point: Point2, startPoint: Point2): void;
   onPinch(multiplier: number): void;
@@ -49,6 +50,7 @@ export class GestureController {
       this.startPoint = point;
       this.lastSinglePoint = point;
       this.lastPinchDistance = null;
+      this.handlers.onGestureStart?.(point);
       return;
     }
 
@@ -56,6 +58,7 @@ export class GestureController {
       const first = touchToPoint(event.touches[0]);
       const second = touchToPoint(event.touches[1]);
       this.lastPinchDistance = getDistanceBetweenTouches(first, second);
+      this.handlers.onGestureStart?.(midpoint(first, second));
     }
   };
 
@@ -130,6 +133,13 @@ function touchToPoint(touch: Touch): Point2 {
   return {
     x: touch.clientX,
     y: touch.clientY,
+  };
+}
+
+function midpoint(a: Point2, b: Point2): Point2 {
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
   };
 }
 

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clampScale } from '../utils/math';
+import { clampScale, type Point2 } from '../utils/math';
 import type { LayoutObject, LayoutVector3 } from './layoutTypes';
 
 interface LayoutSceneObjectInput {
@@ -86,6 +86,46 @@ export class LayoutSceneManager {
 
     this.selectedObjectId = objectId;
     return true;
+  }
+
+  selectObjectAtScreenPoint(point: Point2, canvas: HTMLCanvasElement, camera: THREE.Camera): LayoutObject | null {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+
+    const ndc = new THREE.Vector2(
+      ((point.x - rect.left) / rect.width) * 2 - 1,
+      -(((point.y - rect.top) / rect.height) * 2 - 1),
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(ndc, camera);
+    this.root.updateWorldMatrix(true, true);
+
+    let closestObject: LayoutSceneObject | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    for (const object of this.objects.values()) {
+      if (!object.placed || !object.group.visible) {
+        continue;
+      }
+
+      const intersection = raycaster.intersectObject(object.group, true)[0];
+      if (!intersection) {
+        continue;
+      }
+
+      if (intersection.distance < closestDistance) {
+        closestObject = object;
+        closestDistance = intersection.distance;
+      }
+    }
+
+    if (!closestObject) {
+      return null;
+    }
+
+    this.selectedObjectId = closestObject.id;
+    return this.toLayoutObject(closestObject);
   }
 
   deleteSelected(): boolean {

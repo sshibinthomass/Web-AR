@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isInteractiveTarget } from '../../src/interaction/GestureController';
+import { GestureController, isInteractiveTarget } from '../../src/interaction/GestureController';
 import { clampScale, getAngleBetweenTouches, getDistanceBetweenTouches } from '../../src/utils/math';
 
 describe('gesture math', () => {
@@ -27,4 +27,34 @@ describe('gesture math', () => {
     expect(isInteractiveTarget(span)).toBe(true);
     expect(isInteractiveTarget(document.createElement('div'))).toBe(false);
   });
+
+  it('reports the touched point when a gesture starts', () => {
+    const target = document.createElement('div');
+    const starts: Array<{ x: number; y: number }> = [];
+    const controller = new GestureController(target, {
+      onGestureStart: (point) => starts.push(point),
+      onTap: () => undefined,
+      onDrag: () => undefined,
+      onPinch: () => undefined,
+    } as ConstructorParameters<typeof GestureController>[1]);
+    controller.connect();
+
+    target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));
+    target.dispatchEvent(touchEvent('touchcancel', []));
+    target.dispatchEvent(touchEvent('touchstart', [
+      { clientX: 10, clientY: 20 },
+      { clientX: 30, clientY: 40 },
+    ]));
+
+    expect(starts).toEqual([
+      { x: 20, y: 30 },
+      { x: 20, y: 30 },
+    ]);
+  });
 });
+
+function touchEvent(type: string, touches: Array<{ clientX: number; clientY: number }>): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'touches', { value: touches });
+  return event;
+}

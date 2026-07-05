@@ -64,6 +64,7 @@ export class WebARApp {
   private placementDragMode: PlacementGestureZone | null = null;
   private placementDragStart: Point2 | null = null;
   private lastPlacementDragPoint: Point2 | null = null;
+  private layoutGestureStartedOnObject = false;
   private lastHudMode = this.appState.mode;
   private availableModels = [...MODEL_OPTIONS];
   private generatedModelOptions: ModelOption[] = [];
@@ -339,6 +340,9 @@ export class WebARApp {
 
       const hud = this.requireHud();
       this.gestureController = new arRuntime.GestureController(hud.gestureSurface, {
+        onGestureStart: (point) => {
+          this.layoutGestureStartedOnObject = this.selectLayoutObjectAtPoint(point);
+        },
         onTap: (point) => this.handleTap(point),
         onDrag: (point, startPoint) => this.handleDrag(point, startPoint),
         onPinch: (multiplier) => this.handlePinch(multiplier),
@@ -989,6 +993,11 @@ export class WebARApp {
   }
 
   private handleTap(_point: Point2): void {
+    if (this.layoutMode && (this.appState.mode === 'placed' || this.appState.mode === 'editing')) {
+      this.selectLayoutObjectAtPoint(_point);
+      return;
+    }
+
     if (this.appState.mode === 'readyToPlace' || this.appState.mode === 'scanning') {
       this.placeAtLatestHit();
     }
@@ -1003,6 +1012,12 @@ export class WebARApp {
     const sceneContext = this.requireScene();
     const runtime = this.requireARRuntime();
     if (this.layoutMode) {
+      if (!this.layoutGestureStartedOnObject) {
+        this.layoutGestureStartedOnObject = this.selectLayoutObjectAtPoint(startPoint);
+      }
+      if (!this.layoutGestureStartedOnObject) {
+        return;
+      }
       const floorY = this.requireLayoutSceneManager().selectedGroup()?.position.y ?? this.hitTestManager?.latestPoint?.y ?? null;
       if (floorY === null) {
         return;
@@ -1052,6 +1067,9 @@ export class WebARApp {
     }
 
     if (this.layoutMode) {
+      if (!this.layoutGestureStartedOnObject) {
+        return;
+      }
       this.requireLayoutSceneManager().scaleSelectedBy(multiplier);
       this.appState.setMode('editing');
       return;
@@ -1138,6 +1156,26 @@ export class WebARApp {
     this.placementDragMode = null;
     this.placementDragStart = null;
     this.lastPlacementDragPoint = null;
+    this.layoutGestureStartedOnObject = false;
+  }
+
+  private selectLayoutObjectAtPoint(point: Point2): boolean {
+    if (!this.layoutMode || !this.sceneContext) {
+      return false;
+    }
+
+    const selected = this.requireLayoutSceneManager().selectObjectAtScreenPoint(
+      point,
+      this.sceneContext.renderer.domElement,
+      this.sceneContext.camera,
+    );
+    if (!selected) {
+      return false;
+    }
+
+    this.appState.setMode('editing');
+    this.hud?.update(this.appState.mode, `${selected.modelLabel} selected. Move, scale, rotate, or delete it.`);
+    return true;
   }
 
   private createEstimatedPlacementMatrix(): Three.Matrix4 {
