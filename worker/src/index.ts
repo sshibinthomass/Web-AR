@@ -184,6 +184,12 @@ type ImageTargetModel = {
   preview_url?: string;
 };
 
+type ImageTargetObject = {
+  id: string;
+  model: ImageTargetModel;
+  placement: ImageTargetPlacement;
+};
+
 type ImageTargetEntry = {
   id: string;
   label: string;
@@ -191,6 +197,7 @@ type ImageTargetEntry = {
   image_object_key: string;
   model: ImageTargetModel;
   placement: ImageTargetPlacement;
+  objects: ImageTargetObject[];
   owner_email?: string;
   visibility?: ImageTargetVisibility;
   created_at: string;
@@ -207,6 +214,7 @@ type ImageTargetRequestBody = {
   image_mime_type?: unknown;
   model?: unknown;
   placement?: unknown;
+  objects?: unknown;
   visibility?: unknown;
 };
 
@@ -860,10 +868,11 @@ async function handleImageTargetCreateRequest(
     return jsonResponse({ error: 'image_base64 is required.' }, 400);
   }
 
-  const model = normalizeImageTargetModel(body.value.model);
-  if (!model) {
-    return jsonResponse({ error: 'model with id, label, and url is required.' }, 400);
+  const imageTargetObjects = normalizeImageTargetObjects(body.value.objects, body.value.model, body.value.placement);
+  if (imageTargetObjects.length === 0) {
+    return jsonResponse({ error: 'objects must include at least one model with id, label, and url.' }, 400);
   }
+  const firstObject = imageTargetObjects[0];
 
   const now = deps.now();
   const label = normalizeModelLabel(body.value.label) ?? 'Image target';
@@ -881,8 +890,9 @@ async function handleImageTargetCreateRequest(
     label,
     image_url: `${getPublicOrigin(env, url.origin)}/${objectKey}`,
     image_object_key: objectKey,
-    model,
-    placement: normalizeImageTargetPlacement(body.value.placement),
+    model: firstObject.model,
+    placement: firstObject.placement,
+    objects: imageTargetObjects,
     owner_email: user.email,
     visibility: 'private',
     created_at: now.toISOString(),
@@ -1026,12 +1036,18 @@ async function updateImageTarget(
     return jsonResponse({ error: 'Only the owner or an admin can manage this image target.' }, 403);
   }
 
+  const nextObjects = nextImageTargetObjectsForUpdate(existingTarget, body.value);
+  if (nextObjects.length === 0) {
+    return jsonResponse({ error: 'objects must include at least one model with id, label, and url.' }, 400);
+  }
+  const firstObject = nextObjects[0];
   const now = deps.now();
   const nextTarget: ImageTargetEntry = {
     ...existingTarget,
     label: normalizeModelLabel(body.value.label) ?? existingTarget.label,
-    model: normalizeImageTargetModel(body.value.model) ?? existingTarget.model,
-    placement: normalizeImageTargetPlacement(body.value.placement, existingTarget.placement),
+    model: firstObject.model,
+    placement: firstObject.placement,
+    objects: nextObjects,
     visibility: normalizeModelVisibility(body.value.visibility) ?? existingTarget.visibility ?? 'private',
     updated_at: now.toISOString(),
   };
@@ -1557,6 +1573,84 @@ function normalizeImageTargetModel(value: unknown): ImageTargetModel | null {
   };
 }
 
+function normalizeImageTargetObjects(
+  objectsValue: unknown,
+  legacyModelValue?: unknown,
+  legacyPlacementValue?: unknown,
+): ImageTargetObject[] {
+  if (Array.isArray(objectsValue)) {
+    return objectsValue
+      .map((value, index) => normalizeImageTargetObject(value, index))
+      .filter((object): object is ImageTargetObject => Boolean(object));
+  }
+
+  const legacyModel = normalizeImageTargetModel(legacyModelValue);
+  if (!legacyModel) {
+    return [];
+  }
+
+  return [{
+    id: 'object-1',
+    model: legacyModel,
+    placement: normalizeImageTargetPlacement(legacyPlacementValue),
+  }];
+}
+
+function normalizeImageTargetObject(value: unknown, index: number): ImageTargetObject | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const model = normalizeImageTargetModel(candidate.model);
+  if (!model) {
+    return null;
+  }
+
+  return {
+    id: typeof candidate.id === 'string' && candidate.id.trim() ? candidate.id.trim() : `object-${index + 1}`,
+    model,
+    placement: normalizeImageTargetPlacement(candidate.placement),
+  };
+}
+
+function imageTargetObjectsFromStoredTarget(target: ImageTargetEntry): ImageTargetObject[] {
+  const objects = normalizeImageTargetObjects(target.objects);
+  if (objects.length > 0) {
+    return objects;
+  }
+
+  return normalizeImageTargetObjects(undefined, target.model, target.placement);
+}
+
+function nextImageTargetObjectsForUpdate(
+  existingTarget: ImageTargetEntry,
+  body: ImageTargetRequestBody,
+): ImageTargetObject[] {
+  if (body.objects !== undefined) {
+    return normalizeImageTargetObjects(body.objects);
+  }
+
+  const existingObjects = imageTargetObjectsFromStoredTarget(existingTarget);
+  const firstObject = existingObjects[0];
+  if (!firstObject) {
+    return normalizeImageTargetObjects(undefined, body.model, body.placement);
+  }
+
+  if (body.model === undefined && body.placement === undefined) {
+    return existingObjects;
+  }
+
+  return [
+    {
+      ...firstObject,
+      model: normalizeImageTargetModel(body.model) ?? firstObject.model,
+      placement: normalizeImageTargetPlacement(body.placement, firstObject.placement),
+    },
+    ...existingObjects.slice(1),
+  ];
+}
+
 function normalizeImageTargetPlacement(
   value: unknown,
   fallback: ImageTargetPlacement = defaultImageTargetPlacement(),
@@ -1878,8 +1972,15 @@ function createUniqueImageTargetId(existingTargets: ImageTargetEntry[], now: Dat
 }
 
 function normalizeStoredImageTarget(target: ImageTargetEntry): ImageTargetEntry {
+  const objects = imageTargetObjectsFromStoredTarget(target);
+  const firstObject = objects[0];
   return {
     ...target,
+    ...(firstObject ? {
+      model: firstObject.model,
+      placement: firstObject.placement,
+    } : {}),
+    objects,
     visibility: target.visibility ?? 'private',
   };
 }

@@ -1545,6 +1545,83 @@ describe('handleGenerateModelRequest', () => {
     );
   });
 
+  it('creates image targets with multiple placed objects while preserving legacy model fields', async () => {
+    const { bucket, objects } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({ targets: [] }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket, PUBLIC_MODEL_ORIGIN: '' });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:05:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const response = await handleGenerateModelRequest(
+      withAuth(
+        new Request('https://worker.example/generate-3d/image-targets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            label: 'Shelf card',
+            image_base64: 'aW1hZ2U=',
+            image_mime_type: 'image/png',
+            objects: [
+              {
+                id: 'object-chair',
+                model: { id: 'generated-chair', label: 'Chair', url: 'https://worker.example/chair.glb' },
+                placement: { scale: 1.2, offset_x: 0.1, offset_y: -0.2, height: 0.16 },
+              },
+              {
+                id: 'object-plant',
+                model: { id: 'generated-plant', label: 'Plant', url: 'https://worker.example/plant.glb' },
+                placement: { scale: 0.8, offset_x: -0.25, offset_y: 0.2, height: 0.08 },
+              },
+            ],
+          }),
+        }),
+        ownerToken,
+      ),
+      env,
+      deps,
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      id: 'target-20260705-180500-shelf-card',
+      model: { id: 'generated-chair', label: 'Chair', url: 'https://worker.example/chair.glb' },
+      placement: { scale: 1.2, offset_x: 0.1, offset_y: -0.2, height: 0.16 },
+      objects: [
+        {
+          id: 'object-chair',
+          model: { id: 'generated-chair', label: 'Chair', url: 'https://worker.example/chair.glb' },
+          placement: { scale: 1.2, offset_x: 0.1, offset_y: -0.2, height: 0.16 },
+        },
+        {
+          id: 'object-plant',
+          model: { id: 'generated-plant', label: 'Plant', url: 'https://worker.example/plant.glb' },
+          placement: { scale: 0.8, offset_x: -0.25, offset_y: 0.2, height: 0.08 },
+        },
+      ],
+    });
+    expect(JSON.parse(objects.get('image-targets/index.json') as string)).toEqual({
+      targets: [expect.objectContaining({
+        id: 'target-20260705-180500-shelf-card',
+        objects: expect.arrayContaining([
+          expect.objectContaining({ id: 'object-chair' }),
+          expect.objectContaining({ id: 'object-plant' }),
+        ]),
+      })],
+    });
+    expect(JSON.parse(objects.get('image-targets/records/target-20260705-180500-shelf-card.json') as string)).toEqual(
+      expect.objectContaining({
+        id: 'target-20260705-180500-shelf-card',
+        objects: expect.arrayContaining([
+          expect.objectContaining({ id: 'object-chair' }),
+          expect.objectContaining({ id: 'object-plant' }),
+        ]),
+      }),
+    );
+  });
+
   it('creates a unique image target id when the first-format id already exists', async () => {
     const existingId = 'target-20260705-180000-product-box';
     const { bucket, objects } = createMemoryBucket({
