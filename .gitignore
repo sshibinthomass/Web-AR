@@ -1,6 +1,7 @@
 node_modules/
 dist/
 artifacts/
+.worktrees/
 
 *.log
 localtunnel*.out.log
