@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { LayoutSceneManager } from '../../src/scene/LayoutSceneManager';
-import type { LayoutObject } from '../../src/services/generatedModelClient';
+import type { LayoutObject } from '../../src/scene/layoutTypes';
 
 function createModel(name: string): THREE.Group {
   const group = new THREE.Group();
@@ -71,7 +71,7 @@ describe('LayoutSceneManager', () => {
     expect(manager.exportObjects()).toEqual([expect.objectContaining({ id: second.id })]);
   });
 
-  it('imports and exports saved transforms', () => {
+  it('imports and exports session transforms', () => {
     const root = new THREE.Group();
     const manager = new LayoutSceneManager(root);
     const savedObject: LayoutObject = {

@@ -1,7 +1,7 @@
 import type { AppMode } from '../state/AppState';
 import type { ModelOption, ModelVisibility } from '../app/models';
 import type { AuthUser } from '../services/authClient';
-import type { AdminJobEntry, LayoutSummary } from '../services/generatedModelClient';
+import type { AdminJobEntry } from '../services/generatedModelClient';
 
 interface HUDHandlers {
   onPlace(): void;
@@ -38,16 +38,13 @@ interface HUDHandlers {
   onRefreshAdminJobs(): void;
   onRetryAdminJob(jobId: string): void;
   onCleanupFailedJobArtifacts(): void;
-  onPrepareLayouts(): void;
-  onCreateLayout(): void;
-  onOpenLayout(layoutId: string): void;
-  onSaveLayout(): void;
-  onDeleteLayout(layoutId: string): void;
+  onPrepareMultiObject(): void;
+  onStartMultiObject(): void;
   onAddLayoutObject(): void;
   onDeleteLayoutObject(): void;
 }
 
-type HudRoute = 'home' | 'camera' | 'upload' | 'upload-model' | 'ar' | 'full-flow' | 'layouts' | 'models' | 'login' | 'admin';
+type HudRoute = 'home' | 'camera' | 'upload' | 'upload-model' | 'ar' | 'full-flow' | 'multi-object' | 'models' | 'login' | 'admin';
 type ModelLibraryFilter = 'all' | 'generated' | 'uploaded' | 'favorites' | 'recent';
 type AuthFormMode = 'login' | 'signup';
 type ModelActionIcon = 'preview' | 'favorite' | 'favorite-filled' | 'visibility-public' | 'visibility-private' | 'edit' | 'delete';
@@ -87,7 +84,6 @@ export class ARHud {
   private readonly fullFlowLoading: HTMLElement;
   private readonly modelManager: HTMLElement;
   private readonly layoutManager: HTMLElement;
-  private readonly layoutList: HTMLElement;
   private readonly layoutManagerMessage: HTMLElement;
   private readonly modelSearchInput: HTMLInputElement;
   private readonly modelFilterSelect: HTMLSelectElement;
@@ -121,7 +117,6 @@ export class ARHud {
   private readonly resetButton: HTMLButtonElement;
   private readonly resetScaleButton: HTMLButtonElement;
   private readonly addLayoutObjectButton: HTMLButtonElement;
-  private readonly saveLayoutButton: HTMLButtonElement;
   private readonly deleteLayoutObjectButton: HTMLButtonElement;
   private readonly captureButton: HTMLButtonElement;
   private readonly submitButton: HTMLButtonElement;
@@ -143,7 +138,6 @@ export class ARHud {
   private currentUser: AuthUser | null = null;
   private adminAccounts: AuthUser[] = [];
   private adminJobs: AdminJobEntry[] = [];
-  private layouts: LayoutSummary[] = [];
   private modelEditDialog: HTMLElement | null = null;
   private readonly favoriteStorageKey = 'web-ar-model-favorites';
   private readonly recentStorageKey = 'web-ar-model-recents';
@@ -215,7 +209,7 @@ export class ARHud {
           this.createModeAction(this.createButton('Upload Image', '', () => this.navigateTo('upload')), 'IMG'),
           this.createModeAction(this.createButton('Upload Model', '', () => this.navigateTo('upload-model')), 'GLB'),
           this.createModeAction(this.createButton('Full Flow', '', () => this.navigateTo('full-flow')), 'AI'),
-          this.createModeAction(this.createButton('Layouts', '', () => this.navigateTo('layouts')), 'LAY'),
+          this.createModeAction(this.createButton('Multi Object', '', () => this.navigateTo('multi-object')), '3D'),
         ],
       ),
     );
@@ -396,17 +390,15 @@ export class ARHud {
     const layoutManagerHeader = document.createElement('div');
     layoutManagerHeader.className = 'layout-manager-header';
     const layoutManagerTitle = document.createElement('h2');
-    layoutManagerTitle.textContent = 'Layouts';
+    layoutManagerTitle.textContent = 'Multi Object';
     const layoutManagerDescription = document.createElement('p');
-    layoutManagerDescription.textContent = 'Save and reopen AR scenes with multiple placed objects.';
-    const newLayoutButton = this.createButton('New Layout', 'primary', () => this.openNewLayoutEditor());
-    layoutManagerHeader.append(layoutManagerTitle, layoutManagerDescription, newLayoutButton);
-    this.layoutList = document.createElement('div');
-    this.layoutList.className = 'layout-list';
+    layoutManagerDescription.textContent = 'This session starts empty each time. Place multiple objects, then exit when you are done.';
+    const startSessionButton = this.createButton('Start Session', 'primary', () => this.openMultiObjectEditor());
+    layoutManagerHeader.append(layoutManagerTitle, layoutManagerDescription, startSessionButton);
     this.layoutManagerMessage = document.createElement('p');
     this.layoutManagerMessage.className = 'layout-manager-message';
-    this.layoutManagerMessage.textContent = 'Layouts are saved to Cloudflare storage.';
-    layoutManagerInner.append(layoutManagerBackButton, layoutManagerHeader, this.layoutList, this.layoutManagerMessage);
+    this.layoutManagerMessage.textContent = 'No layout is saved or reopened.';
+    layoutManagerInner.append(layoutManagerBackButton, layoutManagerHeader, this.layoutManagerMessage);
     this.layoutManager.appendChild(layoutManagerInner);
     shell.appendChild(this.layoutManager);
 
@@ -554,10 +546,8 @@ export class ARHud {
     this.resetScaleButton = this.createButton('Scale 1x', '', this.handlers.onResetScale);
     this.resetButton = this.createButton('Reset', '', this.handlers.onReset);
     this.addLayoutObjectButton = this.createButton('Add Object', '', this.handlers.onAddLayoutObject);
-    this.saveLayoutButton = this.createButton('Save Layout', 'primary', this.handlers.onSaveLayout);
     this.deleteLayoutObjectButton = this.createButton('Delete Object', 'danger', this.handlers.onDeleteLayoutObject);
     this.addLayoutObjectButton.classList.add('layout-action', 'hidden');
-    this.saveLayoutButton.classList.add('layout-action', 'hidden');
     this.deleteLayoutObjectButton.classList.add('layout-action', 'hidden');
 
     this.hudActions.append(
@@ -607,15 +597,10 @@ export class ARHud {
     this.renderAdminJobs();
   }
 
-  updateLayouts(layouts: LayoutSummary[]): void {
-    this.layouts = [...layouts];
-    this.renderLayouts();
-  }
-
-  showLayoutEditor(layoutName: string): void {
-    this.activeRoute = 'layouts';
-    if (window.location.hash !== '#/layouts') {
-      window.location.hash = '#/layouts';
+  showMultiObjectEditor(): void {
+    this.activeRoute = 'multi-object';
+    if (window.location.hash !== '#/multi-object') {
+      window.location.hash = '#/multi-object';
     }
     this.closeModelPreviewIfOpen();
     this.landing.classList.add('hidden');
@@ -634,10 +619,10 @@ export class ARHud {
     this.hudActions.classList.remove('hidden');
     this.gestureSurface.classList.remove('hidden');
     this.showLayoutActionButtons(true);
-    this.statusMessage.textContent = `${layoutName}: add, place, move, and save multiple objects.`;
+    this.statusMessage.textContent = 'Place multiple objects in this session.';
   }
 
-  showLayoutMessage(message: string): void {
+  showMultiObjectMessage(message: string): void {
     this.statusMessage.textContent = message;
     this.layoutManagerMessage.textContent = message;
   }
@@ -945,7 +930,7 @@ export class ARHud {
   }
 
   private routeRequiresAuth(route: HudRoute): boolean {
-    return route === 'camera' || route === 'upload' || route === 'upload-model' || route === 'full-flow' || route === 'layouts';
+    return route === 'camera' || route === 'upload' || route === 'upload-model' || route === 'full-flow' || route === 'multi-object';
   }
 
   private isLoggedIn(): boolean {
@@ -978,8 +963,8 @@ export class ARHud {
         return 'Sign in to use Upload Model.';
       case 'full-flow':
         return 'Sign in to use Full Flow.';
-      case 'layouts':
-        return 'Sign in to use Layouts.';
+      case 'multi-object':
+        return 'Sign in to place multiple objects.';
       default:
         return 'Sign in with an approved account.';
     }
@@ -997,8 +982,8 @@ export class ARHud {
         return 'ar';
       case '#/full-flow':
         return 'full-flow';
-      case '#/layouts':
-        return 'layouts';
+      case '#/multi-object':
+        return 'multi-object';
       case '#/models':
         return 'models';
       case '#/login':
@@ -1053,8 +1038,8 @@ export class ARHud {
       return;
     }
 
-    if (route === 'layouts') {
-      this.openLayoutsPage();
+    if (route === 'multi-object') {
+      this.openMultiObjectPage();
       return;
     }
 
@@ -1252,7 +1237,7 @@ export class ARHud {
     this.renderModelManagerList();
   }
 
-  private openLayoutsPage(): void {
+  private openMultiObjectPage(): void {
     this.closeModelPreviewIfOpen();
     this.clearFullFlowModelOption();
     this.arPlacementStarted = false;
@@ -1271,8 +1256,8 @@ export class ARHud {
     this.cameraPanel.classList.add('hidden');
     this.cameraPanel.classList.remove('fullscreen');
     this.fullFlowLoading.classList.add('hidden');
-    this.renderLayouts();
-    this.handlers.onPrepareLayouts();
+    this.layoutManagerMessage.textContent = 'No layout is saved or reopened.';
+    this.handlers.onPrepareMultiObject();
   }
 
   private openAuthPage(message = 'Sign in with an approved account, or create one for admin approval.'): void {
@@ -1656,44 +1641,6 @@ export class ARHud {
     });
   }
 
-  private renderLayouts(): void {
-    this.layoutList.replaceChildren();
-    if (this.layouts.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'layout-empty';
-      empty.textContent = 'No layouts saved yet.';
-      this.layoutList.appendChild(empty);
-      return;
-    }
-
-    this.layouts.forEach((layout) => {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'layout-row';
-      row.dataset.layoutId = layout.id;
-      row.setAttribute('aria-label', `Open ${layout.name}`);
-      row.addEventListener('click', () => {
-        this.showLayoutEditor(layout.name);
-        this.startAttachedARCamera();
-        this.handlers.onOpenLayout(layout.id);
-      });
-
-      const details = document.createElement('span');
-      details.className = 'layout-row-details';
-      const name = document.createElement('strong');
-      name.textContent = layout.name;
-      const meta = document.createElement('small');
-      meta.textContent = `${layout.objectCount} ${layout.objectCount === 1 ? 'object' : 'objects'} · ${this.formatShortDate(layout.updatedAt)}`;
-      details.append(name, meta);
-
-      const action = document.createElement('span');
-      action.className = 'layout-row-action';
-      action.textContent = 'Open';
-      row.append(details, action);
-      this.layoutList.appendChild(row);
-    });
-  }
-
   private renderAuthControls(): void {
     if (!this.currentUser) {
       this.authIdentity.textContent = 'Guest access';
@@ -1914,10 +1861,10 @@ export class ARHud {
     this.renderARModelPicker();
   }
 
-  private openNewLayoutEditor(): void {
-    this.showLayoutEditor('New layout');
+  private openMultiObjectEditor(): void {
+    this.showMultiObjectEditor();
     this.startAttachedARCamera();
-    this.handlers.onCreateLayout();
+    this.handlers.onStartMultiObject();
   }
 
   private showARPlacementControls(): void {
@@ -1931,7 +1878,7 @@ export class ARHud {
   }
 
   private showLayoutActionButtons(isVisible: boolean): void {
-    const buttons = [this.addLayoutObjectButton, this.saveLayoutButton, this.deleteLayoutObjectButton];
+    const buttons = [this.addLayoutObjectButton, this.deleteLayoutObjectButton];
     if (isVisible) {
       buttons.forEach((button) => {
         button.classList.remove('hidden');
@@ -2368,10 +2315,6 @@ export class ARHud {
     });
 
     return svg;
-  }
-
-  private formatShortDate(value: string): string {
-    return this.formatDateTime(value);
   }
 
   private formatBytes(bytes: number): string {

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { clampScale } from '../utils/math';
-import type { LayoutObject, LayoutVector3 } from '../services/generatedModelClient';
+import type { LayoutObject, LayoutVector3 } from './layoutTypes';
 
 interface LayoutSceneObjectInput {
   id?: string;

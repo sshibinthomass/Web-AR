@@ -1,34 +1,41 @@
-# Multi-Object Layouts Design
+# Session-Only Multi-Object Placement Design
 
 ## Goal
 
-Add a login-required Layouts mode where a user can place multiple 3D models in one AR scene, save the arrangement, and reopen it later.
+Add a login-required `Multi Object` mode where a user can place multiple 3D models in one AR session. The scene starts empty every time and is discarded when the user leaves the flow.
 
 ## User Experience
 
-The first screen gains a `Layouts` option in the login-required group. Opening it shows saved layouts for the signed-in user and a `New Layout` action. A layout session opens the existing AR placement experience, but model selection adds new object instances instead of replacing the current object. The user can save the current arrangement, load a saved arrangement, rename it, and delete it.
+The first screen has a `Multi Object` option in the login-required group. Guests are redirected to login with a multi-object specific message. Signed-in users land on a small session page with one `Start Session` action. This extra tap keeps WebXR startup tied to a real user gesture after the AR runtime is prepared.
 
-In a layout session:
+In a multi-object session:
 
-- `Add Object` opens the existing model picker.
+- `Start Session` opens the AR placement surface.
 - Selecting a model loads it as the pending object.
 - `Place` creates a new placed object instance at the current floor hit.
-- Tapping an existing placed object selects it for drag, pinch scale, reset scale, reset position, or delete.
-- `Save Layout` persists all placed objects and their transforms.
-- `Back` exits AR and returns to the home or layout list page.
+- `Add Object` tells the user to choose another model from the rail.
+- `Delete Object` removes the selected placed object.
+- Drag, pinch, reset scale, reset position, and rotate apply to the selected object.
+- `Back` exits AR and clears the in-memory scene.
 
-The existing public `AR View` remains a simple single-object flow.
+There is no layout save, layout list, reopen action, rename action, delete-layout action, or Worker layout storage.
 
-## Persistence
+## Frontend Architecture
 
-Reuse the Cloudflare Worker and R2 storage style already used for generated models and auth. Layout records are private to the owner by default.
+Keep the existing public `AR View` as the single-object flow. Use the existing AR runtime and a session-only scene manager for `Multi Object`.
 
-Storage keys:
+Modules:
 
-- `layouts/index.json` stores a compact list of layout summaries.
-- `layouts/<layout-id>.json` stores the full layout.
+- `src/scene/LayoutSceneManager.ts` owns in-memory placed object instances, active selection, transform export/import for session state, deletion, and hit testing.
+- `src/scene/layoutTypes.ts` defines transient object transform types used by the scene manager.
+- `src/ui/ARHud.ts` adds the `#/multi-object` route, session start page, and AR-only `Add Object` / `Delete Object` controls.
+- `src/app/WebARApp.ts` switches gestures and placement between the single-object controller and the layout scene manager when multi-object mode is active.
 
-Worker routes:
+## Worker And Client Scope
+
+The Worker continues to persist generated and uploaded models. It does not expose layout persistence routes.
+
+Unsupported examples:
 
 - `GET /generate-3d/layouts`
 - `POST /generate-3d/layouts`
@@ -36,60 +43,18 @@ Worker routes:
 - `PATCH /generate-3d/layouts/:id`
 - `DELETE /generate-3d/layouts/:id`
 
-All layout routes require an approved session. Users can only read or manage their own layouts unless they are an admin.
-
-## Data Contract
-
-```ts
-interface LayoutObjectTransform {
-  position: { x: number; y: number; z: number };
-  rotation: { x: number; y: number; z: number };
-  scale: { x: number; y: number; z: number };
-}
-
-interface LayoutObject {
-  id: string;
-  model_id: string;
-  model_label: string;
-  model_url: string;
-  transform: LayoutObjectTransform;
-}
-
-interface LayoutRecord {
-  id: string;
-  name: string;
-  owner_email: string;
-  created_at: string;
-  updated_at: string;
-  objects: LayoutObject[];
-}
-```
-
-## Frontend Architecture
-
-Keep the existing single-object flow intact. Add a layout scene manager for multi-object sessions and let `WebARApp` switch between single placement and layout placement behavior.
-
-New module:
-
-- `src/scene/LayoutSceneManager.ts` owns placed layout object instances, active selection, transform export/import, deletion, and hit testing.
-
-Existing modules:
-
-- `src/app/WebARApp.ts` coordinates layout mode, calls the Worker client, and routes gestures to either the single-object transform controller or the layout manager.
-- `src/ui/ARHud.ts` adds the Layouts route, list, status controls, save/delete actions, and Add Object entry point.
-- `src/services/generatedModelClient.ts` adds typed layout API helpers.
-- `worker/src/index.ts` adds persisted layout routes using the existing auth and R2 helpers.
+`src/services/generatedModelClient.ts` keeps generated-model, upload, admin-job, and thumbnail helpers only.
 
 ## Error Handling
 
-Missing auth redirects to login with a layout-specific message. Worker validation rejects empty layout names, invalid object arrays, invalid numeric transforms, and layout access by non-owners. Frontend save failures stay in the layout panel without discarding the current in-memory scene.
+Missing auth redirects to login. Model load failures stay in the multi-object status area. Deleting with no selected object shows a non-destructive prompt. Leaving the route clears session objects through the existing home/return flow.
 
 ## Testing
 
-Use TDD with focused tests first:
+Focused tests cover:
 
-- Worker tests for layout create/list/get/update/delete and ownership checks.
-- Service-client tests for request/response mapping.
-- Layout scene manager tests for add/select/export/import/delete.
-- HUD tests for the new Layouts route and controls.
-- A full `npm test` and `npm run build` before completion.
+- Worker no longer exposing saved layout persistence routes.
+- Generated-model client no longer including layout persistence helpers.
+- `LayoutSceneManager` adding, selecting, deleting, and transforming multiple objects in memory.
+- HUD `Multi Object` routing, auth redirect, session start, and AR controls without `Save Layout`.
+- Full `npm test` and `npm run build` before completion.

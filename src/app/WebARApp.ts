@@ -15,24 +15,18 @@ import { compressThumbnailImage } from '../capture/thumbnailCompression';
 import type { ModelPreviewViewer } from '../scene/ModelPreviewViewer';
 import {
   cleanupFailedJobArtifacts as cleanupFailedJobArtifactsRequest,
-  createLayout as createLayoutRequest,
   extractImageFor3D,
   deleteGeneratedModel as deleteGeneratedModelRequest,
-  deleteLayout as deleteLayoutRequest,
   generateModelFromImage,
-  getLayout as getLayoutRequest,
   listGeneratedModels,
-  listLayouts,
   listAdminJobs as listAdminJobsRequest,
   renameGeneratedModel as renameGeneratedModelRequest,
   retryAdminJob as retryAdminJobRequest,
   startGeneratedModelJob,
   storeUploadedModel as storeUploadedModelRequest,
   toggleGeneratedModelVisibility as toggleGeneratedModelVisibilityRequest,
-  updateLayout as updateLayoutRequest,
   updateGeneratedModelThumbnail as updateGeneratedModelThumbnailRequest,
   type GenerationPipeline,
-  type SavedLayout,
 } from '../services/generatedModelClient';
 import {
   approveAccount as approveAccountRequest,
@@ -78,7 +72,6 @@ export class WebARApp {
   private modelPreviewViewer: ModelPreviewViewer | null = null;
   private authToken: string | null = null;
   private currentUser: AuthUser | null = null;
-  private activeLayout: SavedLayout | null = null;
   private layoutMode = false;
 
   constructor(private readonly root: HTMLElement) {}
@@ -119,11 +112,8 @@ export class WebARApp {
       onRefreshAdminJobs: () => void this.refreshAdminJobs(),
       onRetryAdminJob: (jobId) => void this.retryAdminJob(jobId),
       onCleanupFailedJobArtifacts: () => void this.cleanupFailedJobArtifacts(),
-      onPrepareLayouts: () => void this.prepareLayouts(),
-      onCreateLayout: () => void this.createLayout(),
-      onOpenLayout: (layoutId) => void this.openLayout(layoutId),
-      onSaveLayout: () => void this.saveLayout(),
-      onDeleteLayout: (layoutId) => void this.deleteLayout(layoutId),
+      onPrepareMultiObject: () => void this.prepareMultiObject(),
+      onStartMultiObject: () => void this.startMultiObjectSession(),
       onAddLayoutObject: () => this.promptForLayoutObject(),
       onDeleteLayoutObject: () => this.deleteSelectedLayoutObject(),
     });
@@ -156,7 +146,7 @@ export class WebARApp {
       this.currentUser = user;
       this.hud?.updateAuthState(user);
       await this.refreshGeneratedModels();
-      await this.refreshLayouts();
+      void this.prepareMultiObject();
     } catch (error) {
       console.warn('Could not restore auth session.', error);
       void this.logout();
@@ -179,7 +169,7 @@ export class WebARApp {
       this.hud?.updateAuthState(session.user);
       this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
       void this.refreshGeneratedModels();
-      void this.refreshLayouts();
+      void this.prepareMultiObject();
       window.location.hash = '#/';
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed.';
@@ -203,7 +193,7 @@ export class WebARApp {
       this.hud?.updateAuthState(session.user);
       this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
       void this.refreshGeneratedModels();
-      void this.refreshLayouts();
+      void this.prepareMultiObject();
       window.location.hash = '#/';
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Account creation failed.';
@@ -224,7 +214,6 @@ export class WebARApp {
     clearAuthToken();
     this.hud?.updateAuthState(null);
     void this.refreshGeneratedModels();
-    this.hud?.updateLayouts([]);
     window.location.hash = '#/';
   }
 
@@ -395,7 +384,7 @@ export class WebARApp {
     this.hud?.updateModelReady(false);
     this.hud?.updateSelectedModel(modelOption.id);
     this.hud?.updateModelSource('Layout object');
-    this.hud?.showLayoutMessage(`Loading ${modelOption.label} for layout placement...`);
+    this.hud?.showMultiObjectMessage(`Loading ${modelOption.label} for multi-object placement...`);
 
     try {
       const { loadGLBModel } = await import('../scene/loadModel');
@@ -414,7 +403,7 @@ export class WebARApp {
       const message = error instanceof Error ? error.message : 'Unknown model loading error.';
       this.appState.modelLoaded = false;
       this.hud?.updateModelReady(false);
-      this.hud?.showLayoutMessage(`Could not load ${modelOption.label}: ${message}`);
+      this.hud?.showMultiObjectMessage(`Could not load ${modelOption.label}: ${message}`);
     }
   }
 
@@ -622,7 +611,6 @@ export class WebARApp {
     this.capturedImageGenerationPipeline = 'openai-to-3d';
     this.pendingUploadModelFile = null;
     this.layoutMode = false;
-    this.activeLayout = null;
     this.layoutSceneManager?.clear();
     this.clearCapturedImagePreview();
     this.closeModelPreview();
@@ -645,156 +633,29 @@ export class WebARApp {
     }
   }
 
-  private async refreshLayouts(): Promise<void> {
-    if (!this.authToken) {
-      this.hud?.updateLayouts([]);
-      return;
-    }
-
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
-    try {
-      this.hud?.updateLayouts(await listLayouts({ apiUrl, authToken: this.authToken }));
-    } catch (error) {
-      console.warn('Could not refresh layouts.', error);
-    }
-  }
-
-  private async prepareLayouts(): Promise<void> {
+  private async prepareMultiObject(): Promise<void> {
     if (!this.authToken) {
       return;
     }
 
-    await Promise.all([
-      this.ensureARRuntime().then(() => undefined).catch((error) => {
-        console.warn('Could not prepare AR runtime for layouts.', error);
-      }),
-      this.refreshLayouts(),
-    ]);
+    await this.ensureARRuntime().catch((error) => {
+      console.warn('Could not prepare AR runtime for multi-object placement.', error);
+    });
   }
 
-  private async createLayout(): Promise<void> {
-    const authToken = this.requireAuthToken('Sign in to save layouts.');
-    if (!authToken) {
+  private async startMultiObjectSession(): Promise<void> {
+    if (!this.requireAuthToken('Sign in to place multiple objects.')) {
       return;
     }
 
     await this.ensureARRuntime();
     this.layoutMode = true;
-    this.activeLayout = null;
     this.requireLayoutSceneManager().clear();
     this.appState.modelLoaded = false;
     this.hud?.updateModelReady(false);
-    this.hud?.showLayoutMessage('Creating new layout...');
-
-    try {
-      const layout = await createLayoutRequest({
-        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
-        name: this.defaultLayoutName(),
-        objects: [],
-        authToken,
-      });
-      this.activeLayout = layout;
-      this.hud?.showLayoutEditor(layout.name);
-      this.hud?.showLayoutMessage(`${layout.name}: choose a model, place it, then save.`);
-      await this.refreshLayouts();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not create layout.';
-      this.hud?.showLayoutMessage(`Layout create failed: ${message}`);
-    }
-  }
-
-  private async openLayout(layoutId: string): Promise<void> {
-    const authToken = this.requireAuthToken('Sign in to open layouts.');
-    if (!authToken) {
-      return;
-    }
-
-    await this.ensureARRuntime();
-    this.layoutMode = true;
-    this.appState.modelLoaded = false;
-    this.hud?.updateModelReady(false);
-    this.hud?.showLayoutMessage('Loading layout...');
-
-    try {
-      const layout = await getLayoutRequest({
-        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
-        layoutId,
-        authToken,
-      });
-      await this.loadLayoutObjects(layout);
-      this.activeLayout = layout;
-      this.hud?.showLayoutEditor(layout.name);
-      this.hud?.showLayoutMessage(`${layout.name} loaded with ${layout.objects.length} object${layout.objects.length === 1 ? '' : 's'}.`);
-      this.appState.setMode(layout.objects.length > 0 ? 'placed' : 'scanning');
-      this.hud?.update(this.appState.mode);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not load layout.';
-      this.hud?.showLayoutMessage(`Layout load failed: ${message}`);
-    }
-  }
-
-  private async saveLayout(): Promise<void> {
-    const authToken = this.requireAuthToken('Sign in to save layouts.');
-    if (!authToken) {
-      return;
-    }
-
-    const objects = this.requireLayoutSceneManager().exportObjects();
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
-    this.hud?.showLayoutMessage('Saving layout...');
-
-    try {
-      const layout = this.activeLayout
-        ? await updateLayoutRequest({ apiUrl, layoutId: this.activeLayout.id, name: this.activeLayout.name, objects, authToken })
-        : await createLayoutRequest({ apiUrl, name: this.defaultLayoutName(), objects, authToken });
-      this.activeLayout = layout;
-      this.hud?.showLayoutMessage(`${layout.name} saved with ${objects.length} object${objects.length === 1 ? '' : 's'}.`);
-      await this.refreshLayouts();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not save layout.';
-      this.hud?.showLayoutMessage(`Layout save failed: ${message}`);
-    }
-  }
-
-  private async deleteLayout(layoutId: string): Promise<void> {
-    const authToken = this.requireAuthToken('Sign in to delete layouts.');
-    if (!authToken) {
-      return;
-    }
-
-    try {
-      await deleteLayoutRequest({
-        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
-        layoutId,
-        authToken,
-      });
-      if (this.activeLayout?.id === layoutId) {
-        this.activeLayout = null;
-        this.requireLayoutSceneManager().clear();
-      }
-      await this.refreshLayouts();
-      this.hud?.showLayoutMessage('Layout deleted.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not delete layout.';
-      this.hud?.showLayoutMessage(`Layout delete failed: ${message}`);
-    }
-  }
-
-  private async loadLayoutObjects(layout: SavedLayout): Promise<void> {
-    const manager = this.requireLayoutSceneManager();
-    manager.clear();
-    const { loadGLBModel } = await import('../scene/loadModel');
-    for (const object of layout.objects) {
-      const model = await loadGLBModel(object.modelUrl);
-      manager.addObject({
-        id: object.id,
-        modelId: object.modelId,
-        modelLabel: object.modelLabel,
-        modelUrl: object.modelUrl,
-        model,
-        transform: object.transform,
-      });
-    }
+    this.appState.setMode('scanning');
+    this.hud?.showMultiObjectEditor();
+    this.hud?.showMultiObjectMessage('This session starts empty each time. Choose a model, tap Place, then add more objects.');
   }
 
   private promptForLayoutObject(): void {
@@ -802,7 +663,7 @@ export class WebARApp {
       return;
     }
 
-    this.hud?.showLayoutMessage('Choose a model from the rail, then tap Place.');
+    this.hud?.showMultiObjectMessage('Choose a model from the rail, then tap Place.');
   }
 
   private deleteSelectedLayoutObject(): void {
@@ -811,16 +672,7 @@ export class WebARApp {
     }
 
     const deleted = this.requireLayoutSceneManager().deleteSelected();
-    this.hud?.showLayoutMessage(deleted ? 'Object removed. Save the layout to persist this change.' : 'Select an object before deleting.');
-  }
-
-  private defaultLayoutName(): string {
-    return `Layout ${new Date().toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })}`;
+    this.hud?.showMultiObjectMessage(deleted ? 'Object removed from this session.' : 'Select an object before deleting.');
   }
 
   private async uploadModel(file: File): Promise<void> {
@@ -1228,7 +1080,7 @@ export class WebARApp {
       this.appState.floorLocked = true;
       this.appState.setMode('placed');
       this.planeTrackingManager?.hide();
-      this.hud?.update(this.appState.mode, `${placedObject.modelLabel} placed. Add another object or save the layout.`);
+      this.hud?.update(this.appState.mode, `${placedObject.modelLabel} placed. Add another object or delete the selected one.`);
       return;
     }
 
