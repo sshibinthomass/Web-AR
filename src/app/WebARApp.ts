@@ -15,18 +15,24 @@ import { compressThumbnailImage } from '../capture/thumbnailCompression';
 import type { ModelPreviewViewer } from '../scene/ModelPreviewViewer';
 import {
   cleanupFailedJobArtifacts as cleanupFailedJobArtifactsRequest,
+  createLayout as createLayoutRequest,
   extractImageFor3D,
   deleteGeneratedModel as deleteGeneratedModelRequest,
+  deleteLayout as deleteLayoutRequest,
   generateModelFromImage,
+  getLayout as getLayoutRequest,
   listGeneratedModels,
+  listLayouts,
   listAdminJobs as listAdminJobsRequest,
   renameGeneratedModel as renameGeneratedModelRequest,
   retryAdminJob as retryAdminJobRequest,
   startGeneratedModelJob,
   storeUploadedModel as storeUploadedModelRequest,
   toggleGeneratedModelVisibility as toggleGeneratedModelVisibilityRequest,
+  updateLayout as updateLayoutRequest,
   updateGeneratedModelThumbnail as updateGeneratedModelThumbnailRequest,
   type GenerationPipeline,
+  type SavedLayout,
 } from '../services/generatedModelClient';
 import {
   approveAccount as approveAccountRequest,
@@ -55,6 +61,7 @@ export class WebARApp {
   private planeTrackingManager: PlaneTrackingManager | null = null;
   private readonly appState = new AppState();
   private transformController: ObjectTransformController | null = null;
+  private layoutSceneManager: InstanceType<ARRuntime['LayoutSceneManager']> | null = null;
   private clock: Three.Clock | null = null;
   private cameraStream: MediaStream | null = null;
   private capturedImage: CapturedImage | null = null;
@@ -71,6 +78,8 @@ export class WebARApp {
   private modelPreviewViewer: ModelPreviewViewer | null = null;
   private authToken: string | null = null;
   private currentUser: AuthUser | null = null;
+  private activeLayout: SavedLayout | null = null;
+  private layoutMode = false;
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -110,6 +119,13 @@ export class WebARApp {
       onRefreshAdminJobs: () => void this.refreshAdminJobs(),
       onRetryAdminJob: (jobId) => void this.retryAdminJob(jobId),
       onCleanupFailedJobArtifacts: () => void this.cleanupFailedJobArtifacts(),
+      onPrepareLayouts: () => void this.prepareLayouts(),
+      onCreateLayout: () => void this.createLayout(),
+      onOpenLayout: (layoutId) => void this.openLayout(layoutId),
+      onSaveLayout: () => void this.saveLayout(),
+      onDeleteLayout: (layoutId) => void this.deleteLayout(layoutId),
+      onAddLayoutObject: () => this.promptForLayoutObject(),
+      onDeleteLayoutObject: () => this.deleteSelectedLayoutObject(),
     });
     this.hud.updateModelSource('Cloudflare only');
     this.authToken = loadAuthToken();
@@ -140,6 +156,7 @@ export class WebARApp {
       this.currentUser = user;
       this.hud?.updateAuthState(user);
       await this.refreshGeneratedModels();
+      await this.refreshLayouts();
     } catch (error) {
       console.warn('Could not restore auth session.', error);
       void this.logout();
@@ -162,6 +179,7 @@ export class WebARApp {
       this.hud?.updateAuthState(session.user);
       this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
       void this.refreshGeneratedModels();
+      void this.refreshLayouts();
       window.location.hash = '#/';
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed.';
@@ -185,6 +203,7 @@ export class WebARApp {
       this.hud?.updateAuthState(session.user);
       this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
       void this.refreshGeneratedModels();
+      void this.refreshLayouts();
       window.location.hash = '#/';
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Account creation failed.';
@@ -205,6 +224,7 @@ export class WebARApp {
     clearAuthToken();
     this.hud?.updateAuthState(null);
     void this.refreshGeneratedModels();
+    this.hud?.updateLayouts([]);
     window.location.hash = '#/';
   }
 
@@ -322,6 +342,10 @@ export class WebARApp {
       this.hitTestManager = new arRuntime.HitTestManager(sceneContext.reticle);
       this.planeTrackingManager = new arRuntime.PlaneTrackingManager(sceneContext.floorGrid);
       this.transformController = new arRuntime.ObjectTransformController();
+      const layoutRoot = new arRuntime.THREE.Group();
+      layoutRoot.name = 'layout-root';
+      sceneContext.scene.add(layoutRoot);
+      this.layoutSceneManager = new arRuntime.LayoutSceneManager(layoutRoot);
       this.clock = new arRuntime.THREE.Clock();
 
       const hud = this.requireHud();
@@ -350,6 +374,11 @@ export class WebARApp {
       return;
     }
 
+    if (this.layoutMode) {
+      await this.loadLayoutPendingObject(modelOption);
+      return;
+    }
+
     const isUploadedModel = modelOption.source === 'uploaded' || modelOption.id.startsWith('uploaded-');
     const sourceLabel = isUploadedModel ? 'uploaded file' : 'Cloudflare';
     await this.loadModelFromUrl(modelOption.url, modelOption.label, {
@@ -358,6 +387,35 @@ export class WebARApp {
       sourceMessage: isUploadedModel ? 'Uploaded GLB' : 'Cloudflare hosted model',
       selectedModelId: modelId,
     });
+  }
+
+  private async loadLayoutPendingObject(modelOption: ModelOption): Promise<void> {
+    await this.ensureARRuntime();
+    this.appState.modelLoaded = false;
+    this.hud?.updateModelReady(false);
+    this.hud?.updateSelectedModel(modelOption.id);
+    this.hud?.updateModelSource('Layout object');
+    this.hud?.showLayoutMessage(`Loading ${modelOption.label} for layout placement...`);
+
+    try {
+      const { loadGLBModel } = await import('../scene/loadModel');
+      const model = await loadGLBModel(modelOption.url);
+      this.requireLayoutSceneManager().addObject({
+        modelId: modelOption.id,
+        modelLabel: modelOption.label,
+        modelUrl: modelOption.url,
+        model,
+      });
+      this.appState.modelLoaded = true;
+      this.appState.setMode('readyToPlace');
+      this.hud?.updateModelReady(true);
+      this.hud?.update(this.appState.mode, `${modelOption.label} ready. Tap Place to add it to this layout.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown model loading error.';
+      this.appState.modelLoaded = false;
+      this.hud?.updateModelReady(false);
+      this.hud?.showLayoutMessage(`Could not load ${modelOption.label}: ${message}`);
+    }
   }
 
   private async loadModelFromUrl(
@@ -563,6 +621,9 @@ export class WebARApp {
     this.capturedImage = null;
     this.capturedImageGenerationPipeline = 'openai-to-3d';
     this.pendingUploadModelFile = null;
+    this.layoutMode = false;
+    this.activeLayout = null;
+    this.layoutSceneManager?.clear();
     this.clearCapturedImagePreview();
     this.closeModelPreview();
 
@@ -582,6 +643,184 @@ export class WebARApp {
     } catch (error) {
       console.warn('Could not refresh generated models.', error);
     }
+  }
+
+  private async refreshLayouts(): Promise<void> {
+    if (!this.authToken) {
+      this.hud?.updateLayouts([]);
+      return;
+    }
+
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    try {
+      this.hud?.updateLayouts(await listLayouts({ apiUrl, authToken: this.authToken }));
+    } catch (error) {
+      console.warn('Could not refresh layouts.', error);
+    }
+  }
+
+  private async prepareLayouts(): Promise<void> {
+    if (!this.authToken) {
+      return;
+    }
+
+    await Promise.all([
+      this.ensureARRuntime().then(() => undefined).catch((error) => {
+        console.warn('Could not prepare AR runtime for layouts.', error);
+      }),
+      this.refreshLayouts(),
+    ]);
+  }
+
+  private async createLayout(): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to save layouts.');
+    if (!authToken) {
+      return;
+    }
+
+    await this.ensureARRuntime();
+    this.layoutMode = true;
+    this.activeLayout = null;
+    this.requireLayoutSceneManager().clear();
+    this.appState.modelLoaded = false;
+    this.hud?.updateModelReady(false);
+    this.hud?.showLayoutMessage('Creating new layout...');
+
+    try {
+      const layout = await createLayoutRequest({
+        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        name: this.defaultLayoutName(),
+        objects: [],
+        authToken,
+      });
+      this.activeLayout = layout;
+      this.hud?.showLayoutEditor(layout.name);
+      this.hud?.showLayoutMessage(`${layout.name}: choose a model, place it, then save.`);
+      await this.refreshLayouts();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not create layout.';
+      this.hud?.showLayoutMessage(`Layout create failed: ${message}`);
+    }
+  }
+
+  private async openLayout(layoutId: string): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to open layouts.');
+    if (!authToken) {
+      return;
+    }
+
+    await this.ensureARRuntime();
+    this.layoutMode = true;
+    this.appState.modelLoaded = false;
+    this.hud?.updateModelReady(false);
+    this.hud?.showLayoutMessage('Loading layout...');
+
+    try {
+      const layout = await getLayoutRequest({
+        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        layoutId,
+        authToken,
+      });
+      await this.loadLayoutObjects(layout);
+      this.activeLayout = layout;
+      this.hud?.showLayoutEditor(layout.name);
+      this.hud?.showLayoutMessage(`${layout.name} loaded with ${layout.objects.length} object${layout.objects.length === 1 ? '' : 's'}.`);
+      this.appState.setMode(layout.objects.length > 0 ? 'placed' : 'scanning');
+      this.hud?.update(this.appState.mode);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load layout.';
+      this.hud?.showLayoutMessage(`Layout load failed: ${message}`);
+    }
+  }
+
+  private async saveLayout(): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to save layouts.');
+    if (!authToken) {
+      return;
+    }
+
+    const objects = this.requireLayoutSceneManager().exportObjects();
+    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    this.hud?.showLayoutMessage('Saving layout...');
+
+    try {
+      const layout = this.activeLayout
+        ? await updateLayoutRequest({ apiUrl, layoutId: this.activeLayout.id, name: this.activeLayout.name, objects, authToken })
+        : await createLayoutRequest({ apiUrl, name: this.defaultLayoutName(), objects, authToken });
+      this.activeLayout = layout;
+      this.hud?.showLayoutMessage(`${layout.name} saved with ${objects.length} object${objects.length === 1 ? '' : 's'}.`);
+      await this.refreshLayouts();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save layout.';
+      this.hud?.showLayoutMessage(`Layout save failed: ${message}`);
+    }
+  }
+
+  private async deleteLayout(layoutId: string): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to delete layouts.');
+    if (!authToken) {
+      return;
+    }
+
+    try {
+      await deleteLayoutRequest({
+        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        layoutId,
+        authToken,
+      });
+      if (this.activeLayout?.id === layoutId) {
+        this.activeLayout = null;
+        this.requireLayoutSceneManager().clear();
+      }
+      await this.refreshLayouts();
+      this.hud?.showLayoutMessage('Layout deleted.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not delete layout.';
+      this.hud?.showLayoutMessage(`Layout delete failed: ${message}`);
+    }
+  }
+
+  private async loadLayoutObjects(layout: SavedLayout): Promise<void> {
+    const manager = this.requireLayoutSceneManager();
+    manager.clear();
+    const { loadGLBModel } = await import('../scene/loadModel');
+    for (const object of layout.objects) {
+      const model = await loadGLBModel(object.modelUrl);
+      manager.addObject({
+        id: object.id,
+        modelId: object.modelId,
+        modelLabel: object.modelLabel,
+        modelUrl: object.modelUrl,
+        model,
+        transform: object.transform,
+      });
+    }
+  }
+
+  private promptForLayoutObject(): void {
+    if (!this.layoutMode) {
+      return;
+    }
+
+    this.hud?.showLayoutMessage('Choose a model from the rail, then tap Place.');
+  }
+
+  private deleteSelectedLayoutObject(): void {
+    if (!this.layoutMode) {
+      return;
+    }
+
+    const deleted = this.requireLayoutSceneManager().deleteSelected();
+    this.hud?.showLayoutMessage(deleted ? 'Object removed. Save the layout to persist this change.' : 'Select an object before deleting.');
+  }
+
+  private defaultLayoutName(): string {
+    return `Layout ${new Date().toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
   }
 
   private async uploadModel(file: File): Promise<void> {
@@ -911,6 +1150,21 @@ export class WebARApp {
 
     const sceneContext = this.requireScene();
     const runtime = this.requireARRuntime();
+    if (this.layoutMode) {
+      const floorY = this.requireLayoutSceneManager().selectedGroup()?.position.y ?? this.hitTestManager?.latestPoint?.y ?? null;
+      if (floorY === null) {
+        return;
+      }
+      const floorPoint = runtime.screenPointToFloorPoint(point, sceneContext.renderer.domElement, sceneContext.camera, floorY);
+      if (!floorPoint) {
+        return;
+      }
+      this.requireLayoutSceneManager().moveSelectedToFloorPoint(floorPoint);
+      this.lastPlacementDragPoint = point;
+      this.appState.setMode('editing');
+      return;
+    }
+
     const transformController = this.requireTransformController();
     const dragMode = this.getPlacementDragMode(startPoint, sceneContext);
     if (dragMode === 'none') {
@@ -945,6 +1199,12 @@ export class WebARApp {
       return;
     }
 
+    if (this.layoutMode) {
+      this.requireLayoutSceneManager().scaleSelectedBy(multiplier);
+      this.appState.setMode('editing');
+      return;
+    }
+
     this.requireTransformController().scaleBy(multiplier);
     this.appState.setMode('editing');
   }
@@ -959,6 +1219,18 @@ export class WebARApp {
     }
 
     const placementMatrix = this.hitTestManager?.latestPoseMatrix ?? this.createEstimatedPlacementMatrix();
+
+    if (this.layoutMode) {
+      const placedObject = this.requireLayoutSceneManager().placePendingAt(placementMatrix);
+      if (!placedObject) {
+        return;
+      }
+      this.appState.floorLocked = true;
+      this.appState.setMode('placed');
+      this.planeTrackingManager?.hide();
+      this.hud?.update(this.appState.mode, `${placedObject.modelLabel} placed. Add another object or save the layout.`);
+      return;
+    }
 
     this.requireTransformController().placeAt(placementMatrix);
     this.appState.floorLocked = true;
@@ -1053,6 +1325,16 @@ export class WebARApp {
       return;
     }
 
+    if (this.layoutMode) {
+      const latestMatrix = this.hitTestManager?.latestPoseMatrix;
+      if (latestMatrix) {
+        this.requireLayoutSceneManager().placeSelectedAt(latestMatrix);
+      }
+      this.appState.setMode('placed');
+      this.hud?.update(this.appState.mode);
+      return;
+    }
+
     const latestMatrix = this.hitTestManager?.latestPoseMatrix;
     const transformController = this.requireTransformController();
     if (latestMatrix) {
@@ -1065,12 +1347,26 @@ export class WebARApp {
   }
 
   private resetScale(): void {
+    if (this.layoutMode) {
+      this.requireLayoutSceneManager().resetSelectedScale();
+      this.appState.setMode('editing');
+      this.hud?.update(this.appState.mode);
+      return;
+    }
+
     this.requireTransformController().resetScale();
     this.appState.setMode('editing');
     this.hud?.update(this.appState.mode);
   }
 
   private rotateBy(deltaRadians: number): void {
+    if (this.layoutMode) {
+      this.requireLayoutSceneManager().rotateSelectedBy(deltaRadians);
+      this.appState.setMode('editing');
+      this.hud?.update(this.appState.mode);
+      return;
+    }
+
     this.requireTransformController().rotateBy(deltaRadians);
     this.appState.setMode('editing');
     this.hud?.update(this.appState.mode);
@@ -1106,6 +1402,14 @@ export class WebARApp {
     }
 
     return this.transformController;
+  }
+
+  private requireLayoutSceneManager(): InstanceType<ARRuntime['LayoutSceneManager']> {
+    if (!this.layoutSceneManager) {
+      throw new Error('Layout scene manager has not been created.');
+    }
+
+    return this.layoutSceneManager;
   }
 
   private requireClock(): Three.Clock {

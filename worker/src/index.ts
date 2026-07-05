@@ -64,6 +64,11 @@ interface ModelPatchRequestBody {
   visibility?: unknown;
 }
 
+interface LayoutRequestBody {
+  name?: unknown;
+  objects?: unknown;
+}
+
 interface AuthRequestBody {
   email?: unknown;
   password?: unknown;
@@ -168,6 +173,48 @@ interface GeneratedModelsIndex {
   models: GeneratedModelEntry[];
 }
 
+interface LayoutVector3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+interface LayoutObjectTransform {
+  position: LayoutVector3;
+  rotation: LayoutVector3;
+  scale: LayoutVector3;
+}
+
+interface LayoutObjectEntry {
+  id: string;
+  model_id: string;
+  model_label: string;
+  model_url: string;
+  transform: LayoutObjectTransform;
+}
+
+interface LayoutRecord {
+  id: string;
+  name: string;
+  owner_email: string;
+  created_at: string;
+  updated_at: string;
+  objects: LayoutObjectEntry[];
+}
+
+interface LayoutSummary {
+  id: string;
+  name: string;
+  owner_email: string;
+  created_at: string;
+  updated_at: string;
+  object_count: number;
+}
+
+interface LayoutsIndex {
+  layouts: LayoutSummary[];
+}
+
 interface ScheduledPollResult {
   completed: number;
   failed: number;
@@ -197,6 +244,8 @@ const generatedModelsIndexKey = 'models/generated/index.json';
 const pendingJobsIndexKey = 'models/generated/jobs/index.json';
 const jobHistoryIndexKey = 'models/generated/jobs/history.json';
 const jobKeyPrefix = 'models/generated/jobs/';
+const layoutsIndexKey = 'layouts/index.json';
+const layoutKeyPrefix = 'layouts/';
 const usersIndexKey = 'auth/users/index.json';
 const revokedSessionsIndexKey = 'auth/sessions/revoked.json';
 const auditLogIndexKey = 'security/audit/events.json';
@@ -264,6 +313,23 @@ async function routeGenerateModelRequest(
 
   if (request.method === 'GET' && url.pathname.startsWith('/models/generated/')) {
     return serveGeneratedModel(url.pathname.slice(1), env);
+  }
+
+  if (url.pathname === '/generate-3d/layouts') {
+    const auth = await requireApprovedUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    return handleLayoutsCollectionRequest(request, env, deps, auth.user);
+  }
+
+  if (url.pathname.startsWith('/generate-3d/layouts/')) {
+    const auth = await requireApprovedUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    const layoutId = decodeURIComponent(url.pathname.replace('/generate-3d/layouts/', ''));
+    return handleLayoutItemRequest(request, env, deps, layoutId, auth.user);
   }
 
   if (request.method === 'GET' && url.pathname === '/generate-3d/models') {
@@ -706,6 +772,143 @@ async function handleAccountRemovalRequest(env: WorkerEnv, email: string, adminU
 
   await writeUsersIndex(env, { users: nextUsers });
   return jsonResponse({ deleted: true, email });
+}
+
+async function handleLayoutsCollectionRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  user: StoredUser,
+): Promise<Response> {
+  if (!env.MODEL_BUCKET) {
+    return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
+  }
+
+  if (request.method === 'GET') {
+    const index = await readLayoutsIndex(env);
+    const layouts = index.layouts
+      .filter((layout) => canAccessLayout(layout, user))
+      .sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+    return jsonResponse({ layouts });
+  }
+
+  if (request.method === 'POST') {
+    const body = await readJsonBody<LayoutRequestBody>(request);
+    if (!body.ok) {
+      return jsonResponse({ error: body.error }, 400);
+    }
+
+    const name = normalizeLayoutName(body.value.name);
+    if (!name.ok) {
+      return jsonResponse({ error: name.error }, 400);
+    }
+
+    const objects = normalizeLayoutObjects(body.value.objects);
+    if (!objects.ok) {
+      return jsonResponse({ error: objects.error }, 400);
+    }
+
+    const now = deps.now();
+    const layout: LayoutRecord = {
+      id: createLayoutId(now, name.value),
+      name: name.value,
+      owner_email: user.email,
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
+      objects: objects.value,
+    };
+    await saveLayout(env, layout);
+    await upsertLayoutSummary(env, toLayoutSummary(layout));
+    await appendAuditEvent(env, deps, {
+      actor: user.email,
+      action: 'layout.create',
+      target: layout.id,
+      status: 'ok',
+    });
+    return jsonResponse({ layout }, 201);
+  }
+
+  return jsonResponse({ error: 'Only GET and POST requests are supported for layouts.' }, 405);
+}
+
+async function handleLayoutItemRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  layoutId: string,
+  user: StoredUser,
+): Promise<Response> {
+  if (!env.MODEL_BUCKET) {
+    return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
+  }
+
+  const layout = await readLayout(env, layoutId);
+  if (!layout) {
+    return jsonResponse({ error: 'Layout not found.' }, 404);
+  }
+
+  if (!canAccessLayout(layout, user)) {
+    return jsonResponse({ error: 'Only the owner or an admin can access this layout.' }, 403);
+  }
+
+  if (request.method === 'GET') {
+    return jsonResponse({ layout });
+  }
+
+  if (request.method === 'PATCH') {
+    const body = await readJsonBody<LayoutRequestBody>(request);
+    if (!body.ok) {
+      return jsonResponse({ error: body.error }, 400);
+    }
+
+    const name = body.value.name === undefined ? { ok: true as const, value: layout.name } : normalizeLayoutName(body.value.name);
+    if (!name.ok) {
+      return jsonResponse({ error: name.error }, 400);
+    }
+
+    const objects = body.value.objects === undefined
+      ? { ok: true as const, value: layout.objects }
+      : normalizeLayoutObjects(body.value.objects);
+    if (!objects.ok) {
+      return jsonResponse({ error: objects.error }, 400);
+    }
+
+    if (body.value.name === undefined && body.value.objects === undefined) {
+      return jsonResponse({ error: 'name or objects is required.' }, 400);
+    }
+
+    const updatedLayout: LayoutRecord = {
+      ...layout,
+      name: name.value,
+      updated_at: deps.now().toISOString(),
+      objects: objects.value,
+    };
+    await saveLayout(env, updatedLayout);
+    await upsertLayoutSummary(env, toLayoutSummary(updatedLayout));
+    await appendAuditEvent(env, deps, {
+      actor: user.email,
+      action: 'layout.update',
+      target: layout.id,
+      status: 'ok',
+    });
+    return jsonResponse({ layout: updatedLayout });
+  }
+
+  if (request.method === 'DELETE') {
+    await removeLayoutSummary(env, layout.id);
+    if (env.MODEL_BUCKET.delete) {
+      await env.MODEL_BUCKET.delete(layoutStorageKey(layout.id));
+    }
+    await appendAuditEvent(env, deps, {
+      actor: user.email,
+      action: 'layout.delete',
+      target: layout.id,
+      status: 'ok',
+    });
+    return jsonResponse({ deleted: true, id: layout.id });
+  }
+
+  return jsonResponse({ error: 'Only GET, PATCH, and DELETE requests are supported for layouts.' }, 405);
 }
 
 async function handleUploadedModelRequest(
@@ -1373,6 +1576,10 @@ function canManageGeneratedModel(model: GeneratedModelEntry, user: StoredUser): 
   return Boolean(model.owner_email && model.owner_email === user.email);
 }
 
+function canAccessLayout(layout: Pick<LayoutRecord, 'owner_email'> | Pick<LayoutSummary, 'owner_email'>, user: StoredUser): boolean {
+  return user.role === 'admin' || layout.owner_email === user.email;
+}
+
 function readBearerToken(request: Request): string | null {
   const header = request.headers.get('Authorization') ?? '';
   const match = /^Bearer\s+(.+)$/i.exec(header);
@@ -1569,6 +1776,33 @@ async function upsertGeneratedModelEntry(env: WorkerEnv, entry: GeneratedModelEn
   await writeJsonObject(env, generatedModelsIndexKey, { models });
 }
 
+async function readLayoutsIndex(env: WorkerEnv): Promise<LayoutsIndex> {
+  return readJsonObject<LayoutsIndex>(env, layoutsIndexKey, { layouts: [] });
+}
+
+async function readLayout(env: WorkerEnv, layoutId: string): Promise<LayoutRecord | null> {
+  return readJsonObject<LayoutRecord | null>(env, layoutStorageKey(layoutId), null);
+}
+
+async function saveLayout(env: WorkerEnv, layout: LayoutRecord): Promise<void> {
+  await writeJsonObject(env, layoutStorageKey(layout.id), layout);
+}
+
+async function upsertLayoutSummary(env: WorkerEnv, summary: LayoutSummary): Promise<void> {
+  const index = await readLayoutsIndex(env);
+  const layouts = [summary, ...index.layouts.filter((layout) => layout.id !== summary.id)].sort((left, right) =>
+    right.updated_at.localeCompare(left.updated_at),
+  );
+  await writeJsonObject(env, layoutsIndexKey, { layouts });
+}
+
+async function removeLayoutSummary(env: WorkerEnv, layoutId: string): Promise<void> {
+  const index = await readLayoutsIndex(env);
+  await writeJsonObject(env, layoutsIndexKey, {
+    layouts: index.layouts.filter((layout) => layout.id !== layoutId),
+  });
+}
+
 async function readJsonObject<T>(env: WorkerEnv, key: string, fallback: T): Promise<T> {
   const object = await env.MODEL_BUCKET.get(key);
   if (!object?.body) {
@@ -1751,6 +1985,21 @@ function jobStorageKey(jobId: string): string {
   return `${jobKeyPrefix}${safeObjectKeyPart(jobId)}.json`;
 }
 
+function layoutStorageKey(layoutId: string): string {
+  return `${layoutKeyPrefix}${safeObjectKeyPart(layoutId)}.json`;
+}
+
+function toLayoutSummary(layout: LayoutRecord): LayoutSummary {
+  return {
+    id: layout.id,
+    name: layout.name,
+    owner_email: layout.owner_email,
+    created_at: layout.created_at,
+    updated_at: layout.updated_at,
+    object_count: layout.objects.length,
+  };
+}
+
 function getPublicOrigin(env: WorkerEnv, requestOrigin?: string): string {
   return (env.PUBLIC_MODEL_ORIGIN || requestOrigin || '').replace(/\/+$/, '');
 }
@@ -1780,6 +2029,13 @@ function formatJobLabel(date: Date, targetObject: string | null): string {
   return `${objectLabel} - ${formatDisplayTimestamp(date)}`;
 }
 
+function createLayoutId(date: Date, name: string): string {
+  const randomId = typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+  return `layout-${formatTimestamp(date)}-${slugifyModelLabel(name)}-${safeObjectKeyPart(randomId).slice(0, 8)}`;
+}
+
 function safeObjectKeyPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80);
 }
@@ -1797,6 +2053,111 @@ function slugifyModelLabel(value: string): string {
 
 function uploadedModelLabel(fileName: string): string {
   return fileName.replace(/\.glb$/i, '').trim() || 'Uploaded model';
+}
+
+function normalizeLayoutName(value: unknown): { ok: true; value: string } | { ok: false; error: string } {
+  if (typeof value !== 'string') {
+    return { ok: false, error: 'name is required.' };
+  }
+
+  const name = value.trim();
+  if (!name) {
+    return { ok: false, error: 'name is required.' };
+  }
+
+  if (name.length > 80) {
+    return { ok: false, error: 'name must be 80 characters or fewer.' };
+  }
+
+  return { ok: true, value: name };
+}
+
+function normalizeLayoutObjects(value: unknown): { ok: true; value: LayoutObjectEntry[] } | { ok: false; error: string } {
+  if (value === undefined) {
+    return { ok: true, value: [] };
+  }
+
+  if (!Array.isArray(value)) {
+    return { ok: false, error: 'objects must be an array.' };
+  }
+
+  if (value.length > 50) {
+    return { ok: false, error: 'layouts can store at most 50 objects.' };
+  }
+
+  const objects: LayoutObjectEntry[] = [];
+  for (const [index, item] of value.entries()) {
+    const object = normalizeLayoutObject(item, index);
+    if (!object.ok) {
+      return object;
+    }
+    objects.push(object.value);
+  }
+
+  return { ok: true, value: objects };
+}
+
+function normalizeLayoutObject(value: unknown, index: number): { ok: true; value: LayoutObjectEntry } | { ok: false; error: string } {
+  if (!isRecord(value)) {
+    return { ok: false, error: `objects[${index}] must be an object.` };
+  }
+
+  const id = normalizeRequiredString(value.id);
+  const modelId = normalizeRequiredString(value.model_id);
+  const modelLabel = normalizeRequiredString(value.model_label);
+  const modelUrl = normalizeRequiredString(value.model_url);
+  if (!id || !modelId || !modelLabel || !modelUrl) {
+    return { ok: false, error: `objects[${index}] must include id, model_id, model_label, and model_url.` };
+  }
+
+  if (!isRecord(value.transform)) {
+    return { ok: false, error: `objects[${index}].transform is required.` };
+  }
+
+  const position = normalizeLayoutVector(value.transform.position);
+  const rotation = normalizeLayoutVector(value.transform.rotation);
+  const scale = normalizeLayoutVector(value.transform.scale);
+  if (!position || !rotation || !scale) {
+    return { ok: false, error: `objects[${index}].transform must include finite position, rotation, and scale vectors.` };
+  }
+
+  return {
+    ok: true,
+    value: {
+      id,
+      model_id: modelId,
+      model_label: modelLabel,
+      model_url: modelUrl,
+      transform: { position, rotation, scale },
+    },
+  };
+}
+
+function normalizeLayoutVector(value: unknown): LayoutVector3 | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const x = normalizeFiniteNumber(value.x);
+  const y = normalizeFiniteNumber(value.y);
+  const z = normalizeFiniteNumber(value.z);
+  if (x === null || y === null || z === null) {
+    return null;
+  }
+
+  return { x, y, z };
+}
+
+function normalizeRequiredString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function normalizeFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function normalizeModelMimeType(_value: unknown): string {

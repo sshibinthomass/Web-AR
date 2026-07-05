@@ -7,6 +7,7 @@ import {
   type PlacementGestureZone,
 } from '../interaction/PlacementGestureZone';
 import { createScene, type SceneContext } from '../scene/createScene';
+import { LayoutSceneManager } from '../scene/LayoutSceneManager';
 import { screenPointToFloorPoint, type Point2 } from '../utils/math';
 import { HitTestManager } from '../xr/HitTestManager';
 import { PlaneTrackingManager } from '../xr/PlaneTrackingManager';
@@ -19,6 +20,7 @@ export const arRuntime = {
   ObjectTransformController,
   classifyPlacementGesture,
   rotationDeltaFromVerticalDrag,
+  LayoutSceneManager,
   createScene,
   screenPointToFloorPoint,
   HitTestManager,

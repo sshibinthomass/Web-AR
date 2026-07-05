@@ -50,6 +50,13 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onRefreshAdminJobs: vi.fn(),
     onRetryAdminJob: vi.fn(),
     onCleanupFailedJobArtifacts: vi.fn(),
+    onPrepareLayouts: vi.fn(),
+    onCreateLayout: vi.fn(),
+    onOpenLayout: vi.fn(),
+    onSaveLayout: vi.fn(),
+    onDeleteLayout: vi.fn(),
+    onAddLayoutObject: vi.fn(),
+    onDeleteLayoutObject: vi.fn(),
     ...overrides,
   };
 }
@@ -93,7 +100,7 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Available as guest');
     expect(root.textContent).toContain('Login required');
     expect(root.querySelector('.landing-preview')).not.toBeNull();
-    expect(choiceButtons).toEqual(['AR View', 'Models', 'Camera', 'Upload Image', 'Upload Model', 'Full Flow']);
+    expect(choiceButtons).toEqual(['AR View', 'Models', 'Camera', 'Upload Image', 'Upload Model', 'Full Flow', 'Layouts']);
     expect(statusPanel?.classList.contains('hidden')).toBe(true);
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
     expect(hudActions?.classList.contains('hidden')).toBe(true);
@@ -110,6 +117,11 @@ describe('ARHud', () => {
     expect(onStartCamera).not.toHaveBeenCalled();
     expect(window.location.hash).toBe('#/login');
     expect(root.textContent).toContain('Sign in to use Camera.');
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Layouts')?.click();
+
+    expect(window.location.hash).toBe('#/login');
+    expect(root.textContent).toContain('Sign in to use Layouts.');
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
 
@@ -282,6 +294,75 @@ describe('ARHud', () => {
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.camera-panel')?.classList.contains('fullscreen')).toBe(true);
     expect(root.textContent).toContain('Capture');
+  });
+
+  it('opens Layouts from the first screen for signed-in users', () => {
+    const root = document.createElement('div');
+    const onCreateLayout = vi.fn();
+    const onOpenLayout = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onCreateLayout, onOpenLayout }));
+    hud.updateAuthState(activeUser);
+    hud.updateLayouts([
+      {
+        id: 'layout-123',
+        name: 'Living room',
+        ownerEmail: 'maker@example.com',
+        createdAt: '2026-07-05T09:15:00.000Z',
+        updatedAt: '2026-07-05T09:20:00.000Z',
+        objectCount: 2,
+      },
+    ]);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Layouts')?.click();
+
+    expect(window.location.hash).toBe('#/layouts');
+    expect(root.querySelector('.layout-manager')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
+    expect(root.textContent).toContain('Living room');
+    expect(root.textContent).toContain('2 objects');
+
+    root.querySelector<HTMLButtonElement>('.layout-row[data-layout-id="layout-123"]')?.click();
+    expect(onOpenLayout).toHaveBeenCalledWith('layout-123');
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Layouts')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'New Layout')?.click();
+
+    expect(onOpenLayout).toHaveBeenCalledWith('layout-123');
+    expect(onCreateLayout).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows layout AR controls for adding and saving multiple objects', () => {
+    const root = document.createElement('div');
+    const onAddLayoutObject = vi.fn();
+    const onSaveLayout = vi.fn();
+    const onDeleteLayoutObject = vi.fn();
+    const hud = new ARHud(
+      root,
+      modelOptions,
+      createHandlers({ onAddLayoutObject, onSaveLayout, onDeleteLayoutObject }),
+    );
+    hud.updateAuthState(activeUser);
+
+    hud.showLayoutEditor('Living room');
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Add Object')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Save Layout')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Delete Object')?.click();
+
+    expect(root.querySelector('.status-panel')?.classList.contains('layout-active')).toBe(true);
+    expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
+    expect([...root.querySelectorAll('.hud-actions > button')].map((button) => button.textContent)).toEqual([
+      'Place',
+      'Scale 1x',
+      'Reset',
+      'Add Object',
+      'Save Layout',
+      'Delete Object',
+    ]);
+    expect(root.textContent).toContain('Living room');
+    expect(onAddLayoutObject).toHaveBeenCalledTimes(1);
+    expect(onSaveLayout).toHaveBeenCalledTimes(1);
+    expect(onDeleteLayoutObject).toHaveBeenCalledTimes(1);
   });
 
   it('opens upload image from the first screen without starting the camera', () => {

@@ -1453,6 +1453,131 @@ describe('handleGenerateModelRequest', () => {
     expect(objects.has('models/generated/previews/failed-job.png')).toBe(false);
   });
 
+  it('creates, lists, loads, updates, protects, and deletes saved AR layouts', async () => {
+    const { bucket, objects } = createMemoryBucket();
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    let now = new Date('2026-07-05T09:15:00Z');
+    const deps = { fetch: vi.fn(), now: () => now };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    const otherToken = await createApprovedUserToken(env, deps, adminToken, 'other@example.com');
+    const layoutObject = {
+      id: 'object-chair',
+      model_id: 'generated-chair',
+      model_label: 'Chair',
+      model_url: 'https://assets.example/chair.glb',
+      transform: {
+        position: { x: 1, y: 0.2, z: -1 },
+        rotation: { x: 0, y: 0.5, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    };
+
+    const createResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/layouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: ' Living room ', objects: [layoutObject] }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+    const created = (await createResponse.json()) as {
+      layout: { id: string; name: string; owner_email: string; objects: unknown[] };
+    };
+    const layoutId = created.layout.id;
+
+    expect(createResponse.status).toBe(201);
+    expect(created.layout).toMatchObject({
+      id: expect.stringMatching(/^layout-/),
+      name: 'Living room',
+      owner_email: 'maker@example.com',
+      objects: [layoutObject],
+    });
+    expect(objects.has(`layouts/${layoutId}.json`)).toBe(true);
+
+    const ownerListResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/layouts'), ownerToken),
+      env,
+      deps,
+    );
+    const otherListResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/layouts'), otherToken),
+      env,
+      deps,
+    );
+    const detailResponse = await handleGenerateModelRequest(
+      withAuth(new Request(`https://worker.example/generate-3d/layouts/${layoutId}`), ownerToken),
+      env,
+      deps,
+    );
+    const forbiddenResponse = await handleGenerateModelRequest(
+      withAuth(new Request(`https://worker.example/generate-3d/layouts/${layoutId}`), otherToken),
+      env,
+      deps,
+    );
+
+    expect(ownerListResponse.status).toBe(200);
+    expect(await ownerListResponse.json()).toEqual({
+      layouts: [
+        expect.objectContaining({
+          id: layoutId,
+          name: 'Living room',
+          owner_email: 'maker@example.com',
+          object_count: 1,
+        }),
+      ],
+    });
+    expect(await otherListResponse.json()).toEqual({ layouts: [] });
+    expect(detailResponse.status).toBe(200);
+    expect(await detailResponse.json()).toEqual({ layout: expect.objectContaining({ id: layoutId, objects: [layoutObject] }) });
+    expect(forbiddenResponse.status).toBe(403);
+
+    now = new Date('2026-07-05T09:20:00Z');
+    const movedObject = {
+      ...layoutObject,
+      transform: {
+        ...layoutObject.transform,
+        position: { x: 2, y: 0.2, z: -2 },
+      },
+    };
+    const updateResponse = await handleGenerateModelRequest(
+      withAuth(new Request(`https://worker.example/generate-3d/layouts/${layoutId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Updated room', objects: [movedObject] }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+
+    expect(updateResponse.status).toBe(200);
+    expect(await updateResponse.json()).toEqual({
+      layout: expect.objectContaining({
+        id: layoutId,
+        name: 'Updated room',
+        updated_at: '2026-07-05T09:20:00.000Z',
+        objects: [movedObject],
+      }),
+    });
+
+    const deleteResponse = await handleGenerateModelRequest(
+      withAuth(new Request(`https://worker.example/generate-3d/layouts/${layoutId}`, { method: 'DELETE' }), ownerToken),
+      env,
+      deps,
+    );
+    const listAfterDeleteResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/layouts'), ownerToken),
+      env,
+      deps,
+    );
+
+    expect(deleteResponse.status).toBe(200);
+    expect(await deleteResponse.json()).toEqual({ deleted: true, id: layoutId });
+    expect(objects.has(`layouts/${layoutId}.json`)).toBe(false);
+    expect(await listAfterDeleteResponse.json()).toEqual({ layouts: [] });
+  });
+
   it('revokes a session token after logout', async () => {
     const env = createEnv();
     const deps = { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') };

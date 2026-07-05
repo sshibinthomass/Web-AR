@@ -88,6 +88,26 @@ interface StoreUploadedModelInput {
   fetchImpl?: typeof fetch;
 }
 
+interface LayoutsInput {
+  apiUrl: string;
+  authToken?: string | null;
+  fetchImpl?: typeof fetch;
+}
+
+interface LayoutInput extends LayoutsInput {
+  layoutId: string;
+}
+
+interface SaveLayoutInput extends LayoutsInput {
+  name: string;
+  objects: LayoutObject[];
+}
+
+interface UpdateLayoutInput extends LayoutInput {
+  name?: string;
+  objects?: LayoutObject[];
+}
+
 interface WorkerSuccessResponse {
   model_url: string;
   object_key: string;
@@ -148,6 +168,50 @@ interface WorkerAdminJobsResponse {
   jobs?: WorkerAdminJobEntry[];
 }
 
+interface WorkerLayoutVector3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+interface WorkerLayoutObject {
+  id: string;
+  model_id: string;
+  model_label: string;
+  model_url: string;
+  transform: {
+    position: WorkerLayoutVector3;
+    rotation: WorkerLayoutVector3;
+    scale: WorkerLayoutVector3;
+  };
+}
+
+interface WorkerLayoutRecord {
+  id: string;
+  name: string;
+  owner_email: string;
+  created_at: string;
+  updated_at: string;
+  objects: WorkerLayoutObject[];
+}
+
+interface WorkerLayoutSummary {
+  id: string;
+  name: string;
+  owner_email: string;
+  created_at: string;
+  updated_at: string;
+  object_count: number;
+}
+
+interface WorkerLayoutsResponse {
+  layouts?: WorkerLayoutSummary[];
+}
+
+interface WorkerLayoutResponse {
+  layout?: WorkerLayoutRecord;
+}
+
 export interface AdminJobEntry {
   id: string;
   label: string;
@@ -161,6 +225,42 @@ export interface AdminJobEntry {
   bytes?: number;
   modelUrl?: string;
   previewUrl?: string;
+}
+
+export interface LayoutVector3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface LayoutObject {
+  id: string;
+  modelId: string;
+  modelLabel: string;
+  modelUrl: string;
+  transform: {
+    position: LayoutVector3;
+    rotation: LayoutVector3;
+    scale: LayoutVector3;
+  };
+}
+
+export interface SavedLayout {
+  id: string;
+  name: string;
+  ownerEmail: string;
+  createdAt: string;
+  updatedAt: string;
+  objects: LayoutObject[];
+}
+
+export interface LayoutSummary {
+  id: string;
+  name: string;
+  ownerEmail: string;
+  createdAt: string;
+  updatedAt: string;
+  objectCount: number;
 }
 
 export async function startGeneratedModelJob({
@@ -254,6 +354,121 @@ export async function listGeneratedModels({
   return (modelList.models ?? [])
     .filter((model: WorkerGeneratedModelEntry) => model.id && model.label && model.model_url)
     .map(mapGeneratedModelEntry);
+}
+
+export async function listLayouts({
+  apiUrl,
+  authToken,
+  fetchImpl = fetch,
+}: LayoutsInput): Promise<LayoutSummary[]> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const response = await fetchImpl(layoutsUrl(apiUrl), {
+    headers: authHeaders(authToken),
+  });
+  const body = (await response.json()) as WorkerLayoutsResponse | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Layout list failed with HTTP ${response.status}.`);
+  }
+
+  return ((body as WorkerLayoutsResponse).layouts ?? []).map(mapLayoutSummary);
+}
+
+export async function createLayout({
+  apiUrl,
+  name,
+  objects,
+  authToken,
+  fetchImpl = fetch,
+}: SaveLayoutInput): Promise<SavedLayout> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    throw new Error('Enter a layout name before saving.');
+  }
+
+  const response = await fetchImpl(layoutsUrl(apiUrl), {
+    method: 'POST',
+    headers: jsonHeaders(authToken),
+    body: JSON.stringify({
+      name: trimmedName,
+      objects: objects.map(toWorkerLayoutObject),
+    }),
+  });
+  return parseLayoutResponse(response, 'Layout create');
+}
+
+export async function getLayout({
+  apiUrl,
+  layoutId,
+  authToken,
+  fetchImpl = fetch,
+}: LayoutInput): Promise<SavedLayout> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const response = await fetchImpl(layoutItemUrl(apiUrl, layoutId), {
+    headers: authHeaders(authToken),
+  });
+  return parseLayoutResponse(response, 'Layout load');
+}
+
+export async function updateLayout({
+  apiUrl,
+  layoutId,
+  name,
+  objects,
+  authToken,
+  fetchImpl = fetch,
+}: UpdateLayoutInput): Promise<SavedLayout> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const body: Record<string, unknown> = {};
+  if (name !== undefined) {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      throw new Error('Enter a layout name before saving.');
+    }
+    body.name = trimmedName;
+  }
+  if (objects !== undefined) {
+    body.objects = objects.map(toWorkerLayoutObject);
+  }
+
+  const response = await fetchImpl(layoutItemUrl(apiUrl, layoutId), {
+    method: 'PATCH',
+    headers: jsonHeaders(authToken),
+    body: JSON.stringify(body),
+  });
+  return parseLayoutResponse(response, 'Layout update');
+}
+
+export async function deleteLayout({
+  apiUrl,
+  layoutId,
+  authToken,
+  fetchImpl = fetch,
+}: LayoutInput): Promise<void> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const response = await fetchImpl(layoutItemUrl(apiUrl, layoutId), {
+    method: 'DELETE',
+    headers: authHeaders(authToken),
+  });
+  const body = (await response.json()) as { deleted?: boolean } | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Layout delete failed with HTTP ${response.status}.`);
+  }
 }
 
 export async function toggleGeneratedModelVisibility({
@@ -578,6 +793,19 @@ function jsonHeaders(authToken?: string | null): Record<string, string> {
   };
 }
 
+async function parseLayoutResponse(response: Response, action: string): Promise<SavedLayout> {
+  const body = (await response.json()) as WorkerLayoutResponse | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `${action} failed with HTTP ${response.status}.`);
+  }
+
+  if (!('layout' in body) || !body.layout) {
+    throw new Error('Worker response did not include a saved layout.');
+  }
+
+  return mapLayoutRecord(body.layout);
+}
+
 function authHeaders(authToken?: string | null): Record<string, string> {
   return authToken ? { Authorization: `Bearer ${authToken}` } : {};
 }
@@ -641,9 +869,59 @@ function mapAdminJobEntry(job: WorkerAdminJobEntry): AdminJobEntry {
   };
 }
 
+function mapLayoutSummary(layout: WorkerLayoutSummary): LayoutSummary {
+  return {
+    id: layout.id,
+    name: layout.name,
+    ownerEmail: layout.owner_email,
+    createdAt: layout.created_at,
+    updatedAt: layout.updated_at,
+    objectCount: layout.object_count,
+  };
+}
+
+function mapLayoutRecord(layout: WorkerLayoutRecord): SavedLayout {
+  return {
+    id: layout.id,
+    name: layout.name,
+    ownerEmail: layout.owner_email,
+    createdAt: layout.created_at,
+    updatedAt: layout.updated_at,
+    objects: layout.objects.map(mapLayoutObject),
+  };
+}
+
+function mapLayoutObject(object: WorkerLayoutObject): LayoutObject {
+  return {
+    id: object.id,
+    modelId: object.model_id,
+    modelLabel: object.model_label,
+    modelUrl: object.model_url,
+    transform: object.transform,
+  };
+}
+
+function toWorkerLayoutObject(object: LayoutObject): WorkerLayoutObject {
+  return {
+    id: object.id,
+    model_id: object.modelId,
+    model_label: object.modelLabel,
+    model_url: object.modelUrl,
+    transform: object.transform,
+  };
+}
+
 function generatedModelItemUrl(apiUrl: string, modelId: string): string {
   const workerModelId = modelId.startsWith('generated-') ? modelId.slice('generated-'.length) : modelId;
   return `${apiUrl.replace(/\/+$/, '')}/models/${encodeURIComponent(workerModelId)}`;
+}
+
+function layoutsUrl(apiUrl: string): string {
+  return `${apiUrl.replace(/\/+$/, '')}/layouts`;
+}
+
+function layoutItemUrl(apiUrl: string, layoutId: string): string {
+  return `${layoutsUrl(apiUrl)}/${encodeURIComponent(layoutId)}`;
 }
 
 function uploadedModelLabel(fileName: string): string {

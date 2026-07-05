@@ -1,16 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   extractImageFor3D,
+  createLayout,
   deleteGeneratedModel,
+  deleteLayout,
   generateModelFromImage,
+  getLayout,
   listAdminJobs,
   listGeneratedModels,
+  listLayouts,
   renameGeneratedModel,
   retryAdminJob,
   startGeneratedModelJob,
   storeUploadedModel,
   toggleGeneratedModelVisibility,
   cleanupFailedJobArtifacts,
+  updateLayout,
   updateGeneratedModelThumbnail,
 } from '../../src/services/generatedModelClient';
 
@@ -504,6 +509,182 @@ describe('admin job operations', () => {
       3,
       'https://worker.example/generate-3d/jobs/cleanup',
       expect.objectContaining({ method: 'POST', headers: { Authorization: 'Bearer admin-token' } }),
+    );
+  });
+});
+
+describe('layout operations', () => {
+  const layoutObject = {
+    id: 'object-chair',
+    modelId: 'generated-chair',
+    modelLabel: 'Chair',
+    modelUrl: 'https://assets.example/chair.glb',
+    transform: {
+      position: { x: 1, y: 0.2, z: -1 },
+      rotation: { x: 0, y: 0.5, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    },
+  };
+
+  it('lists saved layouts with the bearer token', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          layouts: [
+            {
+              id: 'layout-123',
+              name: 'Living room',
+              owner_email: 'maker@example.com',
+              created_at: '2026-07-05T09:15:00.000Z',
+              updated_at: '2026-07-05T09:20:00.000Z',
+              object_count: 2,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    await expect(
+      listLayouts({ apiUrl: 'https://worker.example/generate-3d', authToken: 'signed-token', fetchImpl }),
+    ).resolves.toEqual([
+      {
+        id: 'layout-123',
+        name: 'Living room',
+        ownerEmail: 'maker@example.com',
+        createdAt: '2026-07-05T09:15:00.000Z',
+        updatedAt: '2026-07-05T09:20:00.000Z',
+        objectCount: 2,
+      },
+    ]);
+    expect(fetchImpl).toHaveBeenCalledWith('https://worker.example/generate-3d/layouts', {
+      headers: { Authorization: 'Bearer signed-token' },
+    });
+  });
+
+  it('creates, loads, updates, and deletes saved layouts', async () => {
+    const workerLayout = {
+      id: 'layout-123',
+      name: 'Living room',
+      owner_email: 'maker@example.com',
+      created_at: '2026-07-05T09:15:00.000Z',
+      updated_at: '2026-07-05T09:15:00.000Z',
+      objects: [
+        {
+          id: 'object-chair',
+          model_id: 'generated-chair',
+          model_label: 'Chair',
+          model_url: 'https://assets.example/chair.glb',
+          transform: layoutObject.transform,
+        },
+      ],
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ layout: workerLayout }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ layout: workerLayout }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ layout: { ...workerLayout, name: 'Updated room' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ deleted: true, id: 'layout-123' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    await expect(
+      createLayout({
+        apiUrl: 'https://worker.example/generate-3d',
+        name: ' Living room ',
+        objects: [layoutObject],
+        authToken: 'signed-token',
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      id: 'layout-123',
+      name: 'Living room',
+      ownerEmail: 'maker@example.com',
+      createdAt: '2026-07-05T09:15:00.000Z',
+      updatedAt: '2026-07-05T09:15:00.000Z',
+      objects: [layoutObject],
+    });
+    await expect(
+      getLayout({ apiUrl: 'https://worker.example/generate-3d', layoutId: 'layout-123', authToken: 'signed-token', fetchImpl }),
+    ).resolves.toEqual(expect.objectContaining({ id: 'layout-123', objects: [layoutObject] }));
+    await expect(
+      updateLayout({
+        apiUrl: 'https://worker.example/generate-3d',
+        layoutId: 'layout-123',
+        name: 'Updated room',
+        objects: [layoutObject],
+        authToken: 'signed-token',
+        fetchImpl,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ name: 'Updated room' }));
+    await expect(
+      deleteLayout({ apiUrl: 'https://worker.example/generate-3d', layoutId: 'layout-123', authToken: 'signed-token', fetchImpl }),
+    ).resolves.toBeUndefined();
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'https://worker.example/generate-3d/layouts',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer signed-token' },
+        body: JSON.stringify({
+          name: 'Living room',
+          objects: [
+            {
+              id: 'object-chair',
+              model_id: 'generated-chair',
+              model_label: 'Chair',
+              model_url: 'https://assets.example/chair.glb',
+              transform: layoutObject.transform,
+            },
+          ],
+        }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, 'https://worker.example/generate-3d/layouts/layout-123', {
+      headers: { Authorization: 'Bearer signed-token' },
+    });
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      3,
+      'https://worker.example/generate-3d/layouts/layout-123',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: 'Updated room',
+          objects: [
+            {
+              id: 'object-chair',
+              model_id: 'generated-chair',
+              model_label: 'Chair',
+              model_url: 'https://assets.example/chair.glb',
+              transform: layoutObject.transform,
+            },
+          ],
+        }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      4,
+      'https://worker.example/generate-3d/layouts/layout-123',
+      expect.objectContaining({ method: 'DELETE', headers: { Authorization: 'Bearer signed-token' } }),
     );
   });
 });
