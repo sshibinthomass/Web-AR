@@ -274,6 +274,8 @@ describe('ARHud', () => {
     expect([...root.querySelectorAll('.hud-actions > button')].map((button) => button.textContent)).toEqual([
       'Place',
       'Scale 1x',
+      'Rotate Left',
+      'Rotate Right',
       'Reset',
     ]);
   });
@@ -341,6 +343,8 @@ describe('ARHud', () => {
     expect([...root.querySelectorAll('.hud-actions > button')].map((button) => button.textContent)).toEqual([
       'Place',
       'Scale 1x',
+      'Rotate Left',
+      'Rotate Right',
       'Reset',
       'Add Object',
       'Delete Object',
@@ -1006,12 +1010,38 @@ describe('ARHud', () => {
     expect(hud.overlay.contains(hud.gestureSurface)).toBe(true);
   });
 
-  it('uses gestures instead of rotate buttons', () => {
+  it('provides rotate buttons for the selected AR object', () => {
     const root = document.createElement('div');
-    new ARHud(root, modelOptions, createHandlers());
+    const onRotateLeft = vi.fn();
+    const onRotateRight = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onRotateLeft, onRotateRight }));
+    hud.updateAuthState(activeUser);
 
-    expect(root.textContent).not.toContain('-15 deg');
-    expect(root.textContent).not.toContain('+15 deg');
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="trellis-fast-output"]')?.click();
+    hud.updateModelReady(true);
+    root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
+
+    const rotateLeftButton = [...root.querySelectorAll<HTMLButtonElement>('.hud-actions > button')].find(
+      (button) => button.textContent === 'Rotate Left',
+    );
+    const rotateRightButton = [...root.querySelectorAll<HTMLButtonElement>('.hud-actions > button')].find(
+      (button) => button.textContent === 'Rotate Right',
+    );
+
+    expect(rotateLeftButton).toBeInstanceOf(HTMLButtonElement);
+    expect(rotateRightButton).toBeInstanceOf(HTMLButtonElement);
+    expect(rotateLeftButton?.disabled).toBe(true);
+    expect(rotateRightButton?.disabled).toBe(true);
+
+    hud.update('placed');
+    rotateLeftButton?.click();
+    rotateRightButton?.click();
+
+    expect(rotateLeftButton?.disabled).toBe(false);
+    expect(rotateRightButton?.disabled).toBe(false);
+    expect(onRotateLeft).toHaveBeenCalledTimes(1);
+    expect(onRotateRight).toHaveBeenCalledTimes(1);
   });
 
   it('shows the current model source in the HUD', () => {

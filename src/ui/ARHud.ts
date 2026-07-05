@@ -116,6 +116,8 @@ export class ARHud {
   private readonly placeButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
   private readonly resetScaleButton: HTMLButtonElement;
+  private readonly rotateLeftButton: HTMLButtonElement;
+  private readonly rotateRightButton: HTMLButtonElement;
   private readonly addLayoutObjectButton: HTMLButtonElement;
   private readonly deleteLayoutObjectButton: HTMLButtonElement;
   private readonly captureButton: HTMLButtonElement;
@@ -544,6 +546,8 @@ export class ARHud {
 
     this.placeButton = this.createButton('Place', 'primary', this.handlers.onPlace);
     this.resetScaleButton = this.createButton('Scale 1x', '', this.handlers.onResetScale);
+    this.rotateLeftButton = this.createButton('Rotate Left', '', this.handlers.onRotateLeft);
+    this.rotateRightButton = this.createButton('Rotate Right', '', this.handlers.onRotateRight);
     this.resetButton = this.createButton('Reset', '', this.handlers.onReset);
     this.addLayoutObjectButton = this.createButton('Add Object', '', this.handlers.onAddLayoutObject);
     this.deleteLayoutObjectButton = this.createButton('Delete Object', 'danger', this.handlers.onDeleteLayoutObject);
@@ -553,6 +557,8 @@ export class ARHud {
     this.hudActions.append(
       this.placeButton,
       this.resetScaleButton,
+      this.rotateLeftButton,
+      this.rotateRightButton,
       this.resetButton,
     );
     this.renderModelRail();
@@ -639,6 +645,8 @@ export class ARHud {
     this.statusPanel.classList.toggle('object-placed', hasPlacedObject);
     this.placeButton.disabled = !this.modelReady || (mode !== 'scanning' && mode !== 'readyToPlace');
     this.resetScaleButton.disabled = !hasPlacedObject;
+    this.rotateLeftButton.disabled = !hasPlacedObject;
+    this.rotateRightButton.disabled = !hasPlacedObject;
     this.resetButton.disabled = !hasPlacedObject;
   }
 
