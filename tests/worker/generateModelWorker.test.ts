@@ -1573,6 +1573,7 @@ describe('handleGenerateModelRequest', () => {
                 id: 'object-plant',
                 model: { id: 'generated-plant', label: 'Plant', url: 'https://worker.example/plant.glb' },
                 placement: { scale: 0.8, offset_x: -0.25, offset_y: 0.2, height: 0.08 },
+                animation: { spin_axis: 'y', spin_speed: 1.5, bob_height: 0.08, bob_speed: 2 },
               },
             ],
           }),
@@ -1599,6 +1600,7 @@ describe('handleGenerateModelRequest', () => {
           id: 'object-plant',
           model: { id: 'generated-plant', label: 'Plant', url: 'https://worker.example/plant.glb' },
           placement: { scale: 0.8, offset_x: -0.25, offset_y: 0.2, height: 0.08 },
+          animation: { spin_axis: 'y', spin_speed: 1.5, bob_height: 0.08, bob_speed: 2 },
         },
       ],
     });
@@ -1607,7 +1609,10 @@ describe('handleGenerateModelRequest', () => {
         id: 'target-20260705-180500-shelf-card',
         objects: expect.arrayContaining([
           expect.objectContaining({ id: 'object-chair' }),
-          expect.objectContaining({ id: 'object-plant' }),
+          expect.objectContaining({
+            id: 'object-plant',
+            animation: { spin_axis: 'y', spin_speed: 1.5, bob_height: 0.08, bob_speed: 2 },
+          }),
         ]),
       })],
     });
@@ -1616,7 +1621,10 @@ describe('handleGenerateModelRequest', () => {
         id: 'target-20260705-180500-shelf-card',
         objects: expect.arrayContaining([
           expect.objectContaining({ id: 'object-chair' }),
-          expect.objectContaining({ id: 'object-plant' }),
+          expect.objectContaining({
+            id: 'object-plant',
+            animation: { spin_axis: 'y', spin_speed: 1.5, bob_height: 0.08, bob_speed: 2 },
+          }),
         ]),
       }),
     );

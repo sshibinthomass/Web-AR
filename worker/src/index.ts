@@ -177,6 +177,15 @@ type ImageTargetPlacement = {
   height: number;
 };
 
+type ImageTargetSpinAxis = 'none' | 'x' | 'y' | 'z';
+
+type ImageTargetAnimation = {
+  spin_axis: ImageTargetSpinAxis;
+  spin_speed: number;
+  bob_height: number;
+  bob_speed: number;
+};
+
 type ImageTargetModel = {
   id: string;
   label: string;
@@ -188,6 +197,7 @@ type ImageTargetObject = {
   id: string;
   model: ImageTargetModel;
   placement: ImageTargetPlacement;
+  animation?: ImageTargetAnimation;
 };
 
 type ImageTargetEntry = {
@@ -1611,6 +1621,7 @@ function normalizeImageTargetObject(value: unknown, index: number): ImageTargetO
     id: typeof candidate.id === 'string' && candidate.id.trim() ? candidate.id.trim() : `object-${index + 1}`,
     model,
     placement: normalizeImageTargetPlacement(candidate.placement),
+    ...(candidate.animation ? { animation: normalizeImageTargetAnimation(candidate.animation) } : {}),
   };
 }
 
@@ -1672,6 +1683,35 @@ function defaultImageTargetPlacement(): ImageTargetPlacement {
 }
 
 function normalizeFinitePlacementNumber(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeImageTargetAnimation(value: unknown): ImageTargetAnimation {
+  if (!value || typeof value !== 'object') {
+    return defaultImageTargetAnimation();
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return {
+    spin_axis: normalizeImageTargetSpinAxis(candidate.spin_axis),
+    spin_speed: normalizeFiniteAnimationNumber(candidate.spin_speed, defaultImageTargetAnimation().spin_speed, -6, 6),
+    bob_height: normalizeFiniteAnimationNumber(candidate.bob_height, defaultImageTargetAnimation().bob_height, 0, 1),
+    bob_speed: normalizeFiniteAnimationNumber(candidate.bob_speed, defaultImageTargetAnimation().bob_speed, 0, 8),
+  };
+}
+
+function defaultImageTargetAnimation(): ImageTargetAnimation {
+  return { spin_axis: 'z', spin_speed: 0.22, bob_height: 0, bob_speed: 0 };
+}
+
+function normalizeImageTargetSpinAxis(value: unknown): ImageTargetSpinAxis {
+  return value === 'none' || value === 'x' || value === 'y' || value === 'z' ? value : 'z';
+}
+
+function normalizeFiniteAnimationNumber(value: unknown, fallback: number, min: number, max: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
   }
