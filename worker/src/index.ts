@@ -867,7 +867,8 @@ async function handleImageTargetCreateRequest(
 
   const now = deps.now();
   const label = normalizeModelLabel(body.value.label) ?? 'Image target';
-  const id = `target-${formatTimestamp(now)}-${slugifyModelLabel(label)}`;
+  const existingTargets = (await readImageTargetsIndex(env)).targets;
+  const id = createUniqueImageTargetId(existingTargets, now, label);
   const extension = imageTargetExtension(imageMimeType);
   const objectKey = `${imageTargetImagePrefix}${id}.${extension}`;
   const imageBytes = base64ToArrayBuffer(stripDataUrlPrefix(body.value.image_base64));
@@ -1031,7 +1032,7 @@ async function updateImageTarget(
     label: normalizeModelLabel(body.value.label) ?? existingTarget.label,
     model: normalizeImageTargetModel(body.value.model) ?? existingTarget.model,
     placement: normalizeImageTargetPlacement(body.value.placement, existingTarget.placement),
-    visibility: normalizeModelVisibility(body.value.visibility) ?? existingTarget.visibility,
+    visibility: normalizeModelVisibility(body.value.visibility) ?? existingTarget.visibility ?? 'private',
     updated_at: now.toISOString(),
   };
 
@@ -1040,7 +1041,10 @@ async function updateImageTarget(
     return jsonResponse({ error: 'image_mime_type must be image/png, image/jpeg, or image/webp.' }, 400);
   }
   if (typeof body.value.image_base64 === 'string' && body.value.image_base64.length > 0) {
-    const mimeType = imageMimeType ?? 'image/png';
+    if (body.value.image_mime_type === undefined) {
+      return jsonResponse({ error: 'image_mime_type is required when image_base64 is provided.' }, 400);
+    }
+    const mimeType = imageMimeType;
     const imageBytes = base64ToArrayBuffer(stripDataUrlPrefix(body.value.image_base64));
     if (imageBytes.byteLength > maxImageTargetBytes) {
       return jsonResponse({ error: 'Image target uploads must be 5 MB or smaller.' }, 400);
@@ -1712,7 +1716,7 @@ function isImageTargetVisibleToUser(target: ImageTargetEntry, user: StoredUser |
   if (user?.role === 'admin') {
     return true;
   }
-  if ((target.visibility ?? 'public') === 'public') {
+  if ((target.visibility ?? 'private') === 'public') {
     return true;
   }
   return Boolean(user && target.owner_email === user.email);
@@ -1834,7 +1838,10 @@ async function readGeneratedModelsIndex(env: WorkerEnv): Promise<GeneratedModels
 }
 
 async function readImageTargetsIndex(env: WorkerEnv): Promise<ImageTargetsIndex> {
-  return readJsonObject<ImageTargetsIndex>(env, imageTargetsIndexKey, { targets: [] });
+  const index = await readJsonObject<ImageTargetsIndex>(env, imageTargetsIndexKey, { targets: [] });
+  return {
+    targets: index.targets.map((target) => normalizeStoredImageTarget(target)),
+  };
 }
 
 async function writeImageTargetsIndex(env: WorkerEnv, index: ImageTargetsIndex): Promise<void> {
@@ -1855,6 +1862,26 @@ async function upsertImageTargetEntry(env: WorkerEnv, entry: ImageTargetEntry): 
 
 function imageTargetRecordKey(targetId: string): string {
   return `${imageTargetRecordPrefix}${safeObjectKeyPart(targetId)}.json`;
+}
+
+function createUniqueImageTargetId(existingTargets: ImageTargetEntry[], now: Date, label: string): string {
+  const baseId = `target-${formatTimestamp(now)}-${slugifyModelLabel(label)}`;
+  if (!existingTargets.some((target) => target.id === baseId)) {
+    return baseId;
+  }
+
+  let suffix = 2;
+  while (existingTargets.some((target) => target.id === `${baseId}-${suffix}`)) {
+    suffix += 1;
+  }
+  return `${baseId}-${suffix}`;
+}
+
+function normalizeStoredImageTarget(target: ImageTargetEntry): ImageTargetEntry {
+  return {
+    ...target,
+    visibility: target.visibility ?? 'private',
+  };
 }
 
 async function readUsersIndex(env: WorkerEnv): Promise<UsersIndex> {

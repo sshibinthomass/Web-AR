@@ -1545,6 +1545,73 @@ describe('handleGenerateModelRequest', () => {
     );
   });
 
+  it('creates a unique image target id when the first-format id already exists', async () => {
+    const existingId = 'target-20260705-180000-product-box';
+    const { bucket, objects } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({
+        targets: [
+          {
+            id: existingId,
+            label: 'Product box',
+            image_url: `https://worker.example/image-targets/images/${existingId}.jpg`,
+            image_object_key: `image-targets/images/${existingId}.jpg`,
+            model: { id: 'generated-existing', label: 'Chair', url: 'https://worker.example/models/generated/existing.glb' },
+            placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+            owner_email: 'maker@example.com',
+            visibility: 'private',
+            created_at: '2026-07-05T18:00:00.000Z',
+            updated_at: '2026-07-05T18:00:00.000Z',
+          },
+        ],
+      }),
+      [`image-targets/records/${existingId}.json`]: JSON.stringify({ id: existingId }),
+      [`image-targets/images/${existingId}.jpg`]: new Uint8Array([1, 2, 3]).buffer,
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket, PUBLIC_MODEL_ORIGIN: '' });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:00:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const response = await handleGenerateModelRequest(
+      withAuth(
+        new Request('https://worker.example/generate-3d/image-targets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            label: ' Product box ',
+            image_base64: 'bmV3LWltYWdl',
+            image_mime_type: 'image/jpeg',
+            model: {
+              id: 'generated-fc-456',
+              label: 'Chair',
+              url: 'https://worker.example/models/generated/chair-2.glb',
+            },
+          }),
+        }),
+        ownerToken,
+      ),
+      env,
+      deps,
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      id: `${existingId}-2`,
+      image_url: `https://worker.example/image-targets/images/${existingId}-2.jpg`,
+      image_object_key: `image-targets/images/${existingId}-2.jpg`,
+    });
+    expect(JSON.parse(objects.get('image-targets/index.json') as string)).toEqual({
+      targets: expect.arrayContaining([
+        expect.objectContaining({ id: existingId }),
+        expect.objectContaining({ id: `${existingId}-2` }),
+      ]),
+    });
+    expect(objects.get(`image-targets/images/${existingId}.jpg`)).toEqual(new Uint8Array([1, 2, 3]).buffer);
+    expect(objects.get(`image-targets/images/${existingId}-2.jpg`)).toEqual(
+      new Uint8Array([110, 101, 119, 45, 105, 109, 97, 103, 101]).buffer,
+    );
+  });
+
   it('requires an approved session to create image targets and validates image payloads', async () => {
     const env = createEnv();
     const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:00:00Z') };
@@ -1757,6 +1824,115 @@ describe('handleGenerateModelRequest', () => {
     expect(JSON.parse(storedObjects.get('image-targets/index.json') as string)).toEqual({ targets: [] });
     expect(storedObjects.has('image-targets/images/private-target.jpg')).toBe(false);
     expect(storedObjects.has('image-targets/records/private-target.json')).toBe(false);
+  });
+
+  it('requires image_mime_type when replacing an image target image', async () => {
+    const storedObjects = new Map<string, string | ArrayBuffer>();
+    storedObjects.set('image-targets/images/private-target.jpg', new Uint8Array([1, 2, 3]).buffer);
+    storedObjects.set(
+      'image-targets/index.json',
+      JSON.stringify({
+        targets: [
+          {
+            id: 'private-target',
+            label: 'Private target',
+            image_url: 'https://worker.example/image-targets/images/private-target.jpg',
+            image_object_key: 'image-targets/images/private-target.jpg',
+            model: { id: 'm-private', label: 'Private chair', url: 'https://worker.example/private.glb' },
+            placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+            owner_email: 'maker@example.com',
+            visibility: 'private',
+            created_at: '2026-07-05T18:01:00.000Z',
+            updated_at: '2026-07-05T18:01:00.000Z',
+          },
+        ],
+      }),
+    );
+    const env = createEnv({
+      MODEL_BUCKET: {
+        get: vi.fn((key: string) => {
+          const value = storedObjects.get(key);
+          return Promise.resolve(value ? { body: value, httpMetadata: { contentType: 'application/json' } } : null);
+        }),
+        put: vi.fn((key: string, value: ArrayBuffer | ReadableStream | string) => {
+          if (typeof value === 'string' || value instanceof ArrayBuffer) {
+            storedObjects.set(key, value);
+          }
+          return Promise.resolve(undefined);
+        }),
+        delete: vi.fn((key: string) => {
+          storedObjects.delete(key);
+          return Promise.resolve(undefined);
+        }),
+      },
+    });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:20:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const response = await handleGenerateModelRequest(
+      withAuth(
+        new Request('https://worker.example/generate-3d/image-targets/private-target', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_base64: 'bmV3LWltYWdl' }),
+        }),
+        ownerToken,
+      ),
+      env,
+      deps,
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'image_mime_type is required when image_base64 is provided.',
+    });
+    expect(storedObjects.get('image-targets/images/private-target.jpg')).toEqual(new Uint8Array([1, 2, 3]).buffer);
+  });
+
+  it('treats image targets without visibility as private', async () => {
+    const { bucket } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({
+        targets: [
+          {
+            id: 'legacy-private-target',
+            label: 'Legacy private target',
+            image_url: 'https://worker.example/image-targets/images/legacy-private-target.jpg',
+            image_object_key: 'image-targets/images/legacy-private-target.jpg',
+            model: { id: 'm-legacy', label: 'Legacy chair', url: 'https://worker.example/legacy.glb' },
+            placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+            owner_email: 'maker@example.com',
+            created_at: '2026-07-05T18:03:00.000Z',
+            updated_at: '2026-07-05T18:03:00.000Z',
+          },
+        ],
+      }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:10:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const guestResponse = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/image-targets'),
+      env,
+      deps,
+    );
+    const ownerResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/image-targets'), ownerToken),
+      env,
+      deps,
+    );
+
+    expect(await guestResponse.json()).toEqual({ targets: [] });
+    await expect(ownerResponse.json()).resolves.toEqual({
+      targets: [
+        expect.objectContaining({
+          id: 'legacy-private-target',
+          visibility: 'private',
+        }),
+      ],
+    });
   });
 
   it('serves uploaded image target files from R2', async () => {
