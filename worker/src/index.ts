@@ -168,6 +168,48 @@ interface GeneratedModelsIndex {
   models: GeneratedModelEntry[];
 }
 
+type ImageTargetVisibility = ModelVisibility;
+
+type ImageTargetPlacement = {
+  scale: number;
+  offset_x: number;
+  offset_y: number;
+  height: number;
+};
+
+type ImageTargetModel = {
+  id: string;
+  label: string;
+  url: string;
+  preview_url?: string;
+};
+
+type ImageTargetEntry = {
+  id: string;
+  label: string;
+  image_url: string;
+  image_object_key: string;
+  model: ImageTargetModel;
+  placement: ImageTargetPlacement;
+  owner_email?: string;
+  visibility?: ImageTargetVisibility;
+  created_at: string;
+  updated_at: string;
+};
+
+type ImageTargetsIndex = {
+  targets: ImageTargetEntry[];
+};
+
+type ImageTargetRequestBody = {
+  label?: unknown;
+  image_base64?: unknown;
+  image_mime_type?: unknown;
+  model?: unknown;
+  placement?: unknown;
+  visibility?: unknown;
+};
+
 interface ScheduledPollResult {
   completed: number;
   failed: number;
@@ -197,6 +239,11 @@ const generatedModelsIndexKey = 'models/generated/index.json';
 const pendingJobsIndexKey = 'models/generated/jobs/index.json';
 const jobHistoryIndexKey = 'models/generated/jobs/history.json';
 const jobKeyPrefix = 'models/generated/jobs/';
+const imageTargetsIndexKey = 'image-targets/index.json';
+const imageTargetRecordPrefix = 'image-targets/records/';
+const imageTargetImagePrefix = 'image-targets/images/';
+const maxImageTargetBytes = 5 * 1024 * 1024;
+const allowedImageTargetMimeTypes = ['image/png', 'image/jpeg', 'image/webp'] as const;
 const usersIndexKey = 'auth/users/index.json';
 const revokedSessionsIndexKey = 'auth/sessions/revoked.json';
 const auditLogIndexKey = 'security/audit/events.json';
@@ -266,6 +313,10 @@ async function routeGenerateModelRequest(
     return serveGeneratedModel(url.pathname.slice(1), env);
   }
 
+  if (request.method === 'GET' && url.pathname.startsWith('/image-targets/images/')) {
+    return serveImageTarget(url.pathname.slice(1), env);
+  }
+
   if (request.method === 'GET' && url.pathname === '/generate-3d/models') {
     const index = await readGeneratedModelsIndex(env);
     const auth = await readOptionalApprovedUser(request, env, deps);
@@ -281,6 +332,32 @@ async function routeGenerateModelRequest(
       return auth;
     }
     return handleUploadedModelRequest(request, env, deps, url, auth.user);
+  }
+
+  if (request.method === 'GET' && url.pathname === '/generate-3d/image-targets') {
+    const index = await readImageTargetsIndex(env);
+    const auth = await readOptionalApprovedUser(request, env, deps);
+    const visibleTargets = index.targets.filter((target) => isImageTargetVisibleToUser(target, auth?.user ?? null));
+    return jsonResponse({
+      targets: visibleTargets.sort((left, right) => right.created_at.localeCompare(left.created_at)),
+    });
+  }
+
+  if (request.method === 'POST' && url.pathname === '/generate-3d/image-targets') {
+    const auth = await requireApprovedUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    return handleImageTargetCreateRequest(request, env, deps, url, auth.user);
+  }
+
+  if (url.pathname.startsWith('/generate-3d/image-targets/')) {
+    const auth = await requireApprovedUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    const targetId = decodeURIComponent(url.pathname.replace('/generate-3d/image-targets/', ''));
+    return handleImageTargetManagementRequest(request, env, deps, url, targetId, auth.user);
   }
 
   if (url.pathname.startsWith('/generate-3d/models/')) {
@@ -758,6 +835,73 @@ async function handleUploadedModelRequest(
   return jsonResponse(entry, 201);
 }
 
+async function handleImageTargetCreateRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  url: URL,
+  user: StoredUser,
+): Promise<Response> {
+  if (!env.MODEL_BUCKET) {
+    return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
+  }
+
+  const body = await readJsonBody<ImageTargetRequestBody>(request);
+  if (!body.ok) {
+    return jsonResponse({ error: body.error }, 400);
+  }
+
+  const imageMimeType = normalizeImageTargetMimeType(body.value.image_mime_type);
+  if (!imageMimeType) {
+    return jsonResponse({ error: 'image_mime_type must be image/png, image/jpeg, or image/webp.' }, 400);
+  }
+
+  if (typeof body.value.image_base64 !== 'string' || body.value.image_base64.length === 0) {
+    return jsonResponse({ error: 'image_base64 is required.' }, 400);
+  }
+
+  const model = normalizeImageTargetModel(body.value.model);
+  if (!model) {
+    return jsonResponse({ error: 'model with id, label, and url is required.' }, 400);
+  }
+
+  const now = deps.now();
+  const label = normalizeModelLabel(body.value.label) ?? 'Image target';
+  const id = `target-${formatTimestamp(now)}-${slugifyModelLabel(label)}`;
+  const extension = imageTargetExtension(imageMimeType);
+  const objectKey = `${imageTargetImagePrefix}${id}.${extension}`;
+  const imageBytes = base64ToArrayBuffer(stripDataUrlPrefix(body.value.image_base64));
+  if (imageBytes.byteLength > maxImageTargetBytes) {
+    return jsonResponse({ error: 'Image target uploads must be 5 MB or smaller.' }, 400);
+  }
+
+  const entry: ImageTargetEntry = {
+    id,
+    label,
+    image_url: `${getPublicOrigin(env, url.origin)}/${objectKey}`,
+    image_object_key: objectKey,
+    model,
+    placement: normalizeImageTargetPlacement(body.value.placement),
+    owner_email: user.email,
+    visibility: 'private',
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+  };
+
+  await env.MODEL_BUCKET.put(objectKey, imageBytes, {
+    httpMetadata: { contentType: imageMimeType },
+  });
+  await upsertImageTargetEntry(env, entry);
+  await appendAuditEvent(env, deps, {
+    actor: user.email,
+    action: 'image-target.create',
+    target: id,
+    status: 'ok',
+  });
+
+  return jsonResponse(entry, 201);
+}
+
 async function handleGeneratedModelManagementRequest(
   request: Request,
   env: WorkerEnv,
@@ -829,6 +973,130 @@ async function handleGeneratedModelManagementRequest(
   }
 
   return jsonResponse({ error: 'Only PATCH and DELETE requests are supported for generated models.' }, 405);
+}
+
+async function handleImageTargetManagementRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  url: URL,
+  targetId: string,
+  user: StoredUser,
+): Promise<Response> {
+  if (!targetId) {
+    return jsonResponse({ error: 'target_id is required.' }, 400);
+  }
+  if (!env.MODEL_BUCKET) {
+    return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
+  }
+
+  if (request.method === 'PATCH') {
+    return updateImageTarget(request, env, deps, url, targetId, user);
+  }
+
+  if (request.method === 'DELETE') {
+    return deleteImageTarget(env, deps, targetId, user);
+  }
+
+  return jsonResponse({ error: 'Only PATCH and DELETE requests are supported for image targets.' }, 405);
+}
+
+async function updateImageTarget(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  url: URL,
+  targetId: string,
+  user: StoredUser,
+): Promise<Response> {
+  const body = await readJsonBody<ImageTargetRequestBody>(request);
+  if (!body.ok) {
+    return jsonResponse({ error: body.error }, 400);
+  }
+
+  const index = await readImageTargetsIndex(env);
+  const targetIndex = index.targets.findIndex((target) => target.id === targetId);
+  if (targetIndex === -1) {
+    return jsonResponse({ error: 'Image target not found.' }, 404);
+  }
+
+  const existingTarget = index.targets[targetIndex];
+  if (!canManageImageTarget(existingTarget, user)) {
+    return jsonResponse({ error: 'Only the owner or an admin can manage this image target.' }, 403);
+  }
+
+  const now = deps.now();
+  const nextTarget: ImageTargetEntry = {
+    ...existingTarget,
+    label: normalizeModelLabel(body.value.label) ?? existingTarget.label,
+    model: normalizeImageTargetModel(body.value.model) ?? existingTarget.model,
+    placement: normalizeImageTargetPlacement(body.value.placement, existingTarget.placement),
+    visibility: normalizeModelVisibility(body.value.visibility) ?? existingTarget.visibility,
+    updated_at: now.toISOString(),
+  };
+
+  const imageMimeType = normalizeImageTargetMimeType(body.value.image_mime_type);
+  if (body.value.image_mime_type !== undefined && !imageMimeType) {
+    return jsonResponse({ error: 'image_mime_type must be image/png, image/jpeg, or image/webp.' }, 400);
+  }
+  if (typeof body.value.image_base64 === 'string' && body.value.image_base64.length > 0) {
+    const mimeType = imageMimeType ?? 'image/png';
+    const imageBytes = base64ToArrayBuffer(stripDataUrlPrefix(body.value.image_base64));
+    if (imageBytes.byteLength > maxImageTargetBytes) {
+      return jsonResponse({ error: 'Image target uploads must be 5 MB or smaller.' }, 400);
+    }
+    const objectKey = `${imageTargetImagePrefix}${targetId}.${imageTargetExtension(mimeType)}`;
+    if (objectKey !== existingTarget.image_object_key) {
+      await env.MODEL_BUCKET.delete?.(existingTarget.image_object_key);
+    }
+    await env.MODEL_BUCKET.put(objectKey, imageBytes, {
+      httpMetadata: { contentType: mimeType },
+    });
+    nextTarget.image_object_key = objectKey;
+    nextTarget.image_url = `${getPublicOrigin(env, url.origin)}/${objectKey}`;
+  }
+
+  index.targets[targetIndex] = nextTarget;
+  await writeImageTargetsIndex(env, index);
+  await writeJsonObject(env, imageTargetRecordKey(targetId), nextTarget);
+  await appendAuditEvent(env, deps, {
+    actor: user.email,
+    action: 'image-target.update',
+    target: targetId,
+    status: 'ok',
+  });
+
+  return jsonResponse(nextTarget);
+}
+
+async function deleteImageTarget(
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  targetId: string,
+  user: StoredUser,
+): Promise<Response> {
+  const index = await readImageTargetsIndex(env);
+  const target = index.targets.find((entry) => entry.id === targetId);
+  if (!target) {
+    return jsonResponse({ error: 'Image target not found.' }, 404);
+  }
+  if (!canManageImageTarget(target, user)) {
+    return jsonResponse({ error: 'Only the owner or an admin can manage this image target.' }, 403);
+  }
+
+  await writeImageTargetsIndex(env, {
+    targets: index.targets.filter((entry) => entry.id !== targetId),
+  });
+  await env.MODEL_BUCKET.delete?.(target.image_object_key);
+  await env.MODEL_BUCKET.delete?.(imageTargetRecordKey(targetId));
+  await appendAuditEvent(env, deps, {
+    actor: user.email,
+    action: 'image-target.delete',
+    target: targetId,
+    status: 'ok',
+  });
+
+  return jsonResponse({ deleted: true, id: targetId });
 }
 
 async function updateGeneratedModel(
@@ -1245,6 +1513,73 @@ function normalizeModelVisibility(value: unknown): ModelVisibility | null {
   return value === 'public' || value === 'private' ? value : null;
 }
 
+function normalizeImageTargetMimeType(value: unknown): 'image/png' | 'image/jpeg' | 'image/webp' | null {
+  return typeof value === 'string' && allowedImageTargetMimeTypes.includes(value as 'image/png' | 'image/jpeg' | 'image/webp')
+    ? (value as 'image/png' | 'image/jpeg' | 'image/webp')
+    : null;
+}
+
+function imageTargetExtension(mimeType: 'image/png' | 'image/jpeg' | 'image/webp'): string {
+  if (mimeType === 'image/png') {
+    return 'png';
+  }
+  if (mimeType === 'image/webp') {
+    return 'webp';
+  }
+  return 'jpg';
+}
+
+function normalizeImageTargetModel(value: unknown): ImageTargetModel | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.id !== 'string' || !candidate.id.trim()) {
+    return null;
+  }
+  if (typeof candidate.label !== 'string' || !candidate.label.trim()) {
+    return null;
+  }
+  if (typeof candidate.url !== 'string' || !candidate.url.trim()) {
+    return null;
+  }
+  return {
+    id: candidate.id.trim(),
+    label: candidate.label.trim(),
+    url: candidate.url.trim(),
+    ...(typeof candidate.preview_url === 'string' && candidate.preview_url.trim()
+      ? { preview_url: candidate.preview_url.trim() }
+      : {}),
+  };
+}
+
+function normalizeImageTargetPlacement(
+  value: unknown,
+  fallback: ImageTargetPlacement = defaultImageTargetPlacement(),
+): ImageTargetPlacement {
+  if (!value || typeof value !== 'object') {
+    return fallback;
+  }
+  const candidate = value as Record<string, unknown>;
+  return {
+    scale: normalizeFinitePlacementNumber(candidate.scale, fallback.scale, 0.1, 5),
+    offset_x: normalizeFinitePlacementNumber(candidate.offset_x, fallback.offset_x, -1, 1),
+    offset_y: normalizeFinitePlacementNumber(candidate.offset_y, fallback.offset_y, -1, 1),
+    height: normalizeFinitePlacementNumber(candidate.height, fallback.height, 0, 1),
+  };
+}
+
+function defaultImageTargetPlacement(): ImageTargetPlacement {
+  return { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 };
+}
+
+function normalizeFinitePlacementNumber(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, value));
+}
+
 function normalizeEmail(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -1373,6 +1708,23 @@ function canManageGeneratedModel(model: GeneratedModelEntry, user: StoredUser): 
   return Boolean(model.owner_email && model.owner_email === user.email);
 }
 
+function isImageTargetVisibleToUser(target: ImageTargetEntry, user: StoredUser | null): boolean {
+  if (user?.role === 'admin') {
+    return true;
+  }
+  if ((target.visibility ?? 'public') === 'public') {
+    return true;
+  }
+  return Boolean(user && target.owner_email === user.email);
+}
+
+function canManageImageTarget(target: ImageTargetEntry, user: StoredUser): boolean {
+  if (user.role === 'admin') {
+    return true;
+  }
+  return Boolean(target.owner_email && target.owner_email === user.email);
+}
+
 function readBearerToken(request: Request): string | null {
   const header = request.headers.get('Authorization') ?? '';
   const match = /^Bearer\s+(.+)$/i.exec(header);
@@ -1404,6 +1756,28 @@ async function serveGeneratedModel(objectKey: string, env: WorkerEnv): Promise<R
     headers: {
       ...corsHeaders,
       'Content-Type': object.httpMetadata?.contentType ?? 'model/gltf-binary',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    },
+  });
+}
+
+async function serveImageTarget(objectKey: string, env: WorkerEnv): Promise<Response> {
+  if (!env.MODEL_BUCKET) {
+    return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
+  }
+  if (!objectKey.startsWith(imageTargetImagePrefix)) {
+    return jsonResponse({ error: 'Image target not found.' }, 404);
+  }
+
+  const object = await env.MODEL_BUCKET.get(objectKey);
+  if (!object?.body) {
+    return jsonResponse({ error: 'Image target not found.' }, 404);
+  }
+
+  return new Response(object.body, {
+    headers: {
+      ...corsHeaders,
+      'Content-Type': object.httpMetadata?.contentType ?? 'image/jpeg',
       'Cache-Control': 'public, max-age=31536000, immutable',
     },
   });
@@ -1457,6 +1831,30 @@ async function readKnownJobs(env: WorkerEnv): Promise<StoredJob[]> {
 
 async function readGeneratedModelsIndex(env: WorkerEnv): Promise<GeneratedModelsIndex> {
   return readJsonObject<GeneratedModelsIndex>(env, generatedModelsIndexKey, { models: [] });
+}
+
+async function readImageTargetsIndex(env: WorkerEnv): Promise<ImageTargetsIndex> {
+  return readJsonObject<ImageTargetsIndex>(env, imageTargetsIndexKey, { targets: [] });
+}
+
+async function writeImageTargetsIndex(env: WorkerEnv, index: ImageTargetsIndex): Promise<void> {
+  await writeJsonObject(env, imageTargetsIndexKey, index);
+}
+
+async function upsertImageTargetEntry(env: WorkerEnv, entry: ImageTargetEntry): Promise<void> {
+  const index = await readImageTargetsIndex(env);
+  const existingIndex = index.targets.findIndex((target) => target.id === entry.id);
+  if (existingIndex >= 0) {
+    index.targets[existingIndex] = entry;
+  } else {
+    index.targets.push(entry);
+  }
+  await writeImageTargetsIndex(env, index);
+  await writeJsonObject(env, imageTargetRecordKey(entry.id), entry);
+}
+
+function imageTargetRecordKey(targetId: string): string {
+  return `${imageTargetRecordPrefix}${safeObjectKeyPart(targetId)}.json`;
 }
 
 async function readUsersIndex(env: WorkerEnv): Promise<UsersIndex> {
