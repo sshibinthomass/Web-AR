@@ -20,8 +20,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onEdit: vi.fn(),
     onReset: vi.fn(),
     onResetScale: vi.fn(),
-    onRotateLeft: vi.fn(),
-    onRotateRight: vi.fn(),
+    onRotate: vi.fn(),
     onModelSelect: vi.fn(),
     onStartCamera: vi.fn(),
     onCaptureImage: vi.fn(),
@@ -275,12 +274,11 @@ describe('ARHud', () => {
     expect(actionButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Place',
       'Scale 1x',
-      'Rotate Left',
-      'Rotate Right',
       'Reset',
     ]);
-    expect(actionButtons.every((button) => button.classList.contains('hud-action-icon'))).toBe(true);
-    expect(actionButtons.every((button) => button.querySelector('svg'))).toBe(true);
+    expect(actionButtons.every((button) => button.classList.contains('hud-action-chip'))).toBe(true);
+    expect(actionButtons.every((button) => button.querySelector('svg') === null)).toBe(true);
+    expect(root.querySelector<HTMLInputElement>('.rotate-control input[type="range"]')).toBeInstanceOf(HTMLInputElement);
   });
 
   it('opens Full Flow from the first screen as a capture page', () => {
@@ -337,8 +335,8 @@ describe('ARHud', () => {
     hud.updateAuthState(activeUser);
 
     hud.showMultiObjectEditor();
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Add Object')?.click();
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Delete Object')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Add Object')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Delete Object')?.click();
 
     expect(root.querySelector('.status-panel')?.classList.contains('layout-active')).toBe(true);
     expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
@@ -347,14 +345,13 @@ describe('ARHud', () => {
     expect(actionButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Place',
       'Scale 1x',
-      'Rotate Left',
-      'Rotate Right',
       'Reset',
       'Add Object',
       'Delete Object',
     ]);
-    expect(actionButtons.every((button) => button.classList.contains('hud-action-icon'))).toBe(true);
-    expect(actionButtons.every((button) => button.querySelector('svg'))).toBe(true);
+    expect(actionButtons.every((button) => button.classList.contains('hud-action-chip'))).toBe(true);
+    expect(actionButtons.every((button) => button.querySelector('svg') === null)).toBe(true);
+    expect(root.querySelector<HTMLInputElement>('.rotate-control input[type="range"]')).toBeInstanceOf(HTMLInputElement);
     expect(root.textContent).toContain('Place multiple objects in this session.');
     expect(onAddLayoutObject).toHaveBeenCalledTimes(1);
     expect(onDeleteLayoutObject).toHaveBeenCalledTimes(1);
@@ -1016,11 +1013,10 @@ describe('ARHud', () => {
     expect(hud.overlay.contains(hud.gestureSurface)).toBe(true);
   });
 
-  it('provides rotate buttons for the selected AR object', () => {
+  it('provides a scrollable rotation slider for the selected AR object', () => {
     const root = document.createElement('div');
-    const onRotateLeft = vi.fn();
-    const onRotateRight = vi.fn();
-    const hud = new ARHud(root, modelOptions, createHandlers({ onRotateLeft, onRotateRight }));
+    const onRotate = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onRotate }));
     hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
@@ -1028,30 +1024,25 @@ describe('ARHud', () => {
     hud.updateModelReady(true);
     root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
 
-    const rotateLeftButton = [...root.querySelectorAll<HTMLButtonElement>('.hud-actions > button')].find(
-      (button) => button.getAttribute('aria-label') === 'Rotate Left',
-    );
-    const rotateRightButton = [...root.querySelectorAll<HTMLButtonElement>('.hud-actions > button')].find(
-      (button) => button.getAttribute('aria-label') === 'Rotate Right',
-    );
-
-    expect(rotateLeftButton).toBeInstanceOf(HTMLButtonElement);
-    expect(rotateRightButton).toBeInstanceOf(HTMLButtonElement);
-    expect(rotateLeftButton?.classList.contains('hud-action-icon')).toBe(true);
-    expect(rotateRightButton?.classList.contains('hud-action-icon')).toBe(true);
-    expect(rotateLeftButton?.querySelector('svg')).toBeInstanceOf(SVGSVGElement);
-    expect(rotateRightButton?.querySelector('svg')).toBeInstanceOf(SVGSVGElement);
-    expect(rotateLeftButton?.disabled).toBe(true);
-    expect(rotateRightButton?.disabled).toBe(true);
+    const rotateSlider = root.querySelector<HTMLInputElement>('.rotate-control input[type="range"]');
+    expect(rotateSlider).toBeInstanceOf(HTMLInputElement);
+    expect(rotateSlider?.getAttribute('aria-label')).toBe('Rotate selected object');
+    expect(rotateSlider?.disabled).toBe(true);
+    expect(root.textContent).not.toContain('Rotate Left');
+    expect(root.textContent).not.toContain('Rotate Right');
 
     hud.update('placed');
-    rotateLeftButton?.click();
-    rotateRightButton?.click();
+    rotateSlider!.value = '30';
+    rotateSlider!.dispatchEvent(new Event('input', { bubbles: true }));
+    rotateSlider!.value = '45';
+    rotateSlider!.dispatchEvent(new Event('input', { bubbles: true }));
+    rotateSlider!.dispatchEvent(new Event('change', { bubbles: true }));
 
-    expect(rotateLeftButton?.disabled).toBe(false);
-    expect(rotateRightButton?.disabled).toBe(false);
-    expect(onRotateLeft).toHaveBeenCalledTimes(1);
-    expect(onRotateRight).toHaveBeenCalledTimes(1);
+    expect(rotateSlider?.disabled).toBe(false);
+    expect(onRotate).toHaveBeenCalledTimes(2);
+    expect(onRotate.mock.calls[0][0]).toBeCloseTo(Math.PI / 6);
+    expect(onRotate.mock.calls[1][0]).toBeCloseTo(Math.PI / 12);
+    expect(rotateSlider?.value).toBe('0');
   });
 
   it('shows the current model source in the HUD', () => {

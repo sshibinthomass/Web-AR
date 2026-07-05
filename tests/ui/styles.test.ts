@@ -13,20 +13,19 @@ function cssRule(selector: string): string {
 
 describe('AR overlay styles', () => {
   it('keeps the model rail close above the bottom AR controls', () => {
-    expect(styles).toContain('bottom: calc(max(18px, env(safe-area-inset-bottom)) + 72px);');
-    expect(styles).not.toContain('+ 112px');
-    expect(styles).not.toContain('+ 116px');
+    expect(styles).toContain('bottom: calc(max(18px, env(safe-area-inset-bottom)) + 118px);');
   });
 
-  it('keeps AR action buttons compact enough for a phone-width icon tray', () => {
+  it('keeps AR action controls compact with a scrollable rotation slider', () => {
     const hudActionsRule = cssRule('.hud-actions');
-    const iconRule = cssRule('.hud-actions button.hud-action-icon');
+    const chipRule = cssRule('.hud-actions button.hud-action-chip');
+    const rotateRule = cssRule('.rotate-control');
 
     expect(hudActionsRule).toContain('gap: 6px;');
-    expect(iconRule).toContain('flex: 0 0 44px;');
-    expect(iconRule).toContain('width: 44px;');
-    expect(iconRule).toContain('min-height: 44px;');
-    expect(iconRule).toContain('padding: 0;');
+    expect(chipRule).toContain('min-height: 44px;');
+    expect(chipRule).toContain('padding: 0 12px;');
+    expect(rotateRule).toContain('flex: 1 0 100%;');
+    expect(rotateRule).toContain('grid-template-columns: auto minmax(0, 1fr);');
   });
 
   it('keeps the AR model search controls in the page flow above model cards', () => {

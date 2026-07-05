@@ -426,20 +426,47 @@ canvas {
   backdrop-filter: blur(14px);
 }
 
-.hud-actions button.hud-action-icon {
-  display: grid;
-  flex: 0 0 44px;
-  place-items: center;
-  width: 44px;
+.hud-actions button.hud-action-chip {
+  flex: 0 0 auto;
   min-width: 44px;
   min-height: 44px;
-  padding: 0;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 850;
   touch-action: manipulation;
 }
 
-.hud-actions button.hud-action-icon svg {
-  width: 22px;
-  height: 22px;
+.rotate-control {
+  order: -1;
+  flex: 1 0 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  max-width: min(360px, 100%);
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #f8fafc;
+  background: rgba(5, 10, 14, 0.78);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(14px);
+}
+
+.rotate-control span {
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.rotate-control input {
+  width: 100%;
+  min-width: 0;
+  accent-color: #5eead4;
+}
+
+.rotate-control input:disabled {
+  opacity: 0.48;
 }
 
 .hud-actions button:disabled {
@@ -490,7 +517,7 @@ canvas {
 .model-rail {
   position: fixed;
   right: 0;
-  bottom: calc(max(18px, env(safe-area-inset-bottom)) + 72px);
+  bottom: calc(max(18px, env(safe-area-inset-bottom)) + 118px);
   left: 0;
   z-index: 4;
   display: flex;
@@ -2276,7 +2303,7 @@ canvas {
   }
 
   .model-rail {
-    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 72px);
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 118px);
     padding-inline: 12px;
   }
 

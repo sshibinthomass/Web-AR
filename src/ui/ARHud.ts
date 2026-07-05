@@ -8,8 +8,7 @@ interface HUDHandlers {
   onEdit(): void;
   onReset(): void;
   onResetScale(): void;
-  onRotateLeft(): void;
-  onRotateRight(): void;
+  onRotate(deltaRadians: number): void;
   onModelSelect(modelId: string): void;
   onStartCamera(): void;
   onCaptureImage(): void;
@@ -48,7 +47,6 @@ type HudRoute = 'home' | 'camera' | 'upload' | 'upload-model' | 'ar' | 'full-flo
 type ModelLibraryFilter = 'all' | 'generated' | 'uploaded' | 'favorites' | 'recent';
 type AuthFormMode = 'login' | 'signup';
 type ModelActionIcon = 'preview' | 'favorite' | 'favorite-filled' | 'visibility-public' | 'visibility-private' | 'edit' | 'delete';
-type HudActionIcon = 'place' | 'scale' | 'rotate-left' | 'rotate-right' | 'reset' | 'add' | 'delete';
 
 export class ARHud {
   readonly overlay: HTMLElement;
@@ -117,8 +115,8 @@ export class ARHud {
   private readonly placeButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
   private readonly resetScaleButton: HTMLButtonElement;
-  private readonly rotateLeftButton: HTMLButtonElement;
-  private readonly rotateRightButton: HTMLButtonElement;
+  private readonly rotateControl: HTMLLabelElement;
+  private rotateInput!: HTMLInputElement;
   private readonly addLayoutObjectButton: HTMLButtonElement;
   private readonly deleteLayoutObjectButton: HTMLButtonElement;
   private readonly captureButton: HTMLButtonElement;
@@ -134,6 +132,7 @@ export class ARHud {
   private modelFilter: ModelLibraryFilter = 'all';
   private favoriteModelIds = new Set<string>();
   private recentModelIds: string[] = [];
+  private rotationInputValue = 0;
   private arPlacementStarted = false;
   private modelReady = false;
   private activeRoute: HudRoute | null = null;
@@ -545,21 +544,19 @@ export class ARHud {
     this.arButtonSlot.setAttribute('aria-hidden', 'true');
     this.hudActions.appendChild(this.arButtonSlot);
 
-    this.placeButton = this.createHudActionButton('Place', 'place', 'primary', this.handlers.onPlace);
-    this.resetScaleButton = this.createHudActionButton('Scale 1x', 'scale', '', this.handlers.onResetScale);
-    this.rotateLeftButton = this.createHudActionButton('Rotate Left', 'rotate-left', '', this.handlers.onRotateLeft);
-    this.rotateRightButton = this.createHudActionButton('Rotate Right', 'rotate-right', '', this.handlers.onRotateRight);
-    this.resetButton = this.createHudActionButton('Reset', 'reset', '', this.handlers.onReset);
-    this.addLayoutObjectButton = this.createHudActionButton('Add Object', 'add', '', this.handlers.onAddLayoutObject);
-    this.deleteLayoutObjectButton = this.createHudActionButton('Delete Object', 'delete', 'danger', this.handlers.onDeleteLayoutObject);
+    this.rotateControl = this.createRotateControl();
+    this.placeButton = this.createHudActionButton('Place', 'Place', 'primary', this.handlers.onPlace);
+    this.resetScaleButton = this.createHudActionButton('Scale 1x', '1x', '', this.handlers.onResetScale);
+    this.resetButton = this.createHudActionButton('Reset', 'Reset', '', this.handlers.onReset);
+    this.addLayoutObjectButton = this.createHudActionButton('Add Object', 'Add', '', this.handlers.onAddLayoutObject);
+    this.deleteLayoutObjectButton = this.createHudActionButton('Delete Object', 'Delete', 'danger', this.handlers.onDeleteLayoutObject);
     this.addLayoutObjectButton.classList.add('layout-action', 'hidden');
     this.deleteLayoutObjectButton.classList.add('layout-action', 'hidden');
 
     this.hudActions.append(
+      this.rotateControl,
       this.placeButton,
       this.resetScaleButton,
-      this.rotateLeftButton,
-      this.rotateRightButton,
       this.resetButton,
     );
     this.renderModelRail();
@@ -646,8 +643,10 @@ export class ARHud {
     this.statusPanel.classList.toggle('object-placed', hasPlacedObject);
     this.placeButton.disabled = !this.modelReady || (mode !== 'scanning' && mode !== 'readyToPlace');
     this.resetScaleButton.disabled = !hasPlacedObject;
-    this.rotateLeftButton.disabled = !hasPlacedObject;
-    this.rotateRightButton.disabled = !hasPlacedObject;
+    this.rotateInput.disabled = !hasPlacedObject;
+    if (!hasPlacedObject) {
+      this.resetRotationInput();
+    }
     this.resetButton.disabled = !hasPlacedObject;
   }
 
@@ -2276,20 +2275,57 @@ export class ARHud {
 
   private createHudActionButton(
     label: string,
-    icon: HudActionIcon,
+    visibleLabel: string,
     className: string,
     onClick: () => void,
   ): HTMLButtonElement {
-    const button = this.createButton('', ['hud-action-icon', className].filter(Boolean).join(' '), onClick);
+    const button = this.createButton(visibleLabel, ['hud-action-chip', className].filter(Boolean).join(' '), onClick);
     button.setAttribute('aria-label', label);
     button.title = label;
-    button.append(this.createHudIconSvg(icon));
-
-    const text = document.createElement('span');
-    text.className = 'sr-only';
-    text.textContent = label;
-    button.appendChild(text);
     return button;
+  }
+
+  private createRotateControl(): HTMLLabelElement {
+    const control = document.createElement('label');
+    control.className = 'rotate-control';
+
+    const label = document.createElement('span');
+    label.textContent = 'Rotate';
+
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = '-180';
+    input.max = '180';
+    input.step = '1';
+    input.value = '0';
+    input.setAttribute('aria-label', 'Rotate selected object');
+    input.addEventListener('input', () => this.handleRotationInput());
+    input.addEventListener('change', () => this.resetRotationInput());
+    input.addEventListener('pointerup', () => this.resetRotationInput());
+    input.addEventListener('touchend', () => this.resetRotationInput());
+    input.disabled = true;
+
+    this.rotateInput = input;
+    control.append(label, input);
+    return control;
+  }
+
+  private handleRotationInput(): void {
+    const nextValue = Number(this.rotateInput.value);
+    if (!Number.isFinite(nextValue)) {
+      return;
+    }
+
+    const deltaDegrees = nextValue - this.rotationInputValue;
+    this.rotationInputValue = nextValue;
+    if (deltaDegrees !== 0) {
+      this.handlers.onRotate(deltaDegrees * (Math.PI / 180));
+    }
+  }
+
+  private resetRotationInput(): void {
+    this.rotationInputValue = 0;
+    this.rotateInput.value = '0';
   }
 
   private createModelActionButton(
@@ -2309,36 +2345,6 @@ export class ARHud {
     text.textContent = label;
     button.appendChild(text);
     return button;
-  }
-
-  private createHudIconSvg(icon: HudActionIcon): SVGSVGElement {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('focusable', 'false');
-
-    const paths: Record<HudActionIcon, string[]> = {
-      place: ['M12 21s6-5.2 6-10a6 6 0 1 0-12 0c0 4.8 6 10 6 10Z', 'M9.8 11a2.2 2.2 0 1 0 4.4 0 2.2 2.2 0 0 0-4.4 0Z'],
-      scale: ['M4 9V4h5', 'M4 4l6 6', 'M20 15v5h-5', 'M20 20l-6-6'],
-      'rotate-left': ['M8 7H4V3', 'M4 7a8 8 0 1 1-1 7.8', 'M4 7l3.1 3'],
-      'rotate-right': ['M16 7h4V3', 'M20 7a8 8 0 1 0 1 7.8', 'M20 7l-3.1 3'],
-      reset: ['M4 4v6h6', 'M4.8 14.5a7.2 7.2 0 1 0 1.8-7.3L4 10'],
-      add: ['M12 5v14', 'M5 12h14'],
-      delete: ['M4 7h16', 'M9 7V5h6v2', 'M6 7l1 13h10l1-13', 'M10 11v5', 'M14 11v5'],
-    };
-
-    paths[icon].forEach((pathData) => {
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', pathData);
-      path.setAttribute('fill', 'none');
-      path.setAttribute('stroke', 'currentColor');
-      path.setAttribute('stroke-width', '1.9');
-      path.setAttribute('stroke-linecap', 'round');
-      path.setAttribute('stroke-linejoin', 'round');
-      svg.appendChild(path);
-    });
-
-    return svg;
   }
 
   private createIconSvg(icon: ModelActionIcon): SVGSVGElement {
