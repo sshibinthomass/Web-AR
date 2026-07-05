@@ -1041,7 +1041,7 @@ async function updateImageTarget(
     return jsonResponse({ error: 'image_mime_type must be image/png, image/jpeg, or image/webp.' }, 400);
   }
   if (typeof body.value.image_base64 === 'string' && body.value.image_base64.length > 0) {
-    if (body.value.image_mime_type === undefined) {
+    if (!imageMimeType) {
       return jsonResponse({ error: 'image_mime_type is required when image_base64 is provided.' }, 400);
     }
     const mimeType = imageMimeType;
