@@ -212,6 +212,20 @@ export class LayoutSceneManager {
     return true;
   }
 
+  resetSelectedTransform(): boolean {
+    const object = this.selectedObject();
+    if (!object || !object.placed) {
+      return false;
+    }
+
+    object.group.rotation.set(0, 0, 0);
+    object.group.scale.setScalar(object.initialScale || 1);
+    if (object.floorY !== null) {
+      object.group.position.y = object.floorY;
+    }
+    return true;
+  }
+
   placeSelectedAt(matrix: THREE.Matrix4): boolean {
     const object = this.selectedObject();
     if (!object) {

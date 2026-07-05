@@ -154,6 +154,59 @@ describe('LayoutSceneManager', () => {
     ]);
   });
 
+  it('resets the selected object transform without changing other placed objects', () => {
+    const root = new THREE.Group();
+    const manager = new LayoutSceneManager(root);
+    const first = manager.addObject({
+      modelId: 'generated-chair',
+      modelLabel: 'Chair',
+      modelUrl: 'https://assets.example/chair.glb',
+      model: createModel('chair-model'),
+    });
+    manager.placePendingAt(placementMatrix(1, 0.2, -1));
+    const second = manager.addObject({
+      modelId: 'generated-table',
+      modelLabel: 'Table',
+      modelUrl: 'https://assets.example/table.glb',
+      model: createModel('table-model'),
+    });
+    manager.placePendingAt(placementMatrix(2, 0.4, -2));
+
+    manager.selectObject(first.id);
+    manager.moveSelectedToFloorPoint(new THREE.Vector3(4, 9, -4));
+    manager.scaleSelectedBy(2);
+    manager.rotateSelectedBy(0.75);
+
+    expect(manager.resetSelectedTransform()).toBe(true);
+
+    expect(manager.exportObjects()).toEqual([
+      expect.objectContaining({
+        id: first.id,
+        transform: expect.objectContaining({
+          position: { x: 4, y: 0.2, z: -4 },
+          rotation: expect.objectContaining({
+            x: expect.closeTo(0, 5),
+            y: expect.closeTo(0, 5),
+            z: expect.closeTo(0, 5),
+          }),
+          scale: { x: 1, y: 1, z: 1 },
+        }),
+      }),
+      expect.objectContaining({
+        id: second.id,
+        transform: expect.objectContaining({
+          position: { x: 2, y: 0.4, z: -2 },
+          rotation: expect.objectContaining({
+            x: expect.closeTo(0, 5),
+            y: expect.closeTo(0.5, 5),
+            z: expect.closeTo(0, 5),
+          }),
+          scale: { x: 1, y: 1, z: 1 },
+        }),
+      }),
+    ]);
+  });
+
   it('imports and exports session transforms', () => {
     const root = new THREE.Group();
     const manager = new LayoutSceneManager(root);

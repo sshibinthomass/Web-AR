@@ -1218,6 +1218,8 @@ export class WebARApp {
       const latestMatrix = this.hitTestManager?.latestPoseMatrix;
       if (latestMatrix) {
         this.requireLayoutSceneManager().placeSelectedAt(latestMatrix);
+      } else {
+        this.requireLayoutSceneManager().resetSelectedTransform();
       }
       this.appState.setMode('placed');
       this.hud?.update(this.appState.mode);
