@@ -96,14 +96,26 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Available as guest');
     expect(root.textContent).toContain('Login required');
     expect(root.querySelector('.landing-preview')).not.toBeNull();
-    expect(choiceButtons).toEqual(['AR View', 'Models', 'Camera', 'Upload Image', 'Upload Model', 'Full Flow', 'Multi Object']);
+    expect(choiceButtons).toEqual(['AR View', 'Models', 'Multi Object', 'Camera', 'Upload Image', 'Upload Model', 'Full Flow']);
+    const modeGroups = [...root.querySelectorAll('.mode-group')];
+    expect([...modeGroups[0].querySelectorAll('button')].map((button) => button.textContent)).toEqual([
+      'AR View',
+      'Models',
+      'Multi Object',
+    ]);
+    expect([...modeGroups[1].querySelectorAll('button')].map((button) => button.textContent)).toEqual([
+      'Camera',
+      'Upload Image',
+      'Upload Model',
+      'Full Flow',
+    ]);
     expect(statusPanel?.classList.contains('hidden')).toBe(true);
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
     expect(hudActions?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(true);
   });
 
-  it('prompts guests to sign in for protected actions while leaving AR View and Models public', () => {
+  it('prompts guests to sign in for protected actions while leaving AR View, Models, and Multi Object public', () => {
     const root = document.createElement('div');
     const onStartCamera = vi.fn();
     new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
@@ -116,8 +128,8 @@ describe('ARHud', () => {
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Multi Object')?.click();
 
-    expect(window.location.hash).toBe('#/login');
-    expect(root.textContent).toContain('Sign in to place multiple objects.');
+    expect(window.location.hash).toBe('#/multi-object');
+    expect(root.querySelector('.layout-manager')?.classList.contains('hidden')).toBe(false);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
 
@@ -296,7 +308,7 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Capture');
   });
 
-  it('opens Multi Object as a fresh AR placement session without saved layouts', () => {
+  it('opens Multi Object for guests as a fresh AR placement session without saved layouts', () => {
     const root = document.createElement('div');
     const onStartMultiObject = vi.fn();
     const hud = new ARHud(root, modelOptions, createHandlers({ onStartMultiObject }));
@@ -305,7 +317,6 @@ describe('ARHud', () => {
     arButton.textContent = 'Start AR';
     arButton.addEventListener('click', startArCamera);
     hud.attachARButton(arButton);
-    hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Multi Object')?.click();
 

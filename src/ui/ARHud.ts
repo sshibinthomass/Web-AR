@@ -197,10 +197,11 @@ export class ARHud {
     modePicker.append(
       this.createModeGroup(
         'Available as guest',
-        'View saved 3D models or place them in AR without signing in.',
+        'View saved 3D models or place one or more objects in AR without signing in.',
         [
           this.createModeAction(this.createButton('AR View', 'primary', () => this.navigateTo('ar')), 'AR'),
           this.createModeAction(this.createButton('Models', '', () => this.navigateTo('models')), '3D'),
+          this.createModeAction(this.createButton('Multi Object', '', () => this.navigateTo('multi-object')), '3D'),
         ],
       ),
       this.createModeGroup(
@@ -211,7 +212,6 @@ export class ARHud {
           this.createModeAction(this.createButton('Upload Image', '', () => this.navigateTo('upload')), 'IMG'),
           this.createModeAction(this.createButton('Upload Model', '', () => this.navigateTo('upload-model')), 'GLB'),
           this.createModeAction(this.createButton('Full Flow', '', () => this.navigateTo('full-flow')), 'AI'),
-          this.createModeAction(this.createButton('Multi Object', '', () => this.navigateTo('multi-object')), '3D'),
         ],
       ),
     );
@@ -938,7 +938,7 @@ export class ARHud {
   }
 
   private routeRequiresAuth(route: HudRoute): boolean {
-    return route === 'camera' || route === 'upload' || route === 'upload-model' || route === 'full-flow' || route === 'multi-object';
+    return route === 'camera' || route === 'upload' || route === 'upload-model' || route === 'full-flow';
   }
 
   private isLoggedIn(): boolean {
@@ -971,8 +971,6 @@ export class ARHud {
         return 'Sign in to use Upload Model.';
       case 'full-flow':
         return 'Sign in to use Full Flow.';
-      case 'multi-object':
-        return 'Sign in to place multiple objects.';
       default:
         return 'Sign in with an approved account.';
     }
@@ -2414,9 +2412,9 @@ export class ARHud {
       case 'readyToPlace':
         return 'Tap Place, tap the screen, or press the AR select action to put the model on the floor.';
       case 'placed':
-        return 'Object placed. Drag with one finger, pinch to scale, twist with two fingers to rotate.';
+        return 'Object placed. Drag with one finger to move. Use Rotate to turn it.';
       case 'editing':
-        return 'Editing object. Drag on the floor, pinch to scale, twist with two fingers to rotate.';
+        return 'Editing object. Drag on the floor to move. Use Rotate to turn it.';
     }
   }
 }

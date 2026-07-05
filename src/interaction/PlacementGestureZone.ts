@@ -1,13 +1,11 @@
 import type { Point2 } from '../utils/math';
 
-export type PlacementGestureZone = 'move' | 'rotate' | 'none';
+export type PlacementGestureZone = 'move' | 'none';
 
 export interface PlacementGestureBounds {
   center: Point2;
   radiusPx: number;
   moveRadiusRatio?: number;
-  rotateInnerRadiusRatio?: number;
-  rotateOuterRadiusRatio?: number;
 }
 
 export function classifyPlacementGesture(
@@ -16,8 +14,6 @@ export function classifyPlacementGesture(
     center,
     radiusPx,
     moveRadiusRatio = 0.55,
-    rotateInnerRadiusRatio = 0.82,
-    rotateOuterRadiusRatio = 1.25,
   }: PlacementGestureBounds,
 ): PlacementGestureZone {
   if (radiusPx <= 0) {
@@ -29,13 +25,5 @@ export function classifyPlacementGesture(
     return 'move';
   }
 
-  if (distanceFromCenter >= radiusPx * rotateInnerRadiusRatio && distanceFromCenter <= radiusPx * rotateOuterRadiusRatio) {
-    return 'rotate';
-  }
-
   return 'none';
-}
-
-export function rotationDeltaFromVerticalDrag(previousPoint: Point2, nextPoint: Point2): number {
-  return (nextPoint.y - previousPoint.y) * 0.01;
 }

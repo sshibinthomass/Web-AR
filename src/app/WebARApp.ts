@@ -63,7 +63,6 @@ export class WebARApp {
   private capturedImagePreviewUrl: string | null = null;
   private placementDragMode: PlacementGestureZone | null = null;
   private placementDragStart: Point2 | null = null;
-  private lastPlacementDragPoint: Point2 | null = null;
   private layoutGestureStartedOnObject = false;
   private lastHudMode = this.appState.mode;
   private availableModels = [...MODEL_OPTIONS];
@@ -637,20 +636,12 @@ export class WebARApp {
   }
 
   private async prepareMultiObject(): Promise<void> {
-    if (!this.authToken) {
-      return;
-    }
-
     await this.ensureARRuntime().catch((error) => {
       console.warn('Could not prepare AR runtime for multi-object placement.', error);
     });
   }
 
   private async startMultiObjectSession(): Promise<void> {
-    if (!this.requireAuthToken('Sign in to place multiple objects.')) {
-      return;
-    }
-
     await this.ensureARRuntime();
     this.layoutMode = true;
     this.requireLayoutSceneManager().clear();
@@ -1026,7 +1017,6 @@ export class WebARApp {
         return;
       }
       this.requireLayoutSceneManager().moveSelectedToFloorPoint(floorPoint);
-      this.lastPlacementDragPoint = point;
       this.appState.setMode('editing');
       return;
     }
@@ -1034,14 +1024,6 @@ export class WebARApp {
     const transformController = this.requireTransformController();
     const dragMode = this.getPlacementDragMode(startPoint, sceneContext);
     if (dragMode === 'none') {
-      return;
-    }
-
-    if (dragMode === 'rotate') {
-      const previousPoint = this.lastPlacementDragPoint ?? startPoint;
-      transformController.rotateBy(runtime.rotationDeltaFromVerticalDrag(previousPoint, point));
-      this.lastPlacementDragPoint = point;
-      this.appState.setMode('editing');
       return;
     }
 
@@ -1056,7 +1038,6 @@ export class WebARApp {
     }
 
     transformController.moveToFloorPoint(floorPoint);
-    this.lastPlacementDragPoint = point;
     this.appState.setMode('editing');
   }
 
@@ -1112,7 +1093,6 @@ export class WebARApp {
     if (!this.placementDragStart || this.placementDragStart.x !== startPoint.x || this.placementDragStart.y !== startPoint.y) {
       const bounds = this.getProjectedPlacementMarkerBounds(sceneContext);
       this.placementDragStart = startPoint;
-      this.lastPlacementDragPoint = startPoint;
       this.placementDragMode = bounds ? this.requireARRuntime().classifyPlacementGesture(startPoint, bounds) : 'none';
     }
 
@@ -1154,7 +1134,6 @@ export class WebARApp {
   private resetPlacementDrag(): void {
     this.placementDragMode = null;
     this.placementDragStart = null;
-    this.lastPlacementDragPoint = null;
     this.layoutGestureStartedOnObject = false;
   }
 
@@ -1173,7 +1152,7 @@ export class WebARApp {
     }
 
     this.appState.setMode('editing');
-    this.hud?.update(this.appState.mode, `${selected.modelLabel} selected. Move, scale, rotate, or delete it.`);
+    this.hud?.update(this.appState.mode, `${selected.modelLabel} selected. Move, scale, use Rotate, or delete it.`);
     return true;
   }
 

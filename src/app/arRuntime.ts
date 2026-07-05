@@ -3,7 +3,6 @@ import { GestureController } from '../interaction/GestureController';
 import { ObjectTransformController } from '../interaction/ObjectTransformController';
 import {
   classifyPlacementGesture,
-  rotationDeltaFromVerticalDrag,
   type PlacementGestureZone,
 } from '../interaction/PlacementGestureZone';
 import { createScene, type SceneContext } from '../scene/createScene';
@@ -19,7 +18,6 @@ export const arRuntime = {
   GestureController,
   ObjectTransformController,
   classifyPlacementGesture,
-  rotationDeltaFromVerticalDrag,
   LayoutSceneManager,
   createScene,
   screenPointToFloorPoint,
