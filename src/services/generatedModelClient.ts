@@ -24,6 +24,13 @@ export interface GenerateSpeechModelInput {
 }
 
 export type GenerationPipeline = 'trellis' | 'openai-to-3d' | 'dynamic';
+export type GenerationStage =
+  | 'speech_input'
+  | 'detecting_speech'
+  | 'generating_image'
+  | 'generating_3d'
+  | 'completed'
+  | 'failed';
 
 export interface GeneratedModelResult {
   modelUrl: string;
@@ -46,8 +53,34 @@ export interface StartGeneratedModelJobResult {
   statusUrl: string;
 }
 
+export interface StartSpeechModelJobResult extends StartGeneratedModelJobResult {
+  stage?: GenerationStage;
+  transcript?: string;
+  prompt?: string;
+}
+
+export interface GeneratedModelJobStatus {
+  id: string;
+  label: string;
+  status: 'running' | 'completed' | 'failed';
+  stage?: GenerationStage;
+  error?: string;
+  transcript?: string;
+  prompt?: string;
+  modelUrl?: string;
+  objectKey?: string;
+  previewUrl?: string;
+  bytes?: number;
+}
+
 interface ListGeneratedModelsInput {
   apiUrl: string;
+  authToken?: string | null;
+  fetchImpl?: typeof fetch;
+}
+
+interface GeneratedModelJobStatusInput {
+  statusUrl: string;
   authToken?: string | null;
   fetchImpl?: typeof fetch;
 }
@@ -117,12 +150,21 @@ interface WorkerErrorResponse {
 }
 
 interface WorkerJobResponse {
-  job_id: string;
+  id?: string;
+  job_id?: string;
   label?: string;
   status?: string;
-  status_url: string;
+  stage?: string;
+  status_url?: string;
+  error?: string;
   transcript?: string;
   prompt?: string;
+  source_transcript?: string;
+  generation_prompt?: string;
+  model_url?: string;
+  object_key?: string;
+  preview_url?: string;
+  bytes?: number;
 }
 
 interface WorkerGeneratedModelEntry {
@@ -211,6 +253,70 @@ export async function startGeneratedModelJob({
     status: 'running',
     statusUrl: body.status_url,
   };
+}
+
+export async function startSpeechModelJob({
+  apiUrl,
+  audioBase64,
+  audioMimeType,
+  authToken,
+  fetchImpl = fetch,
+}: GenerateSpeechModelInput): Promise<StartSpeechModelJobResult> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  if (!audioBase64.trim()) {
+    throw new Error('Record speech before generating a 3D model.');
+  }
+
+  const response = await fetchImpl(speechGenerateUrlFromGenerateUrl(apiUrl), {
+    method: 'POST',
+    headers: jsonHeaders(authToken),
+    body: JSON.stringify({
+      audio_base64: audioBase64,
+      audio_mime_type: audioMimeType || 'audio/webm',
+    }),
+  });
+
+  const body = (await response.json()) as WorkerJobResponse | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Speech generation failed with HTTP ${response.status}.`);
+  }
+
+  if (!('job_id' in body) || !body.job_id || !body.status_url) {
+    throw new Error('Worker response did not include a speech generation job.');
+  }
+
+  return {
+    id: body.job_id,
+    label: body.label ?? body.job_id,
+    status: 'running',
+    statusUrl: body.status_url,
+    ...(isGenerationStage(body.stage) ? { stage: body.stage } : {}),
+    ...(body.transcript ? { transcript: body.transcript } : {}),
+    ...(body.prompt ? { prompt: body.prompt } : {}),
+  };
+}
+
+export async function getGeneratedModelJobStatus({
+  statusUrl,
+  authToken,
+  fetchImpl = fetch,
+}: GeneratedModelJobStatusInput): Promise<GeneratedModelJobStatus> {
+  if (!statusUrl) {
+    throw new Error('Job status URL is not configured.');
+  }
+
+  const response = authToken
+    ? await fetchImpl(statusUrl, { headers: authHeaders(authToken) })
+    : await fetchImpl(statusUrl);
+  const body = (await response.json()) as WorkerJobResponse | WorkerErrorResponse;
+  if (!response.ok && response.status !== 202) {
+    throw new Error('error' in body && body.error ? body.error : `Generation failed with HTTP ${response.status}.`);
+  }
+
+  return mapGeneratedModelJobStatus(body);
 }
 
 export async function extractImageFor3D({
@@ -610,6 +716,52 @@ function parseGeneratedModelResult(body: WorkerSuccessResponse | WorkerErrorResp
     objectKey: body.object_key,
     bytes: body.bytes,
   };
+}
+
+function mapGeneratedModelJobStatus(body: WorkerJobResponse | WorkerErrorResponse): GeneratedModelJobStatus {
+  const jobId = 'id' in body && body.id ? body.id : 'job_id' in body && body.job_id ? body.job_id : '';
+  const status = 'status' in body && isJobStatus(body.status) ? body.status : 'running';
+  const stage = 'stage' in body && isGenerationStage(body.stage) ? body.stage : undefined;
+  if (!jobId) {
+    throw new Error('Worker response did not include a generated model job.');
+  }
+
+  return {
+    id: jobId,
+    label: ('label' in body && body.label) || jobId,
+    status,
+    ...(stage ? { stage } : {}),
+    ...('error' in body && body.error ? { error: body.error } : {}),
+    ...('source_transcript' in body && body.source_transcript
+      ? { transcript: body.source_transcript }
+      : 'transcript' in body && body.transcript
+        ? { transcript: body.transcript }
+        : {}),
+    ...('generation_prompt' in body && body.generation_prompt
+      ? { prompt: body.generation_prompt }
+      : 'prompt' in body && body.prompt
+        ? { prompt: body.prompt }
+        : {}),
+    ...('model_url' in body && body.model_url ? { modelUrl: body.model_url } : {}),
+    ...('object_key' in body && body.object_key ? { objectKey: body.object_key } : {}),
+    ...('preview_url' in body && body.preview_url ? { previewUrl: body.preview_url } : {}),
+    ...('bytes' in body && typeof body.bytes === 'number' ? { bytes: body.bytes } : {}),
+  };
+}
+
+function isJobStatus(status: unknown): status is GeneratedModelJobStatus['status'] {
+  return status === 'running' || status === 'completed' || status === 'failed';
+}
+
+function isGenerationStage(stage: unknown): stage is GenerationStage {
+  return (
+    stage === 'speech_input' ||
+    stage === 'detecting_speech' ||
+    stage === 'generating_image' ||
+    stage === 'generating_3d' ||
+    stage === 'completed' ||
+    stage === 'failed'
+  );
 }
 
 function createGenerateModelRequestBody(

@@ -4,11 +4,13 @@ import {
   deleteGeneratedModel,
   generateModelFromImage,
   generateModelFromSpeech,
+  getGeneratedModelJobStatus,
   listAdminJobs,
   listGeneratedModels,
   renameGeneratedModel,
   retryAdminJob,
   startGeneratedModelJob,
+  startSpeechModelJob,
   storeUploadedModel,
   toggleGeneratedModelVisibility,
   cleanupFailedJobArtifacts,
@@ -912,5 +914,129 @@ describe('generateModelFromSpeech', () => {
         fetchImpl: vi.fn(),
       }),
     ).rejects.toThrow('Record speech before generating a 3D model.');
+  });
+});
+
+describe('startSpeechModelJob', () => {
+  it('starts a speech-to-3D background job without polling for completion', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          job_id: 'speech-20260707-abc123',
+          label: 'Speech object - 2026-07-07 08:30:00 UTC',
+          status: 'running',
+          stage: 'detecting_speech',
+          status_url: 'https://worker.example/generate-3d/jobs/speech-20260707-abc123',
+        }),
+        {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const job = await startSpeechModelJob({
+      apiUrl: 'https://worker.example/generate-3d',
+      audioBase64: 'YXVkaW8=',
+      audioMimeType: 'audio/webm',
+      authToken: 'signed-token',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/generate-3d/speech',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer signed-token' },
+        body: JSON.stringify({
+          audio_base64: 'YXVkaW8=',
+          audio_mime_type: 'audio/webm',
+        }),
+      }),
+    );
+    expect(job).toEqual({
+      id: 'speech-20260707-abc123',
+      label: 'Speech object - 2026-07-07 08:30:00 UTC',
+      status: 'running',
+      stage: 'detecting_speech',
+      statusUrl: 'https://worker.example/generate-3d/jobs/speech-20260707-abc123',
+    });
+  });
+});
+
+describe('getGeneratedModelJobStatus', () => {
+  it('maps running speech stages with transcript and prompt details', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'speech-20260707-abc123',
+          label: 'red chair - 2026-07-07 08:30:00 UTC',
+          status: 'running',
+          stage: 'generating_3d',
+          source_transcript: 'make a red chair',
+          generation_prompt: 'single red chair on a white background',
+          preview_url: 'https://assets.example/previews/speech.png',
+        }),
+        {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const status = await getGeneratedModelJobStatus({
+      statusUrl: 'https://worker.example/generate-3d/jobs/speech-20260707-abc123',
+      authToken: 'signed-token',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith('https://worker.example/generate-3d/jobs/speech-20260707-abc123', {
+      headers: { Authorization: 'Bearer signed-token' },
+    });
+    expect(status).toEqual({
+      id: 'speech-20260707-abc123',
+      label: 'red chair - 2026-07-07 08:30:00 UTC',
+      status: 'running',
+      stage: 'generating_3d',
+      transcript: 'make a red chair',
+      prompt: 'single red chair on a white background',
+      previewUrl: 'https://assets.example/previews/speech.png',
+    });
+  });
+
+  it('maps completed jobs into model URLs for AR placement', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'speech-20260707-abc123',
+          label: 'red chair - 2026-07-07 08:30:00 UTC',
+          status: 'completed',
+          stage: 'completed',
+          model_url: 'https://assets.example/models/generated/speech.glb',
+          object_key: 'models/generated/speech.glb',
+          bytes: 4,
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    await expect(
+      getGeneratedModelJobStatus({
+        statusUrl: 'https://worker.example/generate-3d/jobs/speech-20260707-abc123',
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      id: 'speech-20260707-abc123',
+      label: 'red chair - 2026-07-07 08:30:00 UTC',
+      status: 'completed',
+      stage: 'completed',
+      modelUrl: 'https://assets.example/models/generated/speech.glb',
+      objectKey: 'models/generated/speech.glb',
+      bytes: 4,
+    });
   });
 });

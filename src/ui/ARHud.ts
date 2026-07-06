@@ -63,6 +63,20 @@ type HudRoute =
 type ModelLibraryFilter = 'all' | 'generated' | 'uploaded' | 'favorites' | 'recent';
 type AuthFormMode = 'login' | 'signup';
 type ModelActionIcon = 'preview' | 'favorite' | 'favorite-filled' | 'visibility-public' | 'visibility-private' | 'edit' | 'delete';
+type SpeechProcessStage =
+  | 'speech_input'
+  | 'detecting_speech'
+  | 'generating_image'
+  | 'generating_3d'
+  | 'completed'
+  | 'failed';
+
+const speechStageOrder: SpeechProcessStage[] = [
+  'speech_input',
+  'detecting_speech',
+  'generating_image',
+  'generating_3d',
+];
 
 export class ARHud {
   readonly overlay: HTMLElement;
@@ -93,10 +107,13 @@ export class ARHud {
   private readonly adminJobMessage: HTMLElement;
   private readonly speechPanel: HTMLElement;
   private readonly speechStatusMessage: HTMLElement;
+  private readonly speechVisualizer: HTMLElement;
   private readonly speechTranscriptMessage: HTMLElement;
+  private readonly speechBackgroundNote: HTMLElement;
   private readonly speechRecordButton: HTMLButtonElement;
   private readonly speechStopButton: HTMLButtonElement;
   private readonly speechGenerateButton: HTMLButtonElement;
+  private readonly speechStageItems = new Map<SpeechProcessStage, HTMLElement>();
   private readonly statusPanel: HTMLElement;
   private readonly hudActions: HTMLElement;
   private readonly statusMessage: HTMLElement;
@@ -347,13 +364,54 @@ export class ARHud {
           <h2>Speech to 3D</h2>
           <p class="speech-status">Push to talk, then generate a 3D-ready image and model.</p>
         </div>
-        <div class="speech-transcript" aria-live="polite">No speech recorded yet.</div>
+        <div class="speech-visualizer" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="speech-transcript-card">
+          <span>You said</span>
+          <p class="speech-transcript" aria-live="polite">No speech recorded yet.</p>
+        </div>
+        <ol class="speech-stage-list" aria-label="Speech to 3D progress">
+          <li data-speech-stage="speech_input">
+            <span class="speech-stage-marker"></span>
+            <strong>Speech input</strong>
+            <small>Record the object request</small>
+          </li>
+          <li data-speech-stage="detecting_speech">
+            <span class="speech-stage-marker"></span>
+            <strong>Detecting speech</strong>
+            <small>Convert audio into your prompt</small>
+          </li>
+          <li data-speech-stage="generating_image">
+            <span class="speech-stage-marker"></span>
+            <strong>Generating image</strong>
+            <small>Create a clean image for 3D</small>
+          </li>
+          <li data-speech-stage="generating_3d">
+            <span class="speech-stage-marker"></span>
+            <strong>Generating 3D model</strong>
+            <small>Run TRELLIS in Cloudflare/Modal</small>
+          </li>
+        </ol>
+        <p class="speech-background-note hidden">You can close this app now. The model will keep generating in Cloudflare and appear later in AR View and Models.</p>
         <div class="speech-actions"></div>
       </div>
     `;
     this.speechPanel.querySelector<HTMLButtonElement>('.page-back')?.addEventListener('click', () => this.navigateTo('home'));
     this.speechStatusMessage = this.speechPanel.querySelector<HTMLElement>('.speech-status')!;
+    this.speechVisualizer = this.speechPanel.querySelector<HTMLElement>('.speech-visualizer')!;
     this.speechTranscriptMessage = this.speechPanel.querySelector<HTMLElement>('.speech-transcript')!;
+    this.speechBackgroundNote = this.speechPanel.querySelector<HTMLElement>('.speech-background-note')!;
+    this.speechPanel.querySelectorAll<HTMLElement>('[data-speech-stage]').forEach((item) => {
+      const stage = item.dataset.speechStage as SpeechProcessStage | undefined;
+      if (stage) {
+        this.speechStageItems.set(stage, item);
+      }
+    });
     this.speechRecordButton = this.createButton('Record', 'primary', () => this.handlers.onStartSpeechRecording());
     this.speechStopButton = this.createButton('Stop', '', () => this.handlers.onStopSpeechRecording());
     this.speechGenerateButton = this.createButton('Generate Speech Model', '', () => this.handlers.onGenerateSpeechModel());
@@ -627,6 +685,10 @@ export class ARHud {
     this.arButtonSlot.setAttribute('aria-hidden', 'true');
   }
 
+  startARCamera(): void {
+    this.startAttachedARCamera();
+  }
+
   updateAuthState(user: AuthUser | null): void {
     this.currentUser = user?.status === 'active' ? user : null;
     this.renderAuthControls();
@@ -730,32 +792,107 @@ export class ARHud {
 
   showSpeechReady(message = 'Push to talk, then generate a 3D-ready image and model.'): void {
     this.speechStatusMessage.textContent = message;
+    this.speechVisualizer.classList.remove('is-listening', 'is-working');
+    this.speechBackgroundNote.classList.add('hidden');
+    this.setSpeechStage(null);
     this.speechRecordButton.disabled = false;
     this.speechStopButton.disabled = true;
     this.speechGenerateButton.disabled = true;
-    if (!this.speechTranscriptMessage.textContent?.trim()) {
-      this.speechTranscriptMessage.textContent = 'No speech recorded yet.';
-    }
+    this.speechTranscriptMessage.textContent = 'No speech recorded yet.';
   }
 
   showSpeechRecording(): void {
     this.speechStatusMessage.textContent = 'Listening...';
+    this.speechVisualizer.classList.add('is-listening');
+    this.speechVisualizer.classList.remove('is-working');
+    this.speechBackgroundNote.classList.add('hidden');
+    this.setSpeechStage('speech_input');
     this.speechTranscriptMessage.textContent = 'Recording speech for a 3D model request.';
     this.speechRecordButton.disabled = true;
     this.speechStopButton.disabled = false;
     this.speechGenerateButton.disabled = true;
   }
 
+  showSpeechCaptured(): void {
+    this.speechStatusMessage.textContent = 'Audio captured. Generate when ready.';
+    this.speechVisualizer.classList.remove('is-listening', 'is-working');
+    this.speechBackgroundNote.classList.add('hidden');
+    this.setSpeechStage('speech_input');
+    this.speechTranscriptMessage.textContent = 'Audio captured. Speech will appear after detection.';
+    this.speechRecordButton.disabled = false;
+    this.speechStopButton.disabled = true;
+    this.speechGenerateButton.disabled = false;
+  }
+
   showSpeechDetected(transcript: string): void {
     this.speechStatusMessage.textContent = 'Speech detected. Generate the 3D model when ready.';
+    this.speechVisualizer.classList.remove('is-listening', 'is-working');
+    this.speechBackgroundNote.classList.add('hidden');
+    this.setSpeechStage('detecting_speech');
     this.speechTranscriptMessage.textContent = transcript || 'Speech recorded.';
     this.speechRecordButton.disabled = false;
     this.speechStopButton.disabled = true;
     this.speechGenerateButton.disabled = !transcript;
   }
 
+  showSpeechDetecting(): void {
+    this.speechStatusMessage.textContent = 'Detecting speech and shaping the request for 3D generation...';
+    this.speechVisualizer.classList.remove('is-listening');
+    this.speechVisualizer.classList.add('is-working');
+    this.speechBackgroundNote.classList.add('hidden');
+    this.setSpeechStage('detecting_speech');
+    this.speechRecordButton.disabled = true;
+    this.speechStopButton.disabled = true;
+    this.speechGenerateButton.disabled = true;
+  }
+
+  showSpeechGeneratingImage(transcript?: string): void {
+    this.speechStatusMessage.textContent = 'Speech detected. Generating a clean image for 3D reconstruction...';
+    this.speechVisualizer.classList.remove('is-listening');
+    this.speechVisualizer.classList.add('is-working');
+    this.speechBackgroundNote.classList.add('hidden');
+    this.setSpeechStage('generating_image');
+    if (transcript?.trim()) {
+      this.speechTranscriptMessage.textContent = transcript.trim();
+    }
+    this.speechRecordButton.disabled = true;
+    this.speechStopButton.disabled = true;
+    this.speechGenerateButton.disabled = true;
+  }
+
+  showSpeechBackgroundJob(job: { label?: string; transcript?: string; stage?: SpeechProcessStage }): void {
+    this.speechStatusMessage.textContent = `${job.label ?? 'Speech model'} is generating in the background.`;
+    this.speechVisualizer.classList.remove('is-listening');
+    this.speechVisualizer.classList.add('is-working');
+    this.speechBackgroundNote.classList.remove('hidden');
+    this.setSpeechStage(job.stage ?? 'generating_3d');
+    if (job.transcript?.trim()) {
+      this.speechTranscriptMessage.textContent = job.transcript.trim();
+    }
+    this.speechRecordButton.disabled = false;
+    this.speechStopButton.disabled = true;
+    this.speechGenerateButton.disabled = true;
+  }
+
+  showSpeechCompleted(job: { label?: string; transcript?: string }): void {
+    this.speechStatusMessage.textContent = `${job.label ?? 'Speech-generated object'} is ready. Opening AR View...`;
+    this.speechVisualizer.classList.remove('is-listening', 'is-working');
+    this.speechBackgroundNote.classList.add('hidden');
+    this.setSpeechStage('completed');
+    if (job.transcript?.trim()) {
+      this.speechTranscriptMessage.textContent = job.transcript.trim();
+    }
+    this.speechRecordButton.disabled = false;
+    this.speechStopButton.disabled = true;
+    this.speechGenerateButton.disabled = true;
+  }
+
   showSpeechGenerating(message = 'Generating a 3D-ready image and model from speech. Keep this page open.'): void {
     this.speechStatusMessage.textContent = message;
+    this.speechVisualizer.classList.remove('is-listening');
+    this.speechVisualizer.classList.add('is-working');
+    this.speechBackgroundNote.classList.add('hidden');
+    this.setSpeechStage('generating_image');
     this.speechRecordButton.disabled = true;
     this.speechStopButton.disabled = true;
     this.speechGenerateButton.disabled = true;
@@ -763,6 +900,8 @@ export class ARHud {
 
   showSpeechError(message: string): void {
     this.speechStatusMessage.textContent = message;
+    this.speechVisualizer.classList.remove('is-listening', 'is-working');
+    this.setSpeechStage('failed');
     this.speechRecordButton.disabled = false;
     this.speechStopButton.disabled = true;
     this.speechGenerateButton.disabled = this.speechTranscriptMessage.textContent === 'No speech recorded yet.';
@@ -2083,6 +2222,17 @@ export class ARHud {
     buttons.forEach((button) => {
       button.classList.add('hidden');
       button.remove();
+    });
+  }
+
+  private setSpeechStage(stage: SpeechProcessStage | null): void {
+    const activeIndex = stage ? speechStageOrder.indexOf(stage) : -1;
+    this.speechStageItems.forEach((item, itemStage) => {
+      const itemIndex = speechStageOrder.indexOf(itemStage);
+      const isCompleted = stage === 'completed' || (activeIndex > itemIndex && itemIndex >= 0);
+      item.classList.toggle('is-active', itemStage === stage);
+      item.classList.toggle('is-done', isCompleted);
+      item.classList.remove('is-failed');
     });
   }
 

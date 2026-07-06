@@ -801,7 +801,7 @@ describe('handleGenerateModelRequest', () => {
     expect(await response.json()).toEqual({ error: 'Login required.' });
   });
 
-  it('turns approved speech into a 3D-optimized image and starts a TRELLIS job', async () => {
+  it('queues approved speech as a background job, then updates stages and starts a TRELLIS job', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ text: 'Generate a red modern chair with curved wooden legs.' }), {
@@ -831,7 +831,7 @@ describe('handleGenerateModelRequest', () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ call_id: 'speech-123' }), {
+        new Response(JSON.stringify({ call_id: 'speech-modal-123' }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
@@ -839,6 +839,7 @@ describe('handleGenerateModelRequest', () => {
     const env = createEnv();
     const deps = { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') };
     const token = await createAdminToken(env, deps);
+    const waitUntilPromises: Promise<unknown>[] = [];
 
     const response = await handleGenerateModelRequest(
       withAuth(speechGenerationRequest({
@@ -847,7 +848,31 @@ describe('handleGenerateModelRequest', () => {
       }), token),
       env,
       deps,
+      {
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
     );
+
+    expect(response.status).toBe(202);
+    const queuedJob = (await response.json()) as {
+      job_id: string;
+      label: string;
+      status: string;
+      stage: string;
+      status_url: string;
+    };
+    expect(queuedJob).toEqual({
+      job_id: 'speech-20260628120000-8bc60b68',
+      label: 'Speech object - 2026-06-28 12:00:00 UTC',
+      status: 'running',
+      stage: 'detecting_speech',
+      status_url: 'https://worker.example/generate-3d/jobs/speech-20260628120000-8bc60b68',
+    });
+    expect(waitUntilPromises).toHaveLength(1);
+
+    await waitUntilPromises[0];
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls[0][0]).toBe('https://api.openai.com/v1/audio/transcriptions');
@@ -897,24 +922,43 @@ describe('handleGenerateModelRequest', () => {
       }),
     );
     expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
-      'models/generated/jobs/speech-123.json',
+      'models/generated/jobs/speech-20260628120000-8bc60b68.json',
       expect.stringContaining('"pipeline":"speech"'),
       { httpMetadata: { contentType: 'application/json' } },
     );
     expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
-      'models/generated/jobs/speech-123.json',
+      'models/generated/jobs/speech-20260628120000-8bc60b68.json',
       expect.stringContaining('"source_transcript":"Generate a red modern chair with curved wooden legs."'),
       { httpMetadata: { contentType: 'application/json' } },
     );
-    expect(response.status).toBe(202);
-    expect(await response.json()).toEqual({
-      job_id: 'speech-123',
-      label: 'red modern chair - 2026-06-28 12:00:00 UTC',
-      status: 'running',
-      status_url: 'https://worker.example/generate-3d/jobs/speech-123',
-      transcript: 'Generate a red modern chair with curved wooden legs.',
-      prompt:
-        'Single centered red modern chair with curved wooden legs, full object visible, clean silhouette, white background, studio lighting, no text, optimized for image-to-3D reconstruction.',
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/jobs/speech-20260628120000-8bc60b68.json',
+      expect.stringContaining('"modal_call_id":"speech-modal-123"'),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/jobs/speech-20260628120000-8bc60b68.json',
+      expect.stringContaining('"stage":"generating_3d"'),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
+
+    const glbBytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46]).buffer;
+    const pollFetch = vi.fn().mockResolvedValue(new Response(glbBytes, { status: 200 }));
+    const completedResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/jobs/speech-20260628120000-8bc60b68'), token),
+      env,
+      { fetch: pollFetch, now: () => new Date('2026-06-28T12:02:00Z') },
+    );
+
+    expect(pollFetch.mock.calls[0][0]).toBe('https://modal.example/result?call_id=speech-modal-123');
+    expect(completedResponse.status).toBe(200);
+    expect(await completedResponse.json()).toMatchObject({
+      id: 'speech-20260628120000-8bc60b68',
+      status: 'completed',
+      stage: 'completed',
+      model_url:
+        'https://web-ar-model-assets.pages.dev/models/generated/capture-20260628-120000-speech-20260628120000-8bc60b68.glb',
+      source_transcript: 'Generate a red modern chair with curved wooden legs.',
     });
   });
 
@@ -932,7 +976,11 @@ describe('handleGenerateModelRequest', () => {
     );
 
     expect(response.status).toBe(202);
-    expect(await response.json()).toEqual({ status: 'running' });
+    expect(await response.json()).toMatchObject({
+      id: 'fc-123',
+      status: 'running',
+      pipeline: 'trellis',
+    });
   });
 
   it('stores completed Modal job GLB bytes and returns the public URL', async () => {

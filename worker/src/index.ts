@@ -89,6 +89,13 @@ interface AuthRequestBody {
 }
 
 type GenerationPipeline = 'trellis' | 'openai-to-3d' | 'dynamic' | 'speech';
+type GenerationStage =
+  | 'speech_input'
+  | 'detecting_speech'
+  | 'generating_image'
+  | 'generating_3d'
+  | 'completed'
+  | 'failed';
 type AuthRole = 'admin' | 'user';
 type AccountStatus = 'active' | 'pending';
 type ModelVisibility = 'public' | 'private';
@@ -129,6 +136,8 @@ interface StoredJob {
   error?: string;
   target_object?: string;
   pipeline?: GenerationPipeline;
+  stage?: GenerationStage;
+  modal_call_id?: string;
   source_transcript?: string;
   generation_prompt?: string;
   owner_email?: string;
@@ -303,11 +312,11 @@ const corsHeaders = {
 };
 
 export default {
-  fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  fetch(request: Request, env: WorkerEnv, ctx?: ExecutionContext): Promise<Response> {
     return handleGenerateModelRequest(request, env, {
       fetch: (input, init) => fetch(input, init),
       now: () => new Date(),
-    });
+    }, ctx);
   },
   scheduled(_event: ScheduledEvent, env: WorkerEnv, ctx: ExecutionContext): void {
     ctx.waitUntil(
@@ -323,8 +332,9 @@ export async function handleGenerateModelRequest(
   request: Request,
   env: WorkerEnv,
   deps: GenerateModelDeps,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
-  const response = await routeGenerateModelRequest(request, env, deps);
+  const response = await routeGenerateModelRequest(request, env, deps, ctx);
   return applyCorsHeaders(response, request, env);
 }
 
@@ -332,6 +342,7 @@ async function routeGenerateModelRequest(
   request: Request,
   env: WorkerEnv,
   deps: GenerateModelDeps,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const url = new URL(request.url);
 
@@ -460,7 +471,7 @@ async function routeGenerateModelRequest(
   }
 
   if (url.pathname === '/generate-3d/speech') {
-    return handleSpeechGenerationRequest(request, env, deps, url, auth.user);
+    return handleSpeechGenerationRequest(request, env, deps, url, auth.user, ctx);
   }
 
   const pipeline = pipelineFromGeneratePath(url.pathname);
@@ -618,6 +629,7 @@ async function handleSpeechGenerationRequest(
   deps: GenerateModelDeps,
   url: URL,
   user: StoredUser,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const configError = validateEnv(env, 'speech');
   if (configError) {
@@ -638,30 +650,169 @@ async function handleSpeechGenerationRequest(
       ? body.value.audio_mime_type
       : 'audio/webm';
 
+  const now = deps.now();
+  const job: StoredJob = {
+    id: createSpeechJobId(now, body.value.audio_base64),
+    label: `Speech object - ${formatDisplayTimestamp(now)}`,
+    status: 'running',
+    stage: 'detecting_speech',
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+    pipeline: 'speech',
+    owner_email: user.email,
+    visibility: 'private',
+  };
+  await saveJob(env, job);
+
+  const backgroundJob = processSpeechGenerationJob(
+    {
+      audioBase64: body.value.audio_base64,
+      audioMimeType,
+      job,
+      url,
+    },
+    env,
+    deps,
+  );
+  if (ctx) {
+    ctx.waitUntil(backgroundJob);
+  } else {
+    void backgroundJob;
+  }
+
+  return jsonResponse(
+    {
+      job_id: job.id,
+      label: job.label,
+      status: job.status,
+      stage: job.stage,
+      status_url: `${url.origin}/generate-3d/jobs/${encodeURIComponent(job.id)}`,
+    },
+    202,
+  );
+}
+
+async function processSpeechGenerationJob(
+  input: {
+    audioBase64: string;
+    audioMimeType: string;
+    job: StoredJob;
+    url: URL;
+  },
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<void> {
+  let job = input.job;
   try {
     const transcript = await transcribeSpeechFor3D(
       {
-        audioBase64: body.value.audio_base64,
-        audioMimeType,
+        audioBase64: input.audioBase64,
+        audioMimeType: input.audioMimeType,
       },
       env,
       deps,
     );
-    const speechPrompt = await createSpeechImagePromptFor3D(transcript, env, deps);
-    const imageBase64 = await generateSpeechImageFor3D(speechPrompt.prompt, env, deps);
+    job = await updateSpeechJob(env, deps, job, {
+      source_transcript: transcript,
+      stage: 'generating_image',
+      updated_at: deps.now().toISOString(),
+    });
 
-    return startModalGenerationJob(url, env, deps, user, {
+    const speechPrompt = await createSpeechImagePromptFor3D(transcript, env, deps);
+    job = await updateSpeechJob(env, deps, job, {
+      label: formatJobLabel(deps.now(), speechPrompt.object),
+      target_object: speechPrompt.object,
+      generation_prompt: speechPrompt.prompt,
+      stage: 'generating_image',
+      updated_at: deps.now().toISOString(),
+    });
+
+    const imageBase64 = await generateSpeechImageFor3D(speechPrompt.prompt, env, deps);
+    const modalJob = await startModalGenerationForSpeechJob(input.url, env, deps, job, {
       imageBase64,
       imageMimeType: 'image/png',
-      targetObject: speechPrompt.object,
-      pipeline: 'speech',
-      sourceTranscript: transcript,
-      generationPrompt: speechPrompt.prompt,
     });
+    await updateSpeechJob(env, deps, job, {
+      modal_call_id: modalJob.callId,
+      preview_url: modalJob.previewUrl,
+      preview_object_key: modalJob.previewObjectKey,
+      stage: 'generating_3d',
+      updated_at: deps.now().toISOString(),
+    });
+    await addPendingJob(env, job.id);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Speech-to-3D generation failed.';
-    return jsonResponse({ error: message }, 502);
+    await updateSpeechJob(env, deps, job, {
+      status: 'failed',
+      stage: 'failed',
+      error: message,
+      failed_at: deps.now().toISOString(),
+      updated_at: deps.now().toISOString(),
+    });
   }
+}
+
+async function updateSpeechJob(
+  env: WorkerEnv,
+  _deps: GenerateModelDeps,
+  job: StoredJob,
+  update: Partial<StoredJob>,
+): Promise<StoredJob> {
+  const nextJob = {
+    ...job,
+    ...update,
+  };
+  await saveJob(env, nextJob);
+  return nextJob;
+}
+
+async function startModalGenerationForSpeechJob(
+  url: URL,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  job: StoredJob,
+  generationImage: {
+    imageBase64: string;
+    imageMimeType: string;
+  },
+): Promise<{ callId: string; previewUrl?: string; previewObjectKey?: string }> {
+  const modalConfig = modalConfigForPipeline(env, 'speech');
+  const payload = {
+    image_base64: stripDataUrlPrefix(generationImage.imageBase64),
+    ...modalConfig.payloadDefaults,
+  };
+  const modalResponse = await deps.fetch(modalConfig.startUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Modal-Key': env.MODAL_KEY,
+      'Modal-Secret': env.MODAL_SECRET,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!modalResponse.ok) {
+    throw new Error(`Modal job start failed: ${await modalResponse.text()}`);
+  }
+
+  const modalJob = (await modalResponse.json()) as { call_id?: unknown };
+  if (typeof modalJob.call_id !== 'string' || !modalJob.call_id) {
+    throw new Error('Modal job start response did not include a call_id.');
+  }
+
+  const preview = await storeGeneratedModelPreview(env, {
+    imageBase64: generationImage.imageBase64,
+    imageMimeType: generationImage.imageMimeType,
+    jobId: job.id,
+    createdAt: new Date(job.created_at),
+    publicOrigin: getPublicOrigin(env, url.origin),
+  });
+
+  return {
+    callId: modalJob.call_id,
+    ...(preview?.previewUrl ? { previewUrl: preview.previewUrl } : {}),
+    ...(preview?.previewObjectKey ? { previewObjectKey: preview.previewObjectKey } : {}),
+  };
 }
 
 async function handleAuthRequest(
@@ -1408,7 +1559,7 @@ async function pollModalJob(
   const result = await processModalJob(env, deps, jobId, url.origin);
 
   if (result.state === 'running') {
-    return jsonResponse({ status: 'running' }, 202);
+    return jsonResponse(toJobResponse(result.job), 202);
   }
 
   if (result.state === 'failed') {
@@ -1462,8 +1613,18 @@ async function processModalJob(
       updated_at: now.toISOString(),
       pipeline: 'trellis',
     } satisfies StoredJob);
+  if (job.pipeline === 'speech' && !job.modal_call_id) {
+    const waitingJob: StoredJob = {
+      ...job,
+      status: 'running',
+      stage: job.stage ?? 'detecting_speech',
+      updated_at: now.toISOString(),
+    };
+    await saveJob(env, waitingJob);
+    return { state: 'running', job: waitingJob };
+  }
   const resultUrl = new URL(modalConfigForPipeline(env, job.pipeline ?? 'trellis').resultUrl);
-  resultUrl.searchParams.set('call_id', jobId);
+  resultUrl.searchParams.set('call_id', job.modal_call_id ?? jobId);
 
   const modalResponse = await deps.fetch(resultUrl.toString(), {
     method: 'GET',
@@ -1477,6 +1638,7 @@ async function processModalJob(
     const runningJob: StoredJob = {
       ...job,
       status: 'running',
+      stage: job.stage ?? (job.pipeline === 'speech' ? 'generating_3d' : undefined),
       updated_at: now.toISOString(),
     };
     await saveJob(env, runningJob);
@@ -1487,6 +1649,7 @@ async function processModalJob(
     const failedJob: StoredJob = {
       ...job,
       status: 'failed',
+      stage: 'failed',
       error: `Modal job result failed: ${await modalResponse.text()}`,
       failed_at: now.toISOString(),
       updated_at: now.toISOString(),
@@ -1509,6 +1672,7 @@ async function processModalJob(
   const completedJob: StoredJob = {
     ...job,
     status: 'completed',
+    stage: 'completed',
     completed_at: now.toISOString(),
     updated_at: now.toISOString(),
     model_url: `${publicOrigin}/${objectKey}`,
@@ -2600,6 +2764,7 @@ function toJobResponse(job: StoredJob): Record<string, unknown> {
     visibility: job.visibility,
     target_object: job.target_object,
     pipeline: job.pipeline,
+    stage: job.stage,
     source_transcript: job.source_transcript,
     generation_prompt: job.generation_prompt,
     model_url: job.model_url,
@@ -2752,6 +2917,19 @@ function formatDisplayTimestamp(date: Date): string {
 function formatJobLabel(date: Date, targetObject: string | null): string {
   const objectLabel = targetObject ?? 'Main object';
   return `${objectLabel} - ${formatDisplayTimestamp(date)}`;
+}
+
+function createSpeechJobId(date: Date, audioBase64: string): string {
+  return `speech-${formatTimestamp(date).replace('-', '')}-${fnv1aHash(audioBase64)}`;
+}
+
+function fnv1aHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
 }
 
 function safeObjectKeyPart(value: string): string {

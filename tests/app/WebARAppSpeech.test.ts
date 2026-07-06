@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RecordedAudio } from '../../src/capture/audioCapture';
+import type { GeneratedModelJobStatus, StartSpeechModelJobResult } from '../../src/services/generatedModelClient';
 
 vi.mock('../../src/services/generatedModelClient', async () => {
   const actual = await vi.importActual<typeof import('../../src/services/generatedModelClient')>(
@@ -7,65 +8,132 @@ vi.mock('../../src/services/generatedModelClient', async () => {
   );
   return {
     ...actual,
-    generateModelFromSpeech: vi.fn(),
+    getGeneratedModelJobStatus: vi.fn(),
+    startSpeechModelJob: vi.fn(),
   };
 });
 
 import { DEFAULT_GENERATE_MODEL_API_URL } from '../../src/app/config';
 import { WebARApp } from '../../src/app/WebARApp';
-import { generateModelFromSpeech } from '../../src/services/generatedModelClient';
+import { getGeneratedModelJobStatus, startSpeechModelJob } from '../../src/services/generatedModelClient';
+
+function recordedAudio(): RecordedAudio {
+  return {
+    audioBase64: 'YXVkaW8=',
+    audioMimeType: 'audio/webm',
+    blob: new Blob(['audio'], { type: 'audio/webm' }),
+  };
+}
 
 describe('WebARApp speech to 3D', () => {
-  it('generates a 3D model from recorded speech and opens it for AR placement', async () => {
-    vi.mocked(generateModelFromSpeech).mockResolvedValue({
-      modelUrl: 'https://assets.example/models/generated/speech.glb',
-      objectKey: 'models/generated/speech.glb',
-      bytes: 4,
-      transcript: 'a red modern chair',
-      prompt: 'single red modern chair, centered, white background, 3D mesh friendly',
-    });
+  it('starts a durable speech-to-3D job and tells the user it can finish in the background', async () => {
+    const job: StartSpeechModelJobResult = {
+      id: 'speech-20260707-abc123',
+      label: 'Speech object - 2026-07-07 08:30:00 UTC',
+      status: 'running',
+      stage: 'detecting_speech',
+      statusUrl: 'https://worker.example/generate-3d/jobs/speech-20260707-abc123',
+    };
+    vi.mocked(startSpeechModelJob).mockResolvedValue(job);
 
     const app = new WebARApp(document.createElement('div')) as unknown as {
       authToken: string | null;
       speechAudio: RecordedAudio | null;
       hud: {
         showAuthMessage: ReturnType<typeof vi.fn>;
-        showSpeechGenerating: ReturnType<typeof vi.fn>;
-        showSpeechDetected: ReturnType<typeof vi.fn>;
+        showSpeechDetecting: ReturnType<typeof vi.fn>;
+        showSpeechBackgroundJob: ReturnType<typeof vi.fn>;
         showSpeechError: ReturnType<typeof vi.fn>;
-        showFullFlowReady: ReturnType<typeof vi.fn>;
       };
-      loadModelFromUrl: ReturnType<typeof vi.fn>;
+      watchSpeechGenerationJob: ReturnType<typeof vi.fn>;
       refreshGeneratedModels: ReturnType<typeof vi.fn>;
       generateSpeechModel(): Promise<void>;
     };
 
     app.authToken = 'signed-token';
-    app.speechAudio = {
-      audioBase64: 'YXVkaW8=',
-      audioMimeType: 'audio/webm',
-      blob: new Blob(['audio'], { type: 'audio/webm' }),
-    };
+    app.speechAudio = recordedAudio();
     app.hud = {
       showAuthMessage: vi.fn(),
-      showSpeechGenerating: vi.fn(),
-      showSpeechDetected: vi.fn(),
+      showSpeechDetecting: vi.fn(),
+      showSpeechBackgroundJob: vi.fn(),
       showSpeechError: vi.fn(),
-      showFullFlowReady: vi.fn(),
     };
-    app.loadModelFromUrl = vi.fn().mockResolvedValue(undefined);
+    app.watchSpeechGenerationJob = vi.fn();
     app.refreshGeneratedModels = vi.fn().mockResolvedValue(undefined);
 
     await app.generateSpeechModel();
 
-    expect(generateModelFromSpeech).toHaveBeenCalledWith({
+    expect(startSpeechModelJob).toHaveBeenCalledWith({
       apiUrl: DEFAULT_GENERATE_MODEL_API_URL,
       audioBase64: 'YXVkaW8=',
       audioMimeType: 'audio/webm',
       authToken: 'signed-token',
     });
-    expect(app.hud.showSpeechGenerating).toHaveBeenCalledWith();
-    expect(app.hud.showSpeechDetected).toHaveBeenCalledWith('a red modern chair');
+    expect(app.hud.showSpeechDetecting).toHaveBeenCalledOnce();
+    expect(app.hud.showSpeechBackgroundJob).toHaveBeenCalledWith({
+      id: 'speech-20260707-abc123',
+      label: 'Speech object - 2026-07-07 08:30:00 UTC',
+      status: 'running',
+      stage: 'detecting_speech',
+      statusUrl: 'https://worker.example/generate-3d/jobs/speech-20260707-abc123',
+    });
+    expect(app.watchSpeechGenerationJob).toHaveBeenCalledWith(job);
+    expect(app.refreshGeneratedModels).toHaveBeenCalledOnce();
+  });
+
+  it('loads a completed speech job into AR placement and asks the HUD to start AR camera', async () => {
+    const completedStatus: GeneratedModelJobStatus = {
+      id: 'speech-20260707-abc123',
+      label: 'red modern chair - 2026-07-07 08:30:00 UTC',
+      status: 'completed',
+      stage: 'completed',
+      transcript: 'make a red modern chair',
+      modelUrl: 'https://assets.example/models/generated/speech.glb',
+      objectKey: 'models/generated/speech.glb',
+      bytes: 4,
+    };
+    vi.mocked(getGeneratedModelJobStatus).mockResolvedValue(completedStatus);
+
+    const app = new WebARApp(document.createElement('div')) as unknown as {
+      authToken: string | null;
+      hud: {
+        showSpeechCompleted: ReturnType<typeof vi.fn>;
+        showSpeechGeneratingImage: ReturnType<typeof vi.fn>;
+        showSpeechBackgroundJob: ReturnType<typeof vi.fn>;
+        showSpeechError: ReturnType<typeof vi.fn>;
+        showFullFlowReady: ReturnType<typeof vi.fn>;
+        startARCamera: ReturnType<typeof vi.fn>;
+      };
+      loadModelFromUrl: ReturnType<typeof vi.fn>;
+      refreshGeneratedModels: ReturnType<typeof vi.fn>;
+      watchSpeechGenerationJob(job: StartSpeechModelJobResult): Promise<void>;
+    };
+
+    app.authToken = 'signed-token';
+    app.hud = {
+      showSpeechCompleted: vi.fn(),
+      showSpeechGeneratingImage: vi.fn(),
+      showSpeechBackgroundJob: vi.fn(),
+      showSpeechError: vi.fn(),
+      showFullFlowReady: vi.fn(),
+      startARCamera: vi.fn(),
+    };
+    app.loadModelFromUrl = vi.fn().mockResolvedValue(undefined);
+    app.refreshGeneratedModels = vi.fn().mockResolvedValue(undefined);
+
+    await app.watchSpeechGenerationJob({
+      id: 'speech-20260707-abc123',
+      label: 'Speech object - 2026-07-07 08:30:00 UTC',
+      status: 'running',
+      stage: 'generating_3d',
+      statusUrl: 'https://worker.example/generate-3d/jobs/speech-20260707-abc123',
+    });
+
+    expect(getGeneratedModelJobStatus).toHaveBeenCalledWith({
+      statusUrl: 'https://worker.example/generate-3d/jobs/speech-20260707-abc123',
+      authToken: 'signed-token',
+    });
+    expect(app.hud.showSpeechCompleted).toHaveBeenCalledWith(completedStatus);
     expect(app.loadModelFromUrl).toHaveBeenCalledWith(
       'https://assets.example/models/generated/speech.glb',
       'Speech object',
@@ -76,13 +144,14 @@ describe('WebARApp speech to 3D', () => {
       },
     );
     expect(app.hud.showFullFlowReady).toHaveBeenCalledWith(
-      'Speech-generated object is ready. Scan the floor, then tap Place.',
+      'Speech-generated object is ready. Opening AR camera.',
       {
-        id: 'speech-generated-object',
-        label: 'a red modern chair',
+        id: 'speech-20260707-abc123',
+        label: 'red modern chair - 2026-07-07 08:30:00 UTC',
         url: 'https://assets.example/models/generated/speech.glb',
       },
     );
+    expect(app.hud.startARCamera).toHaveBeenCalledOnce();
     expect(app.refreshGeneratedModels).toHaveBeenCalledOnce();
   });
 });

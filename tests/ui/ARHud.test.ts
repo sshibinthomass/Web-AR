@@ -202,6 +202,44 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('a red modern chair');
   });
 
+  it('shows animated speech progress, detected transcript, and background-job guidance', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Speech to 3D')?.click();
+
+    expect(root.textContent).toContain('Speech input');
+    expect(root.textContent).toContain('Detecting speech');
+    expect(root.textContent).toContain('Generating image');
+    expect(root.textContent).toContain('Generating 3D model');
+
+    hud.showSpeechRecording();
+    expect(root.querySelector('.speech-visualizer')?.classList.contains('is-listening')).toBe(true);
+    expect(root.querySelector('[data-speech-stage="speech_input"]')?.classList.contains('is-active')).toBe(true);
+
+    hud.showSpeechCaptured();
+    expect(root.textContent).toContain('Audio captured. Speech will appear after detection.');
+    expect(root.querySelector<HTMLButtonElement>('.speech-actions button:nth-child(3)')?.disabled).toBe(false);
+
+    hud.showSpeechDetecting();
+    expect(root.querySelector('[data-speech-stage="detecting_speech"]')?.classList.contains('is-active')).toBe(true);
+
+    hud.showSpeechGeneratingImage('make a red modern chair');
+    expect(root.textContent).toContain('You said');
+    expect(root.textContent).toContain('make a red modern chair');
+    expect(root.querySelector('[data-speech-stage="generating_image"]')?.classList.contains('is-active')).toBe(true);
+
+    hud.showSpeechBackgroundJob({
+      label: 'red modern chair - 2026-07-07 08:30:00 UTC',
+      transcript: 'make a red modern chair',
+    });
+
+    expect(root.querySelector('[data-speech-stage="generating_3d"]')?.classList.contains('is-active')).toBe(true);
+    expect(root.textContent).toContain('You can close this app now.');
+    expect(root.textContent).toContain('AR View');
+  });
+
   it('submits login and account creation from the auth screen', () => {
     const root = document.createElement('div');
     const onLogin = vi.fn();

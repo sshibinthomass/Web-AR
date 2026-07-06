@@ -23,16 +23,19 @@ import {
   extractImageFor3D,
   deleteGeneratedModel as deleteGeneratedModelRequest,
   generateModelFromImage,
-  generateModelFromSpeech,
+  getGeneratedModelJobStatus,
   listGeneratedModels,
   listAdminJobs as listAdminJobsRequest,
   renameGeneratedModel as renameGeneratedModelRequest,
   retryAdminJob as retryAdminJobRequest,
+  startSpeechModelJob,
   startGeneratedModelJob,
   storeUploadedModel as storeUploadedModelRequest,
   toggleGeneratedModelVisibility as toggleGeneratedModelVisibilityRequest,
   updateGeneratedModelThumbnail as updateGeneratedModelThumbnailRequest,
+  type GeneratedModelJobStatus,
   type GenerationPipeline,
+  type StartSpeechModelJobResult,
 } from '../services/generatedModelClient';
 import {
   approveAccount as approveAccountRequest,
@@ -69,6 +72,8 @@ export class WebARApp {
   private capturedImagePreviewUrl: string | null = null;
   private speechRecordingSession: AudioRecordingSession | null = null;
   private speechAudio: RecordedAudio | null = null;
+  private speechJobWatchToken = 0;
+  private readonly speechJobPollDelayMs = 5000;
   private placementDragMode: PlacementGestureZone | null = null;
   private placementDragStart: Point2 | null = null;
   private layoutGestureStartedOnObject = false;
@@ -698,7 +703,7 @@ export class WebARApp {
 
     try {
       this.speechAudio = await session.stop();
-      this.hud?.showSpeechDetected('Speech recorded. Generate when ready.');
+      this.hud?.showSpeechCaptured();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not record speech.';
       this.speechAudio = null;
@@ -718,37 +723,95 @@ export class WebARApp {
     }
 
     const recordedAudio = this.speechAudio;
-    this.hud?.showSpeechGenerating();
+    this.hud?.showSpeechDetecting();
 
     try {
-      const generatedModel = await generateModelFromSpeech({
+      const job = await startSpeechModelJob({
         apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
         audioBase64: recordedAudio.audioBase64,
         audioMimeType: recordedAudio.audioMimeType,
         authToken,
       });
-      const transcript = generatedModel.transcript?.trim();
-      if (transcript) {
-        this.hud?.showSpeechDetected(transcript);
-      }
-
-      await this.loadModelFromUrl(generatedModel.modelUrl, 'Speech object', {
-        loadingMessage: 'Loading speech-generated object into AR...',
-        successMessage: 'Speech-generated object loaded.',
-        sourceMessage: 'Generated from speech',
-      });
-
       this.speechAudio = null;
-      this.hud?.showFullFlowReady('Speech-generated object is ready. Scan the floor, then tap Place.', {
-        id: 'speech-generated-object',
-        label: transcript || 'Speech object',
-        url: generatedModel.modelUrl,
-      });
+      this.hud?.showSpeechBackgroundJob(job);
       void this.refreshGeneratedModels();
+      void this.watchSpeechGenerationJob(job);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Speech to 3D failed.';
       this.hud?.showSpeechError(`Speech generation failed: ${message}`);
     }
+  }
+
+  private async watchSpeechGenerationJob(job: StartSpeechModelJobResult): Promise<void> {
+    const watchToken = ++this.speechJobWatchToken;
+    await this.pollSpeechGenerationJob(job, watchToken);
+  }
+
+  private async pollSpeechGenerationJob(job: StartSpeechModelJobResult, watchToken: number): Promise<void> {
+    if (watchToken !== this.speechJobWatchToken) {
+      return;
+    }
+
+    try {
+      const status = await getGeneratedModelJobStatus({
+        statusUrl: job.statusUrl,
+        authToken: this.authToken,
+      });
+      this.updateSpeechJobStatus(status);
+
+      if (status.status === 'completed') {
+        await this.openCompletedSpeechModelInAR(status);
+        return;
+      }
+
+      if (status.status === 'failed') {
+        this.hud?.showSpeechError(`Speech generation failed: ${status.error ?? 'The background job failed.'}`);
+        return;
+      }
+
+      window.setTimeout(() => {
+        void this.pollSpeechGenerationJob(job, watchToken);
+      }, this.speechJobPollDelayMs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not check speech generation status.';
+      this.hud?.showSpeechError(`Speech generation status failed: ${message}`);
+    }
+  }
+
+  private updateSpeechJobStatus(status: GeneratedModelJobStatus): void {
+    if (status.stage === 'generating_image') {
+      this.hud?.showSpeechGeneratingImage(status.transcript);
+      return;
+    }
+
+    if (status.stage === 'generating_3d' || status.status === 'running') {
+      this.hud?.showSpeechBackgroundJob({
+        label: status.label,
+        transcript: status.transcript,
+        stage: status.stage,
+      });
+    }
+  }
+
+  private async openCompletedSpeechModelInAR(status: GeneratedModelJobStatus): Promise<void> {
+    if (!status.modelUrl) {
+      this.hud?.showSpeechError('Speech model finished without a model URL.');
+      return;
+    }
+
+    this.hud?.showSpeechCompleted(status);
+    await this.refreshGeneratedModels();
+    await this.loadModelFromUrl(status.modelUrl, 'Speech object', {
+      loadingMessage: 'Loading speech-generated object into AR...',
+      successMessage: 'Speech-generated object loaded.',
+      sourceMessage: 'Generated from speech',
+    });
+    this.hud?.showFullFlowReady('Speech-generated object is ready. Opening AR camera.', {
+      id: status.id,
+      label: status.label,
+      url: status.modelUrl,
+    });
+    this.hud?.startARCamera();
   }
 
   private async returnHome(): Promise<void> {
@@ -759,6 +822,7 @@ export class WebARApp {
     this.speechRecordingSession?.cancel();
     this.speechRecordingSession = null;
     this.speechAudio = null;
+    this.speechJobWatchToken += 1;
     this.pendingUploadModelFile = null;
     this.layoutMode = false;
     this.layoutSceneManager?.clear();
