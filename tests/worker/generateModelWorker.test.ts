@@ -1488,6 +1488,169 @@ describe('handleGenerateModelRequest', () => {
     });
   });
 
+  it('scheduled polling resumes a speech job that was interrupted while generating the image', async () => {
+    const { bucket, objects } = createMemoryBucket({
+      'models/generated/jobs/index.json': JSON.stringify({ pending: ['speech-stuck'] }),
+      'models/generated/jobs/speech-stuck.json': JSON.stringify({
+        id: 'speech-stuck',
+        label: 'sofa with two pillows - 2026-07-06 23:17:47 UTC',
+        status: 'running',
+        stage: 'generating_image',
+        created_at: '2026-07-06T23:17:37.409Z',
+        updated_at: '2026-07-06T23:20:04.635Z',
+        pipeline: 'speech',
+        owner_email: 'sshibinthomass@gmail.com',
+        visibility: 'private',
+        source_transcript: 'A sofa with two pillows.',
+        target_object: 'sofa with two pillows',
+        generation_prompt:
+          'A centered sofa with two pillows, full object visible, clean silhouette, plain background, optimized for image-to-3D reconstruction.',
+      }),
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ b64_json: 'resumed-speech-image' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ call_id: 'speech-modal-resumed' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    const processed = await handleScheduledPendingJobs(createEnv({ MODEL_BUCKET: bucket }), {
+      fetch: fetchMock,
+      now: () => new Date('2026-07-06T23:25:00Z'),
+    });
+
+    expect(processed).toEqual({ completed: 0, failed: 0, stillRunning: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.openai.com/v1/images/generations');
+    expect(fetchMock.mock.calls[1][0]).toBe('https://modal.example/start');
+    expect(JSON.parse(objects.get('models/generated/jobs/speech-stuck.json') as string)).toMatchObject({
+      id: 'speech-stuck',
+      status: 'running',
+      stage: 'generating_3d',
+      modal_call_id: 'speech-modal-resumed',
+    });
+    expect(JSON.parse(objects.get('models/generated/jobs/index.json') as string)).toEqual({
+      pending: ['speech-stuck'],
+    });
+  });
+
+  it('scheduled polling resumes a speech job from stored audio when speech detection was interrupted', async () => {
+    const audioObjectKey = 'models/generated/speech-audio/speech-detecting.wav';
+    const { bucket, objects } = createMemoryBucket({
+      'models/generated/jobs/index.json': JSON.stringify({ pending: ['speech-detecting'] }),
+      'models/generated/jobs/speech-detecting.json': JSON.stringify({
+        id: 'speech-detecting',
+        label: 'Speech object - 2026-07-06 23:17:37 UTC',
+        status: 'running',
+        stage: 'detecting_speech',
+        created_at: '2026-07-06T23:17:37.409Z',
+        updated_at: '2026-07-06T23:17:37.409Z',
+        pipeline: 'speech',
+        owner_email: 'sshibinthomass@gmail.com',
+        visibility: 'private',
+        audio_object_key: audioObjectKey,
+        audio_mime_type: 'audio/wav',
+      }),
+      [audioObjectKey]: new TextEncoder().encode('wav-bytes').buffer,
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ text: 'A small round coffee table.' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            output: [
+              {
+                content: [
+                  {
+                    type: 'output_text',
+                    text: JSON.stringify({
+                      object: 'small round coffee table',
+                      prompt:
+                        'A small round coffee table, full object visible, clean silhouette, plain background, optimized for image-to-3D reconstruction.',
+                    }),
+                  },
+                ],
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ b64_json: 'coffee-table-image' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ call_id: 'speech-modal-detecting' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    const processed = await handleScheduledPendingJobs(createEnv({ MODEL_BUCKET: bucket }), {
+      fetch: fetchMock,
+      now: () => new Date('2026-07-06T23:25:00Z'),
+    });
+
+    expect(processed).toEqual({ completed: 0, failed: 0, stillRunning: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.openai.com/v1/audio/transcriptions');
+    expect(fetchMock.mock.calls[3][0]).toBe('https://modal.example/start');
+    expect(JSON.parse(objects.get('models/generated/jobs/speech-detecting.json') as string)).toMatchObject({
+      id: 'speech-detecting',
+      status: 'running',
+      stage: 'generating_3d',
+      source_transcript: 'A small round coffee table.',
+      modal_call_id: 'speech-modal-detecting',
+    });
+    expect(objects.has(audioObjectKey)).toBe(false);
+  });
+
+  it('queues speech jobs immediately so cron can resume the background pipeline', async () => {
+    const { bucket, objects } = createMemoryBucket({
+      'models/generated/jobs/index.json': JSON.stringify({ pending: [] }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-06-28T12:00:00Z') };
+    const token = await createAdminToken(env, deps);
+
+    const response = await handleGenerateModelRequest(
+      withAuth(speechGenerationRequest({
+        audio_base64: 'UklGRg==',
+        audio_mime_type: 'audio/wav',
+      }), token),
+      env,
+      deps,
+      { waitUntil: vi.fn() } as unknown as Parameters<typeof handleGenerateModelRequest>[3],
+    );
+
+    expect(response.status).toBe(202);
+    const body = (await response.json()) as { job_id: string };
+    expect(JSON.parse(objects.get('models/generated/jobs/index.json') as string)).toEqual({
+      pending: [body.job_id],
+    });
+    expect(objects.has(`models/generated/speech-audio/${body.job_id}.wav`)).toBe(true);
+  });
+
   it('returns a gateway error when Modal fails', async () => {
     const env = createEnv();
     const deps = {

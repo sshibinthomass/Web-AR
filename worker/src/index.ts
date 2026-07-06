@@ -140,6 +140,8 @@ interface StoredJob {
   modal_call_id?: string;
   source_transcript?: string;
   generation_prompt?: string;
+  audio_object_key?: string;
+  audio_mime_type?: string;
   owner_email?: string;
   visibility?: ModelVisibility;
   model_url?: string;
@@ -285,6 +287,7 @@ const generatedModelsIndexKey = 'models/generated/index.json';
 const pendingJobsIndexKey = 'models/generated/jobs/index.json';
 const jobHistoryIndexKey = 'models/generated/jobs/history.json';
 const jobKeyPrefix = 'models/generated/jobs/';
+const speechAudioKeyPrefix = 'models/generated/speech-audio/';
 const imageTargetsIndexKey = 'image-targets/index.json';
 const imageTargetRecordPrefix = 'image-targets/records/';
 const imageTargetImagePrefix = 'image-targets/images/';
@@ -649,24 +652,34 @@ async function handleSpeechGenerationRequest(
     typeof body.value.audio_mime_type === 'string' && body.value.audio_mime_type.startsWith('audio/')
       ? body.value.audio_mime_type
       : 'audio/webm';
+  const audioBase64 = stripDataUrlPrefix(body.value.audio_base64);
 
   const now = deps.now();
+  const jobId = createSpeechJobId(now, audioBase64);
+  const audioObjectKey = await storeSpeechAudio(env, {
+    jobId,
+    audioBase64,
+    audioMimeType,
+  });
   const job: StoredJob = {
-    id: createSpeechJobId(now, body.value.audio_base64),
+    id: jobId,
     label: `Speech object - ${formatDisplayTimestamp(now)}`,
     status: 'running',
     stage: 'detecting_speech',
     created_at: now.toISOString(),
     updated_at: now.toISOString(),
     pipeline: 'speech',
+    audio_object_key: audioObjectKey,
+    audio_mime_type: audioMimeType,
     owner_email: user.email,
     visibility: 'private',
   };
   await saveJob(env, job);
+  await addPendingJob(env, job.id);
 
   const backgroundJob = processSpeechGenerationJob(
     {
-      audioBase64: body.value.audio_base64,
+      audioBase64,
       audioMimeType,
       job,
       url,
@@ -702,23 +715,60 @@ async function processSpeechGenerationJob(
   env: WorkerEnv,
   deps: GenerateModelDeps,
 ): Promise<void> {
-  let job = input.job;
   try {
-    const transcript = await transcribeSpeechFor3D(
+    await advanceSpeechGenerationJob(
       {
+        job: input.job,
+        requestOrigin: input.url.origin,
         audioBase64: input.audioBase64,
         audioMimeType: input.audioMimeType,
       },
       env,
       deps,
     );
+  } catch (error) {
+    await failSpeechGenerationJob(env, deps, input.job, error);
+  }
+}
+
+async function advanceSpeechGenerationJob(
+  input: {
+    job: StoredJob;
+    requestOrigin?: string;
+    audioBase64?: string;
+    audioMimeType?: string;
+  },
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<StoredJob> {
+  let job = (await readJob(env, input.job.id)) ?? input.job;
+  if (job.status !== 'running' || job.modal_call_id) {
+    return job;
+  }
+
+  let transcript = job.source_transcript;
+  if (!transcript) {
+    const speechAudio = await readSpeechAudioForJob(env, job, {
+      audioBase64: input.audioBase64,
+      audioMimeType: input.audioMimeType,
+    });
+
+    if (!speechAudio) {
+      throw new Error('Speech audio was not available to resume detection.');
+    }
+
+    transcript = await transcribeSpeechFor3D(speechAudio, env, deps);
     job = await updateSpeechJob(env, deps, job, {
       source_transcript: transcript,
       stage: 'generating_image',
       updated_at: deps.now().toISOString(),
     });
+  }
 
+  let generationPrompt = job.generation_prompt;
+  if (!generationPrompt || !job.target_object) {
     const speechPrompt = await createSpeechImagePromptFor3D(transcript, env, deps);
+    generationPrompt = speechPrompt.prompt;
     job = await updateSpeechJob(env, deps, job, {
       label: formatJobLabel(deps.now(), speechPrompt.object),
       target_object: speechPrompt.object,
@@ -726,30 +776,53 @@ async function processSpeechGenerationJob(
       stage: 'generating_image',
       updated_at: deps.now().toISOString(),
     });
+  }
 
-    const imageBase64 = await generateSpeechImageFor3D(speechPrompt.prompt, env, deps);
-    const modalJob = await startModalGenerationForSpeechJob(input.url, env, deps, job, {
+  const imageBase64 = await generateSpeechImageFor3D(generationPrompt, env, deps);
+  const audioObjectKeyToDelete = job.audio_object_key;
+  const modalJob = await startModalGenerationForSpeechJob(
+    new URL(input.requestOrigin || getPublicOrigin(env) || 'https://worker.example'),
+    env,
+    deps,
+    job,
+    {
       imageBase64,
       imageMimeType: 'image/png',
-    });
-    await updateSpeechJob(env, deps, job, {
-      modal_call_id: modalJob.callId,
-      preview_url: modalJob.previewUrl,
-      preview_object_key: modalJob.previewObjectKey,
-      stage: 'generating_3d',
-      updated_at: deps.now().toISOString(),
-    });
-    await addPendingJob(env, job.id);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Speech-to-3D generation failed.';
-    await updateSpeechJob(env, deps, job, {
-      status: 'failed',
-      stage: 'failed',
-      error: message,
-      failed_at: deps.now().toISOString(),
-      updated_at: deps.now().toISOString(),
-    });
+    },
+  );
+  job = await updateSpeechJob(env, deps, job, {
+    modal_call_id: modalJob.callId,
+    preview_url: modalJob.previewUrl,
+    preview_object_key: modalJob.previewObjectKey,
+    audio_object_key: undefined,
+    audio_mime_type: undefined,
+    stage: 'generating_3d',
+    updated_at: deps.now().toISOString(),
+  });
+  if (env.MODEL_BUCKET.delete && audioObjectKeyToDelete) {
+    await env.MODEL_BUCKET.delete(audioObjectKeyToDelete);
   }
+  await addPendingJob(env, job.id);
+  return job;
+}
+
+async function failSpeechGenerationJob(
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  job: StoredJob,
+  error: unknown,
+): Promise<StoredJob> {
+  const currentJob = (await readJob(env, job.id)) ?? job;
+  const message = error instanceof Error ? error.message : 'Speech-to-3D generation failed.';
+  const failedJob = await updateSpeechJob(env, deps, currentJob, {
+    status: 'failed',
+    stage: 'failed',
+    error: message,
+    failed_at: deps.now().toISOString(),
+    updated_at: deps.now().toISOString(),
+  });
+  await removePendingJob(env, failedJob.id);
+  return failedJob;
 }
 
 async function updateSpeechJob(
@@ -764,6 +837,57 @@ async function updateSpeechJob(
   };
   await saveJob(env, nextJob);
   return nextJob;
+}
+
+async function storeSpeechAudio(
+  env: WorkerEnv,
+  input: {
+    jobId: string;
+    audioBase64: string;
+    audioMimeType: string;
+  },
+): Promise<string> {
+  const objectKey = speechAudioObjectKey(input.jobId, input.audioMimeType);
+  await env.MODEL_BUCKET.put(objectKey, base64ToArrayBuffer(stripDataUrlPrefix(input.audioBase64)), {
+    httpMetadata: {
+      contentType: input.audioMimeType,
+    },
+  });
+  return objectKey;
+}
+
+async function readSpeechAudioForJob(
+  env: WorkerEnv,
+  job: StoredJob,
+  suppliedAudio: {
+    audioBase64?: string;
+    audioMimeType?: string;
+  },
+): Promise<{ audioBase64: string; audioMimeType: string } | null> {
+  if (suppliedAudio.audioBase64) {
+    return {
+      audioBase64: stripDataUrlPrefix(suppliedAudio.audioBase64),
+      audioMimeType: suppliedAudio.audioMimeType ?? job.audio_mime_type ?? 'audio/webm',
+    };
+  }
+
+  if (!job.audio_object_key) {
+    return null;
+  }
+
+  const audioObject = await env.MODEL_BUCKET.get(job.audio_object_key);
+  if (!audioObject?.body) {
+    return null;
+  }
+
+  const audioBuffer = audioObject.arrayBuffer
+    ? await audioObject.arrayBuffer()
+    : await new Response(audioObject.body).arrayBuffer();
+
+  return {
+    audioBase64: arrayBufferToBase64(audioBuffer),
+    audioMimeType: job.audio_mime_type ?? audioObject.httpMetadata?.contentType ?? 'audio/webm',
+  };
 }
 
 async function startModalGenerationForSpeechJob(
@@ -1614,14 +1738,20 @@ async function processModalJob(
       pipeline: 'trellis',
     } satisfies StoredJob);
   if (job.pipeline === 'speech' && !job.modal_call_id) {
-    const waitingJob: StoredJob = {
-      ...job,
-      status: 'running',
-      stage: job.stage ?? 'detecting_speech',
-      updated_at: now.toISOString(),
-    };
-    await saveJob(env, waitingJob);
-    return { state: 'running', job: waitingJob };
+    try {
+      const resumedJob = await advanceSpeechGenerationJob(
+        {
+          job,
+          requestOrigin,
+        },
+        env,
+        deps,
+      );
+      return { state: 'running', job: resumedJob };
+    } catch (error) {
+      const failedJob = await failSpeechGenerationJob(env, deps, job, error);
+      return { state: 'failed', job: failedJob };
+    }
   }
   const resultUrl = new URL(modalConfigForPipeline(env, job.pipeline ?? 'trellis').resultUrl);
   resultUrl.searchParams.set('call_id', job.modal_call_id ?? jobId);
@@ -2073,6 +2203,23 @@ function audioFileName(audioMimeType: string): string {
     return 'speech.m4a';
   }
   return 'speech.webm';
+}
+
+function speechAudioObjectKey(jobId: string, audioMimeType: string): string {
+  return `${speechAudioKeyPrefix}${safeObjectKeyPart(jobId)}.${audioExtensionForMimeType(audioMimeType)}`;
+}
+
+function audioExtensionForMimeType(audioMimeType: string): string {
+  if (audioMimeType.includes('wav')) {
+    return 'wav';
+  }
+  if (audioMimeType.includes('mpeg') || audioMimeType.includes('mp3')) {
+    return 'mp3';
+  }
+  if (audioMimeType.includes('mp4') || audioMimeType.includes('m4a')) {
+    return 'm4a';
+  }
+  return 'webm';
 }
 
 function pipelineFromGeneratePath(pathname: string): GenerationPipeline {
