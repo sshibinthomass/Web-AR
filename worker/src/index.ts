@@ -25,6 +25,7 @@ export interface WorkerEnv {
   MODAL_OPENAI_TO_3D_URL: string;
   MODAL_OPENAI_TO_3D_START_URL: string;
   MODAL_OPENAI_TO_3D_RESULT_URL: string;
+  MODAL_OBJECT_PREPROCESS_QUALITY_URL?: string;
   OPENAI_API_KEY: string;
   PUBLIC_MODEL_ORIGIN?: string;
   MODEL_BUCKET: ModelBucket;
@@ -50,6 +51,14 @@ interface GenerateModelRequestBody {
   target_object?: unknown;
 }
 
+interface DynamicImageResponse {
+  image_base64?: unknown;
+  image_format?: unknown;
+  image_mime_type?: unknown;
+  error?: unknown;
+  detail?: unknown;
+}
+
 interface UploadModelRequestBody {
   file_name?: unknown;
   label?: unknown;
@@ -71,7 +80,7 @@ interface AuthRequestBody {
   status?: unknown;
 }
 
-type GenerationPipeline = 'trellis' | 'openai-to-3d';
+type GenerationPipeline = 'trellis' | 'openai-to-3d' | 'dynamic';
 type AuthRole = 'admin' | 'user';
 type AccountStatus = 'active' | 'pending';
 type ModelVisibility = 'public' | 'private';
@@ -425,7 +434,12 @@ async function routeGenerateModelRequest(
     return jsonResponse({ error: 'Only POST requests are supported.' }, 405);
   }
 
-  if (url.pathname !== '/generate-3d' && url.pathname !== '/generate-3d/openai' && url.pathname !== '/extract-image') {
+  if (
+    url.pathname !== '/generate-3d' &&
+    url.pathname !== '/generate-3d/openai' &&
+    url.pathname !== '/generate-3d/dynamic' &&
+    url.pathname !== '/extract-image'
+  ) {
     return jsonResponse({ error: 'Not found.' }, 404);
   }
 
@@ -434,7 +448,8 @@ async function routeGenerateModelRequest(
     return auth;
   }
 
-  const configError = validateEnv(env);
+  const pipeline = pipelineFromGeneratePath(url.pathname);
+  const configError = validateEnv(env, pipeline);
   if (configError) {
     return jsonResponse({ error: configError }, 500);
   }
@@ -482,7 +497,7 @@ async function routeGenerateModelRequest(
       imageBase64: body.value.image_base64,
       imageMimeType: typeof body.value.image_mime_type === 'string' ? body.value.image_mime_type : 'image/png',
       targetObject,
-      pipeline: url.pathname === '/generate-3d/openai' ? 'openai-to-3d' : 'trellis',
+      pipeline,
     },
   );
 }
@@ -500,8 +515,21 @@ async function startModalGenerationJob(
   },
 ): Promise<Response> {
   const modalConfig = modalConfigForPipeline(env, input.pipeline);
+  let generationImage = {
+    imageBase64: input.imageBase64,
+    imageMimeType: input.imageMimeType,
+  };
+  if (input.pipeline === 'dynamic') {
+    try {
+      generationImage = await generateDynamicImageFor3D(input, env, deps);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Dynamic image generation failed.';
+      return jsonResponse({ error: message }, 502);
+    }
+  }
+
   const payload: Record<string, unknown> = {
-    image_base64: input.imageBase64,
+    image_base64: generationImage.imageBase64,
   };
   if (input.pipeline === 'openai-to-3d' && input.targetObject) {
     payload.prompt = input.targetObject;
@@ -530,8 +558,8 @@ async function startModalGenerationJob(
   const now = deps.now();
   const publicOrigin = getPublicOrigin(env, url.origin);
   const preview = await storeGeneratedModelPreview(env, {
-    imageBase64: input.imageBase64,
-    imageMimeType: input.imageMimeType,
+    imageBase64: generationImage.imageBase64,
+    imageMimeType: generationImage.imageMimeType,
     jobId: modalJob.call_id,
     createdAt: now,
     publicOrigin,
@@ -1422,7 +1450,7 @@ async function processModalJob(
   return { state: 'completed', job: completedJob };
 }
 
-function validateEnv(env: WorkerEnv): string | null {
+function validateEnv(env: WorkerEnv, pipeline?: GenerationPipeline): string | null {
   if (!env.MODAL_KEY || !env.MODAL_SECRET) {
     return 'Modal credentials are not configured.';
   }
@@ -1441,6 +1469,10 @@ function validateEnv(env: WorkerEnv): string | null {
 
   if (!env.MODAL_OPENAI_TO_3D_START_URL || !env.MODAL_OPENAI_TO_3D_RESULT_URL) {
     return 'Modal OpenAI-to-3D async endpoint URLs are not configured.';
+  }
+
+  if (pipeline === 'dynamic' && !env.MODAL_OBJECT_PREPROCESS_QUALITY_URL) {
+    return 'Modal dynamic image generation endpoint URL is not configured.';
   }
 
   if (!env.MODEL_BUCKET) {
@@ -1467,6 +1499,84 @@ function modalConfigForPipeline(
     resultUrl: env.MODAL_IMAGE_TO_3D_RESULT_URL,
     payloadDefaults: modalPayloadDefaults,
   };
+}
+
+async function generateDynamicImageFor3D(
+  input: {
+    imageBase64: string;
+    imageMimeType: string;
+    targetObject: string | null;
+  },
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<{ imageBase64: string; imageMimeType: string }> {
+  if (!env.MODAL_OBJECT_PREPROCESS_QUALITY_URL) {
+    throw new Error('Modal dynamic image generation endpoint URL is not configured.');
+  }
+
+  const response = await deps.fetch(env.MODAL_OBJECT_PREPROCESS_QUALITY_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Modal-Key': env.MODAL_KEY,
+      'Modal-Secret': env.MODAL_SECRET,
+    },
+    body: JSON.stringify({
+      image_base64: input.imageBase64,
+      target_text: dynamicTargetText(input.targetObject),
+      force_image_gen: true,
+      return_debug_images: false,
+      validate_output: true,
+      auto_image_gen_on_validation_fail: true,
+    }),
+  });
+
+  const responseText = await response.text();
+  if (!response.ok) {
+    throw new Error(`Dynamic image generation failed: ${responseText}`);
+  }
+
+  let body: DynamicImageResponse;
+  try {
+    body = JSON.parse(responseText) as DynamicImageResponse;
+  } catch {
+    throw new Error('Dynamic image generation failed: invalid JSON response.');
+  }
+
+  if (typeof body.error === 'string' && body.error) {
+    throw new Error(`${body.error}${typeof body.detail === 'string' && body.detail ? `: ${body.detail}` : ''}`);
+  }
+
+  if (typeof body.image_base64 !== 'string' || !body.image_base64) {
+    throw new Error('Dynamic image generation failed: endpoint response did not include image_base64.');
+  }
+
+  return {
+    imageBase64: body.image_base64,
+    imageMimeType: imageMimeTypeFromDynamicResponse(body),
+  };
+}
+
+function dynamicTargetText(targetObject: string | null): string {
+  return targetObject?.trim() || 'main object';
+}
+
+function imageMimeTypeFromDynamicResponse(body: DynamicImageResponse): string {
+  if (typeof body.image_mime_type === 'string' && body.image_mime_type.startsWith('image/')) {
+    return body.image_mime_type;
+  }
+
+  if (typeof body.image_format === 'string') {
+    const normalized = body.image_format.trim().toLowerCase();
+    if (normalized === 'jpg' || normalized === 'jpeg') {
+      return 'image/jpeg';
+    }
+    if (normalized === 'webp') {
+      return 'image/webp';
+    }
+  }
+
+  return 'image/png';
 }
 
 async function extractImageFor3D(
@@ -1519,6 +1629,18 @@ function buildOpenAiExtractionPrompt(targetObject: string | null): string {
   }
 
   return 'Extract the main, most prominent object from the image. Place it in a frontal-side position suitable for 3D generation, and make the background solid pure white. The final output must contain only a single object, in high quality (HQ), extremely sharp, with clear details and studio lighting, optimized for 3D reconstruction.';
+}
+
+function pipelineFromGeneratePath(pathname: string): GenerationPipeline {
+  if (pathname === '/generate-3d/openai') {
+    return 'openai-to-3d';
+  }
+
+  if (pathname === '/generate-3d/dynamic') {
+    return 'dynamic';
+  }
+
+  return 'trellis';
 }
 
 function normalizeTargetObject(value: unknown): string | null {

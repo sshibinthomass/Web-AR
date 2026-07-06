@@ -160,6 +160,41 @@ describe('startGeneratedModelJob', () => {
       }),
     );
   });
+
+  it('uses the Dynamic Worker endpoint when requested', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          job_id: 'dynamic-123',
+          status_url: 'https://worker.example/generate-3d/jobs/dynamic-123',
+        }),
+        {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    await startGeneratedModelJob({
+      apiUrl: 'https://worker.example/generate-3d',
+      imageBase64: 'captured-image-base64',
+      imageMimeType: 'image/jpeg',
+      targetObject: ' chair ',
+      generationPipeline: 'dynamic',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/generate-3d/dynamic',
+      expect.objectContaining({
+        body: JSON.stringify({
+          image_base64: 'captured-image-base64',
+          image_mime_type: 'image/jpeg',
+          target_object: 'chair',
+        }),
+      }),
+    );
+  });
 });
 
 describe('listGeneratedModels', () => {

@@ -13,7 +13,7 @@ export interface GenerateModelInput {
   maxPolls?: number;
 }
 
-export type GenerationPipeline = 'trellis' | 'openai-to-3d';
+export type GenerationPipeline = 'trellis' | 'openai-to-3d' | 'dynamic';
 
 export interface GeneratedModelResult {
   modelUrl: string;
@@ -589,6 +589,10 @@ function extractImageUrlFromGenerateUrl(apiUrl: string): string {
 function generateModelUrlForPipeline(apiUrl: string, generationPipeline: GenerationPipeline): string {
   if (generationPipeline === 'openai-to-3d') {
     return apiUrl.replace(/\/+$/, '').replace(/\/generate-3d$/, '/generate-3d/openai');
+  }
+
+  if (generationPipeline === 'dynamic') {
+    return apiUrl.replace(/\/+$/, '').replace(/\/generate-3d$/, '/generate-3d/dynamic');
   }
 
   return apiUrl;

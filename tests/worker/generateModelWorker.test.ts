@@ -13,6 +13,7 @@ function createEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
     MODAL_OPENAI_TO_3D_URL: 'https://modal.example/openai-generate',
     MODAL_OPENAI_TO_3D_START_URL: 'https://modal.example/openai-start',
     MODAL_OPENAI_TO_3D_RESULT_URL: 'https://modal.example/openai-result',
+    MODAL_OBJECT_PREPROCESS_QUALITY_URL: 'https://modal.example/quality-preprocess',
     OPENAI_API_KEY: 'openai-key',
     PUBLIC_MODEL_ORIGIN: 'https://web-ar-model-assets.pages.dev',
     MODEL_BUCKET: createMemoryBucket().bucket,
@@ -69,6 +70,14 @@ function extractRequest(body: unknown): Request {
 
 function directOpenAiTo3DRequest(body: unknown): Request {
   return new Request('https://worker.example/generate-3d/openai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+function dynamicGenerationRequest(body: unknown): Request {
+  return new Request('https://worker.example/generate-3d/dynamic', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -679,6 +688,94 @@ describe('handleGenerateModelRequest', () => {
       label: 'laptop - 2026-06-28 12:00:00 UTC',
       status: 'running',
       status_url: 'https://worker.example/generate-3d/jobs/openai-123',
+    });
+  });
+
+  it('starts a Dynamic Modal job by preprocessing the image before TRELLIS generation', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            image_base64: 'dynamic-image-base64',
+            image_format: 'png',
+            used_image_gen: true,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ call_id: 'dynamic-123' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const env = createEnv();
+    const deps = { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') };
+    const token = await createAdminToken(env, deps);
+
+    const response = await handleGenerateModelRequest(
+      withAuth(dynamicGenerationRequest({
+        image_base64: 'captured-image-base64',
+        image_mime_type: 'image/jpeg',
+        target_object: ' chair ',
+      }), token),
+      env,
+      deps,
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://modal.example/quality-preprocess',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Modal-Key': 'modal-key',
+          'Modal-Secret': 'modal-secret',
+        },
+        body: JSON.stringify({
+          image_base64: 'captured-image-base64',
+          target_text: 'chair',
+          force_image_gen: true,
+          return_debug_images: false,
+          validate_output: true,
+          auto_image_gen_on_validation_fail: true,
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://modal.example/start',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Modal-Key': 'modal-key',
+          'Modal-Secret': 'modal-secret',
+        },
+        body: JSON.stringify({
+          image_base64: 'dynamic-image-base64',
+          seed: 42,
+          pipeline_type: '512',
+          decimation_target: 100000,
+          texture_size: 1024,
+        }),
+      }),
+    );
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/jobs/dynamic-123.json',
+      expect.stringContaining('"pipeline":"dynamic"'),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({
+      job_id: 'dynamic-123',
+      label: 'chair - 2026-06-28 12:00:00 UTC',
+      status: 'running',
+      status_url: 'https://worker.example/generate-3d/jobs/dynamic-123',
     });
   });
 

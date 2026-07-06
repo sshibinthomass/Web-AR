@@ -17,6 +17,7 @@ interface HUDHandlers {
   onSubmitTarget(targetObject: string): void;
   onGenerateModel(targetObject: string): void;
   onFullFlowCapture(targetObject: string): void;
+  onDynamicFlowCapture(targetObject: string): void;
   onStoreUploadedModel(): void;
   onRenameGeneratedModel(modelId: string, label: string): void;
   onDeleteGeneratedModel(modelId: string): void;
@@ -43,7 +44,18 @@ interface HUDHandlers {
   onDeleteLayoutObject(): void;
 }
 
-type HudRoute = 'home' | 'camera' | 'upload' | 'upload-model' | 'ar' | 'full-flow' | 'multi-object' | 'models' | 'login' | 'admin';
+type HudRoute =
+  | 'home'
+  | 'camera'
+  | 'upload'
+  | 'upload-model'
+  | 'ar'
+  | 'full-flow'
+  | 'dynamic'
+  | 'multi-object'
+  | 'models'
+  | 'login'
+  | 'admin';
 type ModelLibraryFilter = 'all' | 'generated' | 'uploaded' | 'favorites' | 'recent';
 type AuthFormMode = 'login' | 'signup';
 type ModelActionIcon = 'preview' | 'favorite' | 'favorite-filled' | 'visibility-public' | 'visibility-private' | 'edit' | 'delete';
@@ -212,6 +224,7 @@ export class ARHud {
           this.createModeAction(this.createButton('Upload Image', '', () => this.navigateTo('upload')), 'IMG'),
           this.createModeAction(this.createButton('Upload Model', '', () => this.navigateTo('upload-model')), 'GLB'),
           this.createModeAction(this.createButton('Full Flow', '', () => this.navigateTo('full-flow')), 'AI'),
+          this.createModeAction(this.createButton('Dynamic', '', () => this.navigateTo('dynamic')), 'DYN'),
         ],
       ),
     );
@@ -763,12 +776,18 @@ export class ARHud {
     this.targetObjectLabel.classList.remove('hidden');
     this.captureButton.classList.add('hidden');
     this.captureButton.disabled = true;
-    this.submitButton.classList.remove('hidden');
+    this.submitButton.classList.toggle('hidden', this.activeRoute === 'dynamic');
+    this.submitButton.disabled = this.activeRoute === 'dynamic';
     this.generateButton.classList.remove('hidden');
     this.generateButton.textContent = this.generationButtonLabel();
     this.storeModelButton.classList.add('hidden');
     this.storeModelButton.disabled = true;
-    this.updateCameraStatus('Image captured. Submit to GPT or generate a 3D model directly.', true);
+    this.updateCameraStatus(
+      this.activeRoute === 'dynamic'
+        ? 'Image captured. Generate a dynamic image, then place the 3D model.'
+        : 'Image captured. Submit to GPT or generate a 3D model directly.',
+      true,
+    );
   }
 
   showUploadedImagePreview(imageUrl: string): void {
@@ -938,7 +957,7 @@ export class ARHud {
   }
 
   private routeRequiresAuth(route: HudRoute): boolean {
-    return route === 'camera' || route === 'upload' || route === 'upload-model' || route === 'full-flow';
+    return route === 'camera' || route === 'upload' || route === 'upload-model' || route === 'full-flow' || route === 'dynamic';
   }
 
   private isLoggedIn(): boolean {
@@ -971,6 +990,8 @@ export class ARHud {
         return 'Sign in to use Upload Model.';
       case 'full-flow':
         return 'Sign in to use Full Flow.';
+      case 'dynamic':
+        return 'Sign in to use Dynamic.';
       default:
         return 'Sign in with an approved account.';
     }
@@ -988,6 +1009,8 @@ export class ARHud {
         return 'ar';
       case '#/full-flow':
         return 'full-flow';
+      case '#/dynamic':
+        return 'dynamic';
       case '#/multi-object':
         return 'multi-object';
       case '#/models':
@@ -1041,6 +1064,11 @@ export class ARHud {
 
     if (route === 'full-flow') {
       this.openFullFlowPage();
+      return;
+    }
+
+    if (route === 'dynamic') {
+      this.openDynamicPage();
       return;
     }
 
@@ -1166,6 +1194,32 @@ export class ARHud {
     this.fullFlowLoading.classList.add('hidden');
     this.showLiveCameraPreview();
     this.updateCameraStatus('Capture an image to build and place a 3D object.', false);
+    this.handlers.onStartCamera();
+  }
+
+  private openDynamicPage(): void {
+    this.closeModelPreviewIfOpen();
+    this.clearFullFlowModelOption();
+    this.arPlacementStarted = false;
+    this.landing.classList.add('hidden');
+    this.authPanel.classList.add('hidden');
+    this.adminDashboard.classList.add('hidden');
+    this.modelManager.classList.add('hidden');
+    this.layoutManager.classList.add('hidden');
+    this.statusPanel.classList.remove('hidden');
+    this.statusPanel.classList.add('camera-active', 'full-flow-active');
+    this.statusPanel.classList.remove('ar-picker-active');
+    this.statusPanel.classList.remove('layout-active');
+    this.hudActions.classList.add('hidden');
+    this.showLayoutActionButtons(false);
+    this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.cameraPanel.classList.remove('hidden');
+    this.cameraPanel.classList.add('fullscreen');
+    this.fullFlowLoading.classList.add('hidden');
+    this.showLiveCameraPreview();
+    this.updateCameraStatus('Capture an image to generate a dynamic image and 3D object.', false);
     this.handlers.onStartCamera();
   }
 
@@ -1371,10 +1425,18 @@ export class ARHud {
 
   private handleGenerateClick(): void {
     const targetObject = this.targetObjectInput.value.trim();
-    if (this.activeRoute === 'full-flow') {
+    if (this.activeRoute === 'full-flow' || this.activeRoute === 'dynamic') {
+      const isDynamicRoute = this.activeRoute === 'dynamic';
       this.navigateTo('ar');
-      this.statusMessage.textContent = 'Opening AR camera and building your 3D object...';
+      this.statusMessage.textContent =
+        isDynamicRoute
+          ? 'Opening AR camera, generating a dynamic image, and building your 3D object...'
+          : 'Opening AR camera and building your 3D object...';
       this.startAttachedARCamera();
+      if (isDynamicRoute) {
+        this.handlers.onDynamicFlowCapture(targetObject);
+        return;
+      }
       this.handlers.onFullFlowCapture(targetObject);
       return;
     }
@@ -2180,7 +2242,7 @@ export class ARHud {
   }
 
   private generationButtonLabel(): string {
-    return this.activeRoute === 'full-flow' ? 'Generate and Place' : 'Generate 3D';
+    return this.activeRoute === 'full-flow' || this.activeRoute === 'dynamic' ? 'Generate and Place' : 'Generate 3D';
   }
 
   private startAttachedARCamera(): void {

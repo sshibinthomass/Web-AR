@@ -29,6 +29,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onSubmitTarget: vi.fn(),
     onGenerateModel: vi.fn(),
     onFullFlowCapture: vi.fn(),
+    onDynamicFlowCapture: vi.fn(),
     onStoreUploadedModel: vi.fn(),
     onRenameGeneratedModel: vi.fn(),
     onDeleteGeneratedModel: vi.fn(),
@@ -96,7 +97,16 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Available as guest');
     expect(root.textContent).toContain('Login required');
     expect(root.querySelector('.landing-preview')).not.toBeNull();
-    expect(choiceButtons).toEqual(['AR View', 'Models', 'Multi Object', 'Camera', 'Upload Image', 'Upload Model', 'Full Flow']);
+    expect(choiceButtons).toEqual([
+      'AR View',
+      'Models',
+      'Multi Object',
+      'Camera',
+      'Upload Image',
+      'Upload Model',
+      'Full Flow',
+      'Dynamic',
+    ]);
     const modeGroups = [...root.querySelectorAll('.mode-group')];
     expect([...modeGroups[0].querySelectorAll('button')].map((button) => button.textContent)).toEqual([
       'AR View',
@@ -108,6 +118,7 @@ describe('ARHud', () => {
       'Upload Image',
       'Upload Model',
       'Full Flow',
+      'Dynamic',
     ]);
     expect(statusPanel?.classList.contains('hidden')).toBe(true);
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
@@ -306,6 +317,21 @@ describe('ARHud', () => {
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.camera-panel')?.classList.contains('fullscreen')).toBe(true);
     expect(root.textContent).toContain('Capture');
+  });
+
+  it('opens Dynamic from the first screen as a capture page', () => {
+    const root = document.createElement('div');
+    const onStartCamera = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
+    hud.updateAuthState(activeUser);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Dynamic')?.click();
+
+    expect(window.location.hash).toBe('#/dynamic');
+    expect(onStartCamera).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.camera-panel')?.classList.contains('fullscreen')).toBe(true);
+    expect(root.textContent).toContain('dynamic image');
   });
 
   it('opens Multi Object for guests as a fresh AR placement session without saved layouts', () => {
@@ -880,6 +906,42 @@ describe('ARHud', () => {
     expect(window.location.hash).toBe('#/ar');
     expect(startArCamera).toHaveBeenCalledTimes(1);
     expect(onFullFlowCapture).toHaveBeenCalledWith('laptop');
+  });
+
+  it('starts Dynamic generation from the generate tap after capture without GPT submit', () => {
+    const root = document.createElement('div');
+    const onCaptureImage = vi.fn();
+    const onSubmitTarget = vi.fn();
+    const onDynamicFlowCapture = vi.fn();
+    const hud = new ARHud(
+      root,
+      modelOptions,
+      createHandlers({ onCaptureImage, onSubmitTarget, onDynamicFlowCapture }),
+    );
+    hud.updateAuthState(activeUser);
+    const startArCamera = vi.fn();
+    const arButton = document.createElement('button');
+    arButton.textContent = 'Start AR';
+    arButton.addEventListener('click', startArCamera);
+    hud.attachARButton(arButton);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Dynamic')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Capture')?.click();
+
+    expect(onCaptureImage).toHaveBeenCalledTimes(1);
+
+    hud.showCapturedImagePreview('blob:dynamic-capture');
+    const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
+    targetInput!.value = ' chair ';
+    const submitButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit');
+    expect(submitButton?.classList.contains('hidden')).toBe(true);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate and Place')?.click();
+
+    expect(window.location.hash).toBe('#/ar');
+    expect(startArCamera).toHaveBeenCalledTimes(1);
+    expect(onDynamicFlowCapture).toHaveBeenCalledWith('chair');
+    expect(onSubmitTarget).not.toHaveBeenCalled();
   });
 
   it('shows a blocking loading state during Full Flow generation', () => {
