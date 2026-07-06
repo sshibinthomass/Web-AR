@@ -38,6 +38,9 @@ interface HUDHandlers {
   onRefreshAdminJobs(): void;
   onRetryAdminJob(jobId: string): void;
   onCleanupFailedJobArtifacts(): void;
+  onStartSpeechRecording(): void;
+  onStopSpeechRecording(): void;
+  onGenerateSpeechModel(): void;
   onPrepareMultiObject(): void;
   onStartMultiObject(): void;
   onAddLayoutObject(): void;
@@ -52,6 +55,7 @@ type HudRoute =
   | 'ar'
   | 'full-flow'
   | 'dynamic'
+  | 'speech'
   | 'multi-object'
   | 'models'
   | 'login'
@@ -87,6 +91,12 @@ export class ARHud {
   private readonly adminJobList: HTMLElement;
   private readonly adminDashboardMessage: HTMLElement;
   private readonly adminJobMessage: HTMLElement;
+  private readonly speechPanel: HTMLElement;
+  private readonly speechStatusMessage: HTMLElement;
+  private readonly speechTranscriptMessage: HTMLElement;
+  private readonly speechRecordButton: HTMLButtonElement;
+  private readonly speechStopButton: HTMLButtonElement;
+  private readonly speechGenerateButton: HTMLButtonElement;
   private readonly statusPanel: HTMLElement;
   private readonly hudActions: HTMLElement;
   private readonly statusMessage: HTMLElement;
@@ -223,6 +233,7 @@ export class ARHud {
           this.createModeAction(this.createButton('Camera', '', () => this.navigateTo('camera')), 'CAM'),
           this.createModeAction(this.createButton('Upload Image', '', () => this.navigateTo('upload')), 'IMG'),
           this.createModeAction(this.createButton('Upload Model', '', () => this.navigateTo('upload-model')), 'GLB'),
+          this.createModeAction(this.createButton('Speech to 3D', '', () => this.navigateTo('speech')), 'MIC'),
           this.createModeAction(this.createButton('Full Flow', '', () => this.navigateTo('full-flow')), 'AI'),
           this.createModeAction(this.createButton('Dynamic', '', () => this.navigateTo('dynamic')), 'DYN'),
         ],
@@ -326,6 +337,34 @@ export class ARHud {
     this.adminDashboardMessage = this.adminDashboard.querySelector<HTMLElement>('.admin-dashboard-message')!;
     this.adminJobMessage = this.adminDashboard.querySelector<HTMLElement>('.admin-job-message')!;
     shell.appendChild(this.adminDashboard);
+
+    this.speechPanel = document.createElement('section');
+    this.speechPanel.className = 'speech-panel hidden';
+    this.speechPanel.innerHTML = `
+      <div class="speech-panel-inner">
+        <button class="page-back" type="button">Back</button>
+        <div class="speech-panel-header">
+          <h2>Speech to 3D</h2>
+          <p class="speech-status">Push to talk, then generate a 3D-ready image and model.</p>
+        </div>
+        <div class="speech-transcript" aria-live="polite">No speech recorded yet.</div>
+        <div class="speech-actions"></div>
+      </div>
+    `;
+    this.speechPanel.querySelector<HTMLButtonElement>('.page-back')?.addEventListener('click', () => this.navigateTo('home'));
+    this.speechStatusMessage = this.speechPanel.querySelector<HTMLElement>('.speech-status')!;
+    this.speechTranscriptMessage = this.speechPanel.querySelector<HTMLElement>('.speech-transcript')!;
+    this.speechRecordButton = this.createButton('Record', 'primary', () => this.handlers.onStartSpeechRecording());
+    this.speechStopButton = this.createButton('Stop', '', () => this.handlers.onStopSpeechRecording());
+    this.speechGenerateButton = this.createButton('Generate Speech Model', '', () => this.handlers.onGenerateSpeechModel());
+    this.speechStopButton.disabled = true;
+    this.speechGenerateButton.disabled = true;
+    this.speechPanel.querySelector<HTMLElement>('.speech-actions')?.append(
+      this.speechRecordButton,
+      this.speechStopButton,
+      this.speechGenerateButton,
+    );
+    shell.appendChild(this.speechPanel);
 
     this.modelManager = document.createElement('section');
     this.modelManager.className = 'model-manager hidden';
@@ -623,6 +662,7 @@ export class ARHud {
     this.landing.classList.add('hidden');
     this.authPanel.classList.add('hidden');
     this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -686,6 +726,46 @@ export class ARHud {
     if (!this.submitButton.classList.contains('hidden')) {
       this.submitButton.disabled = !canGenerate;
     }
+  }
+
+  showSpeechReady(message = 'Push to talk, then generate a 3D-ready image and model.'): void {
+    this.speechStatusMessage.textContent = message;
+    this.speechRecordButton.disabled = false;
+    this.speechStopButton.disabled = true;
+    this.speechGenerateButton.disabled = true;
+    if (!this.speechTranscriptMessage.textContent?.trim()) {
+      this.speechTranscriptMessage.textContent = 'No speech recorded yet.';
+    }
+  }
+
+  showSpeechRecording(): void {
+    this.speechStatusMessage.textContent = 'Listening...';
+    this.speechTranscriptMessage.textContent = 'Recording speech for a 3D model request.';
+    this.speechRecordButton.disabled = true;
+    this.speechStopButton.disabled = false;
+    this.speechGenerateButton.disabled = true;
+  }
+
+  showSpeechDetected(transcript: string): void {
+    this.speechStatusMessage.textContent = 'Speech detected. Generate the 3D model when ready.';
+    this.speechTranscriptMessage.textContent = transcript || 'Speech recorded.';
+    this.speechRecordButton.disabled = false;
+    this.speechStopButton.disabled = true;
+    this.speechGenerateButton.disabled = !transcript;
+  }
+
+  showSpeechGenerating(message = 'Generating a 3D-ready image and model from speech. Keep this page open.'): void {
+    this.speechStatusMessage.textContent = message;
+    this.speechRecordButton.disabled = true;
+    this.speechStopButton.disabled = true;
+    this.speechGenerateButton.disabled = true;
+  }
+
+  showSpeechError(message: string): void {
+    this.speechStatusMessage.textContent = message;
+    this.speechRecordButton.disabled = false;
+    this.speechStopButton.disabled = true;
+    this.speechGenerateButton.disabled = this.speechTranscriptMessage.textContent === 'No speech recorded yet.';
   }
 
   showLiveCameraPreview(): void {
@@ -957,7 +1037,7 @@ export class ARHud {
   }
 
   private routeRequiresAuth(route: HudRoute): boolean {
-    return route === 'camera' || route === 'upload' || route === 'upload-model' || route === 'full-flow' || route === 'dynamic';
+    return route === 'camera' || route === 'upload' || route === 'upload-model' || route === 'full-flow' || route === 'dynamic' || route === 'speech';
   }
 
   private isLoggedIn(): boolean {
@@ -992,6 +1072,8 @@ export class ARHud {
         return 'Sign in to use Full Flow.';
       case 'dynamic':
         return 'Sign in to use Dynamic.';
+      case 'speech':
+        return 'Sign in to use Speech to 3D.';
       default:
         return 'Sign in with an approved account.';
     }
@@ -1011,6 +1093,8 @@ export class ARHud {
         return 'full-flow';
       case '#/dynamic':
         return 'dynamic';
+      case '#/speech':
+        return 'speech';
       case '#/multi-object':
         return 'multi-object';
       case '#/models':
@@ -1072,6 +1156,11 @@ export class ARHud {
       return;
     }
 
+    if (route === 'speech') {
+      this.openSpeechPage();
+      return;
+    }
+
     if (route === 'multi-object') {
       this.openMultiObjectPage();
       return;
@@ -1102,6 +1191,7 @@ export class ARHud {
     this.landing.classList.remove('hidden');
     this.authPanel.classList.add('hidden');
     this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.add('hidden');
@@ -1130,6 +1220,7 @@ export class ARHud {
     this.landing.classList.add('hidden');
     this.authPanel.classList.add('hidden');
     this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -1154,6 +1245,7 @@ export class ARHud {
     this.landing.classList.add('hidden');
     this.authPanel.classList.add('hidden');
     this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -1178,6 +1270,7 @@ export class ARHud {
     this.landing.classList.add('hidden');
     this.authPanel.classList.add('hidden');
     this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -1204,6 +1297,7 @@ export class ARHud {
     this.landing.classList.add('hidden');
     this.authPanel.classList.add('hidden');
     this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -1223,6 +1317,29 @@ export class ARHud {
     this.handlers.onStartCamera();
   }
 
+  private openSpeechPage(): void {
+    this.closeModelPreviewIfOpen();
+    this.clearFullFlowModelOption();
+    this.arPlacementStarted = false;
+    this.landing.classList.add('hidden');
+    this.authPanel.classList.add('hidden');
+    this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.remove('hidden');
+    this.modelManager.classList.add('hidden');
+    this.layoutManager.classList.add('hidden');
+    this.statusPanel.classList.add('hidden');
+    this.statusPanel.classList.remove('camera-active', 'ar-picker-active', 'full-flow-active', 'layout-active');
+    this.hudActions.classList.add('hidden');
+    this.showLayoutActionButtons(false);
+    this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.cameraPanel.classList.add('hidden');
+    this.cameraPanel.classList.remove('fullscreen');
+    this.fullFlowLoading.classList.add('hidden');
+    this.showSpeechReady();
+  }
+
   private openUploadPage(): void {
     this.closeModelPreviewIfOpen();
     this.clearFullFlowModelOption();
@@ -1230,6 +1347,7 @@ export class ARHud {
     this.landing.classList.add('hidden');
     this.authPanel.classList.add('hidden');
     this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -1255,6 +1373,7 @@ export class ARHud {
     this.landing.classList.add('hidden');
     this.authPanel.classList.add('hidden');
     this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -1279,6 +1398,7 @@ export class ARHud {
     this.landing.classList.add('hidden');
     this.authPanel.classList.add('hidden');
     this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
     this.modelManager.classList.remove('hidden');
     this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.add('hidden');
@@ -1304,6 +1424,7 @@ export class ARHud {
     this.landing.classList.add('hidden');
     this.authPanel.classList.add('hidden');
     this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
     this.modelManager.classList.add('hidden');
     this.layoutManager.classList.remove('hidden');
     this.statusPanel.classList.add('hidden');
@@ -1328,6 +1449,7 @@ export class ARHud {
     this.modelManager.classList.add('hidden');
     this.layoutManager.classList.add('hidden');
     this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
     this.authPanel.classList.remove('hidden');
     this.statusPanel.classList.add('hidden');
     this.statusPanel.classList.remove('camera-active');
@@ -1354,6 +1476,7 @@ export class ARHud {
     this.modelManager.classList.add('hidden');
     this.layoutManager.classList.add('hidden');
     this.authPanel.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
     this.adminDashboard.classList.remove('hidden');
     this.statusPanel.classList.add('hidden');
     this.statusPanel.classList.remove('camera-active');

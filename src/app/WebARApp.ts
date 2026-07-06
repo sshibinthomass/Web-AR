@@ -11,6 +11,11 @@ import {
   stopCameraPreview,
   type CapturedImage,
 } from '../capture/cameraCapture';
+import {
+  startAudioRecording,
+  type AudioRecordingSession,
+  type RecordedAudio,
+} from '../capture/audioCapture';
 import { compressThumbnailImage } from '../capture/thumbnailCompression';
 import type { ModelPreviewViewer } from '../scene/ModelPreviewViewer';
 import {
@@ -18,6 +23,7 @@ import {
   extractImageFor3D,
   deleteGeneratedModel as deleteGeneratedModelRequest,
   generateModelFromImage,
+  generateModelFromSpeech,
   listGeneratedModels,
   listAdminJobs as listAdminJobsRequest,
   renameGeneratedModel as renameGeneratedModelRequest,
@@ -61,6 +67,8 @@ export class WebARApp {
   private capturedImage: CapturedImage | null = null;
   private capturedImageGenerationPipeline: GenerationPipeline = 'openai-to-3d';
   private capturedImagePreviewUrl: string | null = null;
+  private speechRecordingSession: AudioRecordingSession | null = null;
+  private speechAudio: RecordedAudio | null = null;
   private placementDragMode: PlacementGestureZone | null = null;
   private placementDragStart: Point2 | null = null;
   private layoutGestureStartedOnObject = false;
@@ -112,6 +120,9 @@ export class WebARApp {
       onRefreshAdminJobs: () => void this.refreshAdminJobs(),
       onRetryAdminJob: (jobId) => void this.retryAdminJob(jobId),
       onCleanupFailedJobArtifacts: () => void this.cleanupFailedJobArtifacts(),
+      onStartSpeechRecording: () => void this.startSpeechRecording(),
+      onStopSpeechRecording: () => void this.stopSpeechRecording(),
+      onGenerateSpeechModel: () => void this.generateSpeechModel(),
       onPrepareMultiObject: () => void this.prepareMultiObject(),
       onStartMultiObject: () => void this.startMultiObjectSession(),
       onAddLayoutObject: () => this.promptForLayoutObject(),
@@ -652,11 +663,102 @@ export class WebARApp {
     }
   }
 
+  private async startSpeechRecording(): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to use Speech to 3D.');
+    if (!authToken) {
+      return;
+    }
+
+    if (this.speechRecordingSession) {
+      this.hud?.showSpeechRecording();
+      return;
+    }
+
+    try {
+      stopCameraPreview(this.cameraStream);
+      this.cameraStream = null;
+      this.speechAudio = null;
+      this.speechRecordingSession = await startAudioRecording();
+      this.hud?.showSpeechRecording();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Microphone permission was not granted.';
+      this.speechRecordingSession = null;
+      this.hud?.showSpeechError(`Microphone unavailable: ${message}`);
+    }
+  }
+
+  private async stopSpeechRecording(): Promise<void> {
+    const session = this.speechRecordingSession;
+    if (!session) {
+      this.hud?.showSpeechError('Start recording before stopping.');
+      return;
+    }
+
+    this.speechRecordingSession = null;
+
+    try {
+      this.speechAudio = await session.stop();
+      this.hud?.showSpeechDetected('Speech recorded. Generate when ready.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not record speech.';
+      this.speechAudio = null;
+      this.hud?.showSpeechError(`Speech recording failed: ${message}`);
+    }
+  }
+
+  private async generateSpeechModel(): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to use Speech to 3D.');
+    if (!authToken) {
+      return;
+    }
+
+    if (!this.speechAudio) {
+      this.hud?.showSpeechError('Record speech before generating a 3D model.');
+      return;
+    }
+
+    const recordedAudio = this.speechAudio;
+    this.hud?.showSpeechGenerating();
+
+    try {
+      const generatedModel = await generateModelFromSpeech({
+        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        audioBase64: recordedAudio.audioBase64,
+        audioMimeType: recordedAudio.audioMimeType,
+        authToken,
+      });
+      const transcript = generatedModel.transcript?.trim();
+      if (transcript) {
+        this.hud?.showSpeechDetected(transcript);
+      }
+
+      await this.loadModelFromUrl(generatedModel.modelUrl, 'Speech object', {
+        loadingMessage: 'Loading speech-generated object into AR...',
+        successMessage: 'Speech-generated object loaded.',
+        sourceMessage: 'Generated from speech',
+      });
+
+      this.speechAudio = null;
+      this.hud?.showFullFlowReady('Speech-generated object is ready. Scan the floor, then tap Place.', {
+        id: 'speech-generated-object',
+        label: transcript || 'Speech object',
+        url: generatedModel.modelUrl,
+      });
+      void this.refreshGeneratedModels();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Speech to 3D failed.';
+      this.hud?.showSpeechError(`Speech generation failed: ${message}`);
+    }
+  }
+
   private async returnHome(): Promise<void> {
     stopCameraPreview(this.cameraStream);
     this.cameraStream = null;
     this.capturedImage = null;
     this.capturedImageGenerationPipeline = 'openai-to-3d';
+    this.speechRecordingSession?.cancel();
+    this.speechRecordingSession = null;
+    this.speechAudio = null;
     this.pendingUploadModelFile = null;
     this.layoutMode = false;
     this.layoutSceneManager?.clear();

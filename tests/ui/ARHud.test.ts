@@ -50,6 +50,9 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onRefreshAdminJobs: vi.fn(),
     onRetryAdminJob: vi.fn(),
     onCleanupFailedJobArtifacts: vi.fn(),
+    onStartSpeechRecording: vi.fn(),
+    onStopSpeechRecording: vi.fn(),
+    onGenerateSpeechModel: vi.fn(),
     onPrepareMultiObject: vi.fn(),
     onStartMultiObject: vi.fn(),
     onAddLayoutObject: vi.fn(),
@@ -104,6 +107,7 @@ describe('ARHud', () => {
       'Camera',
       'Upload Image',
       'Upload Model',
+      'Speech to 3D',
       'Full Flow',
       'Dynamic',
     ]);
@@ -117,6 +121,7 @@ describe('ARHud', () => {
       'Camera',
       'Upload Image',
       'Upload Model',
+      'Speech to 3D',
       'Full Flow',
       'Dynamic',
     ]);
@@ -151,6 +156,50 @@ describe('ARHud', () => {
 
     expect(window.location.hash).toBe('#/models');
     expect(root.querySelector('.model-manager')?.classList.contains('hidden')).toBe(false);
+  });
+
+  it('requires login for Speech to 3D and shows push-to-talk controls to approved users', () => {
+    const guestRoot = document.createElement('div');
+    new ARHud(guestRoot, modelOptions, createHandlers());
+
+    [...guestRoot.querySelectorAll('button')].find((button) => button.textContent === 'Speech to 3D')?.click();
+
+    expect(window.location.hash).toBe('#/login');
+    expect(guestRoot.textContent).toContain('Sign in to use Speech to 3D.');
+
+    const root = document.createElement('div');
+    const onStartSpeechRecording = vi.fn();
+    const onStopSpeechRecording = vi.fn();
+    const onGenerateSpeechModel = vi.fn();
+    const hud = new ARHud(
+      root,
+      modelOptions,
+      createHandlers({ onStartSpeechRecording, onStopSpeechRecording, onGenerateSpeechModel }),
+    );
+    hud.updateAuthState(activeUser);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Speech to 3D')?.click();
+
+    expect(window.location.hash).toBe('#/speech');
+    expect(root.querySelector('.speech-panel')?.classList.contains('hidden')).toBe(false);
+    expect(root.textContent).toContain('Push to talk');
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Record')?.click();
+    expect(onStartSpeechRecording).toHaveBeenCalledTimes(1);
+
+    hud.showSpeechRecording();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Stop')?.click();
+    expect(onStopSpeechRecording).toHaveBeenCalledTimes(1);
+
+    hud.showSpeechDetected('a red modern chair');
+    const generateButton = [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Generate Speech Model',
+    ) as HTMLButtonElement;
+    expect(generateButton.disabled).toBe(false);
+    generateButton.click();
+
+    expect(onGenerateSpeechModel).toHaveBeenCalledTimes(1);
+    expect(root.textContent).toContain('a red modern chair');
   });
 
   it('submits login and account creation from the auth screen', () => {

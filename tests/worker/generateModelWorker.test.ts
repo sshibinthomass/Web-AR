@@ -84,6 +84,14 @@ function dynamicGenerationRequest(body: unknown): Request {
   });
 }
 
+function speechGenerationRequest(body: unknown): Request {
+  return new Request('https://worker.example/generate-3d/speech', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 async function createAdminToken(
   env: WorkerEnv,
   deps: { fetch: typeof fetch; now: () => Date } = {
@@ -776,6 +784,137 @@ describe('handleGenerateModelRequest', () => {
       label: 'chair - 2026-06-28 12:00:00 UTC',
       status: 'running',
       status_url: 'https://worker.example/generate-3d/jobs/dynamic-123',
+    });
+  });
+
+  it('requires an approved session before accepting speech-to-3D audio', async () => {
+    const response = await handleGenerateModelRequest(
+      speechGenerationRequest({
+        audio_base64: 'YXVkaW8=',
+        audio_mime_type: 'audio/webm',
+      }),
+      createEnv(),
+      { fetch: vi.fn(), now: () => new Date('2026-06-28T12:00:00Z') },
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: 'Login required.' });
+  });
+
+  it('turns approved speech into a 3D-optimized image and starts a TRELLIS job', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ text: 'Generate a red modern chair with curved wooden legs.' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify({
+              object: 'red modern chair',
+              prompt:
+                'Single centered red modern chair with curved wooden legs, full object visible, clean silhouette, white background, studio lighting, no text, optimized for image-to-3D reconstruction.',
+            }),
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ b64_json: 'speech-image-base64' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ call_id: 'speech-123' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const env = createEnv();
+    const deps = { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') };
+    const token = await createAdminToken(env, deps);
+
+    const response = await handleGenerateModelRequest(
+      withAuth(speechGenerationRequest({
+        audio_base64: 'YXVkaW8=',
+        audio_mime_type: 'audio/webm',
+      }), token),
+      env,
+      deps,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.openai.com/v1/audio/transcriptions');
+    const transcriptionInit = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(transcriptionInit).toMatchObject({
+      method: 'POST',
+      headers: { Authorization: 'Bearer openai-key' },
+    });
+    const transcriptionForm = transcriptionInit.body as FormData;
+    expect(transcriptionForm.get('model')).toBe('gpt-4o-transcribe');
+    expect(String(transcriptionForm.get('prompt'))).toContain('3D model');
+    expect(transcriptionForm.get('file')).toBeInstanceOf(Blob);
+
+    expect(fetchMock.mock.calls[1][0]).toBe('https://api.openai.com/v1/responses');
+    const promptBody = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body));
+    expect(promptBody.model).toBe('gpt-5.5');
+    expect(JSON.stringify(promptBody)).toContain('image-to-3D');
+    expect(JSON.stringify(promptBody)).toContain('Generate a red modern chair');
+
+    expect(fetchMock.mock.calls[2][0]).toBe('https://api.openai.com/v1/images/generations');
+    const imageBody = JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body));
+    expect(imageBody).toMatchObject({
+      model: 'gpt-image-2',
+      prompt:
+        'Single centered red modern chair with curved wooden legs, full object visible, clean silhouette, white background, studio lighting, no text, optimized for image-to-3D reconstruction.',
+      n: 1,
+      size: '1024x1024',
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      'https://modal.example/start',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Modal-Key': 'modal-key',
+          'Modal-Secret': 'modal-secret',
+        },
+        body: JSON.stringify({
+          image_base64: 'speech-image-base64',
+          seed: 42,
+          pipeline_type: '512',
+          decimation_target: 100000,
+          texture_size: 1024,
+        }),
+      }),
+    );
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/jobs/speech-123.json',
+      expect.stringContaining('"pipeline":"speech"'),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/jobs/speech-123.json',
+      expect.stringContaining('"source_transcript":"Generate a red modern chair with curved wooden legs."'),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({
+      job_id: 'speech-123',
+      label: 'red modern chair - 2026-06-28 12:00:00 UTC',
+      status: 'running',
+      status_url: 'https://worker.example/generate-3d/jobs/speech-123',
+      transcript: 'Generate a red modern chair with curved wooden legs.',
+      prompt:
+        'Single centered red modern chair with curved wooden legs, full object visible, clean silhouette, white background, studio lighting, no text, optimized for image-to-3D reconstruction.',
     });
   });
 

@@ -3,6 +3,7 @@ import {
   extractImageFor3D,
   deleteGeneratedModel,
   generateModelFromImage,
+  generateModelFromSpeech,
   listAdminJobs,
   listGeneratedModels,
   renameGeneratedModel,
@@ -834,5 +835,82 @@ describe('generateModelFromImage', () => {
         fetchImpl: vi.fn(),
       }),
     ).rejects.toThrow('Worker API URL is not configured.');
+  });
+});
+
+describe('generateModelFromSpeech', () => {
+  it('posts recorded audio to the Worker speech endpoint and returns the generated model result', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            job_id: 'speech-123',
+            status_url: 'https://worker.example/generate-3d/jobs/speech-123',
+            transcript: 'a red chair',
+            prompt: 'single centered red chair on a white background',
+          }),
+          {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            model_url: 'https://assets.example/models/generated/speech.glb',
+            object_key: 'models/generated/speech.glb',
+            bytes: 4,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      );
+
+    const result = await generateModelFromSpeech({
+      apiUrl: 'https://worker.example/generate-3d',
+      audioBase64: 'YXVkaW8=',
+      audioMimeType: 'audio/webm',
+      authToken: 'signed-token',
+      fetchImpl,
+      pollIntervalMs: 0,
+    });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'https://worker.example/generate-3d/speech',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer signed-token' },
+        body: JSON.stringify({
+          audio_base64: 'YXVkaW8=',
+          audio_mime_type: 'audio/webm',
+        }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, 'https://worker.example/generate-3d/jobs/speech-123', {
+      headers: { Authorization: 'Bearer signed-token' },
+    });
+    expect(result).toEqual({
+      modelUrl: 'https://assets.example/models/generated/speech.glb',
+      objectKey: 'models/generated/speech.glb',
+      bytes: 4,
+      transcript: 'a red chair',
+      prompt: 'single centered red chair on a white background',
+    });
+  });
+
+  it('requires recorded audio before calling the Worker speech endpoint', async () => {
+    await expect(
+      generateModelFromSpeech({
+        apiUrl: 'https://worker.example/generate-3d',
+        audioBase64: '',
+        audioMimeType: 'audio/webm',
+        fetchImpl: vi.fn(),
+      }),
+    ).rejects.toThrow('Record speech before generating a 3D model.');
   });
 });

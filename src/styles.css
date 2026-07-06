@@ -1091,6 +1091,7 @@ canvas {
 
 .auth-actions button,
 .auth-form-actions button,
+.speech-actions button,
 .admin-account-actions button,
 .admin-dashboard-section-header button,
 .admin-job-actions button {
@@ -1108,6 +1109,7 @@ canvas {
 
 .auth-actions button.primary,
 .auth-form-actions button.primary,
+.speech-actions button.primary,
 .admin-account-actions button.primary,
 .admin-job-actions button.primary {
   color: #031b18;
@@ -1122,6 +1124,7 @@ canvas {
 }
 
 .auth-panel,
+.speech-panel,
 .admin-dashboard {
   position: fixed;
   inset: 0;
@@ -1133,6 +1136,7 @@ canvas {
 }
 
 .auth-panel-inner,
+.speech-panel-inner,
 .admin-dashboard-inner {
   display: grid;
   gap: 12px;
@@ -1141,11 +1145,13 @@ canvas {
 }
 
 .auth-panel-header,
+.speech-panel-header,
 .admin-dashboard-header {
   margin: 18px 0 4px;
 }
 
 .auth-panel-header h2,
+.speech-panel-header h2,
 .admin-dashboard-header h2 {
   margin: 0;
   color: #ffffff;
@@ -1155,6 +1161,7 @@ canvas {
 }
 
 .auth-message,
+.speech-status,
 .admin-dashboard-header p,
 .admin-dashboard-message {
   margin: 8px 0 0;
@@ -1169,6 +1176,31 @@ canvas {
 
 .admin-job-message.is-error {
   color: #fecaca;
+}
+
+.speech-transcript {
+  min-height: 104px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 14px;
+  color: rgba(255, 255, 255, 0.84);
+  background: rgba(5, 10, 14, 0.78);
+  font-size: 15px;
+  font-weight: 760;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.speech-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.speech-actions button {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .auth-panel label {
@@ -1999,6 +2031,7 @@ canvas {
 
 .auth-panel,
 .admin-dashboard,
+.speech-panel,
 .camera-panel.fullscreen,
 .full-flow-loading {
   color: #102326;
@@ -2014,6 +2047,7 @@ canvas {
 
 .auth-panel::before,
 .admin-dashboard::before,
+.speech-panel::before,
 .camera-panel.fullscreen::before,
 .full-flow-loading::before {
   content: "";
@@ -2027,6 +2061,7 @@ canvas {
 }
 
 .auth-panel-inner,
+.speech-panel-inner,
 .admin-dashboard-inner {
   border: 1px solid rgba(15, 118, 110, 0.16);
   border-radius: 8px;
@@ -2038,6 +2073,7 @@ canvas {
 
 .auth-panel .page-back,
 .admin-dashboard .page-back,
+.speech-panel .page-back,
 .status-panel.camera-active > .page-back,
 .status-panel.full-flow-active > .page-back {
   border-color: rgba(15, 118, 110, 0.2);
@@ -2047,6 +2083,7 @@ canvas {
 }
 
 .auth-panel-header h2,
+.speech-panel-header h2,
 .admin-dashboard-header h2,
 .admin-dashboard-section-header h3,
 .camera-label {
@@ -2054,6 +2091,7 @@ canvas {
 }
 
 .auth-message,
+.speech-status,
 .admin-dashboard-header p,
 .admin-dashboard-message,
 .admin-job-message,
@@ -2067,6 +2105,13 @@ canvas {
 .auth-message.is-error,
 .admin-job-message.is-error {
   color: #b91c1c;
+}
+
+.speech-transcript {
+  border-color: rgba(15, 118, 110, 0.16);
+  color: #102326;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 16px 42px rgba(15, 118, 110, 0.12);
 }
 
 .auth-panel label,
@@ -2112,6 +2157,7 @@ canvas {
 
 .camera-actions button,
 .camera-panel.fullscreen .camera-actions button,
+.speech-actions button,
 .admin-account-actions button,
 .admin-dashboard-section-header button,
 .admin-job-actions button {
@@ -2123,6 +2169,7 @@ canvas {
 
 .camera-actions button.primary,
 .camera-panel.fullscreen .camera-actions button.primary,
+.speech-actions button.primary,
 .auth-form-actions button.primary,
 .admin-account-actions button.primary,
 .admin-job-actions button.primary {
@@ -2132,7 +2179,8 @@ canvas {
 }
 
 .camera-actions button:disabled,
-.camera-panel.fullscreen .camera-actions button:disabled {
+.camera-panel.fullscreen .camera-actions button:disabled,
+.speech-actions button:disabled {
   color: rgba(16, 35, 38, 0.44);
   background: rgba(255, 255, 255, 0.64);
 }
@@ -2296,6 +2344,10 @@ canvas {
 
   .mode-action button {
     min-height: 50px;
+  }
+
+  .speech-actions {
+    grid-template-columns: 1fr;
   }
 
   .model-library-controls {

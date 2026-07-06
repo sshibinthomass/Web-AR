@@ -13,12 +13,24 @@ export interface GenerateModelInput {
   maxPolls?: number;
 }
 
+export interface GenerateSpeechModelInput {
+  apiUrl: string;
+  audioBase64: string;
+  audioMimeType: string;
+  authToken?: string | null;
+  fetchImpl?: typeof fetch;
+  pollIntervalMs?: number;
+  maxPolls?: number;
+}
+
 export type GenerationPipeline = 'trellis' | 'openai-to-3d' | 'dynamic';
 
 export interface GeneratedModelResult {
   modelUrl: string;
   objectKey: string;
   bytes: number;
+  transcript?: string;
+  prompt?: string;
 }
 
 export interface ExtractedImageResult {
@@ -109,6 +121,8 @@ interface WorkerJobResponse {
   label?: string;
   status?: string;
   status_url: string;
+  transcript?: string;
+  prompt?: string;
 }
 
 interface WorkerGeneratedModelEntry {
@@ -512,6 +526,49 @@ export async function generateModelFromImage({
   return parseGeneratedModelResult(body);
 }
 
+export async function generateModelFromSpeech({
+  apiUrl,
+  audioBase64,
+  audioMimeType,
+  authToken,
+  fetchImpl = fetch,
+  pollIntervalMs = 5000,
+  maxPolls = 180,
+}: GenerateSpeechModelInput): Promise<GeneratedModelResult> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  if (!audioBase64.trim()) {
+    throw new Error('Record speech before generating a 3D model.');
+  }
+
+  const response = await fetchImpl(speechGenerateUrlFromGenerateUrl(apiUrl), {
+    method: 'POST',
+    headers: jsonHeaders(authToken),
+    body: JSON.stringify({
+      audio_base64: audioBase64,
+      audio_mime_type: audioMimeType || 'audio/webm',
+    }),
+  });
+
+  const body = (await response.json()) as WorkerJobResponse | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Speech generation failed with HTTP ${response.status}.`);
+  }
+
+  if (!('job_id' in body) || !body.status_url) {
+    throw new Error('Worker response did not include a speech generation job.');
+  }
+
+  const result = await pollGeneratedModel(body.status_url, fetchImpl, pollIntervalMs, maxPolls, authToken);
+  return {
+    ...result,
+    transcript: body.transcript,
+    prompt: body.prompt,
+  };
+}
+
 async function pollGeneratedModel(
   statusUrl: string,
   fetchImpl: typeof fetch,
@@ -596,6 +653,10 @@ function generateModelUrlForPipeline(apiUrl: string, generationPipeline: Generat
   }
 
   return apiUrl;
+}
+
+function speechGenerateUrlFromGenerateUrl(apiUrl: string): string {
+  return apiUrl.replace(/\/+$/, '').replace(/\/generate-3d$/, '/generate-3d/speech');
 }
 
 function mapGeneratedModelEntry(model: WorkerGeneratedModelEntry): ModelOption {

@@ -27,6 +27,9 @@ export interface WorkerEnv {
   MODAL_OPENAI_TO_3D_RESULT_URL: string;
   MODAL_OBJECT_PREPROCESS_QUALITY_URL?: string;
   OPENAI_API_KEY: string;
+  OPENAI_TRANSCRIPTION_MODEL?: string;
+  OPENAI_PROMPT_MODEL?: string;
+  OPENAI_IMAGE_MODEL?: string;
   PUBLIC_MODEL_ORIGIN?: string;
   MODEL_BUCKET: ModelBucket;
 }
@@ -49,6 +52,11 @@ interface GenerateModelRequestBody {
   image_base64?: unknown;
   image_mime_type?: unknown;
   target_object?: unknown;
+}
+
+interface GenerateSpeechRequestBody {
+  audio_base64?: unknown;
+  audio_mime_type?: unknown;
 }
 
 interface DynamicImageResponse {
@@ -80,7 +88,7 @@ interface AuthRequestBody {
   status?: unknown;
 }
 
-type GenerationPipeline = 'trellis' | 'openai-to-3d' | 'dynamic';
+type GenerationPipeline = 'trellis' | 'openai-to-3d' | 'dynamic' | 'speech';
 type AuthRole = 'admin' | 'user';
 type AccountStatus = 'active' | 'pending';
 type ModelVisibility = 'public' | 'private';
@@ -121,6 +129,8 @@ interface StoredJob {
   error?: string;
   target_object?: string;
   pipeline?: GenerationPipeline;
+  source_transcript?: string;
+  generation_prompt?: string;
   owner_email?: string;
   visibility?: ModelVisibility;
   model_url?: string;
@@ -438,6 +448,7 @@ async function routeGenerateModelRequest(
     url.pathname !== '/generate-3d' &&
     url.pathname !== '/generate-3d/openai' &&
     url.pathname !== '/generate-3d/dynamic' &&
+    url.pathname !== '/generate-3d/speech' &&
     url.pathname !== '/extract-image'
   ) {
     return jsonResponse({ error: 'Not found.' }, 404);
@@ -446,6 +457,10 @@ async function routeGenerateModelRequest(
   const auth = await requireApprovedUser(request, env, deps);
   if (auth instanceof Response) {
     return auth;
+  }
+
+  if (url.pathname === '/generate-3d/speech') {
+    return handleSpeechGenerationRequest(request, env, deps, url, auth.user);
   }
 
   const pipeline = pipelineFromGeneratePath(url.pathname);
@@ -512,6 +527,8 @@ async function startModalGenerationJob(
     imageMimeType: string;
     targetObject: string | null;
     pipeline: GenerationPipeline;
+    sourceTranscript?: string;
+    generationPrompt?: string;
   },
 ): Promise<Response> {
   const modalConfig = modalConfigForPipeline(env, input.pipeline);
@@ -572,6 +589,8 @@ async function startModalGenerationJob(
     updated_at: now.toISOString(),
     target_object: input.targetObject ?? undefined,
     pipeline: input.pipeline,
+    source_transcript: input.sourceTranscript,
+    generation_prompt: input.generationPrompt,
     owner_email: user.email,
     visibility: 'private',
     preview_url: preview?.previewUrl,
@@ -586,9 +605,63 @@ async function startModalGenerationJob(
       label: job.label,
       status: job.status,
       status_url: `${url.origin}/generate-3d/jobs/${encodeURIComponent(modalJob.call_id)}`,
+      ...(input.sourceTranscript ? { transcript: input.sourceTranscript } : {}),
+      ...(input.generationPrompt ? { prompt: input.generationPrompt } : {}),
     },
     202,
   );
+}
+
+async function handleSpeechGenerationRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  url: URL,
+  user: StoredUser,
+): Promise<Response> {
+  const configError = validateEnv(env, 'speech');
+  if (configError) {
+    return jsonResponse({ error: configError }, 500);
+  }
+
+  const body = await readJsonBody<GenerateSpeechRequestBody>(request);
+  if (!body.ok) {
+    return jsonResponse({ error: body.error }, 400);
+  }
+
+  if (typeof body.value.audio_base64 !== 'string' || body.value.audio_base64.length === 0) {
+    return jsonResponse({ error: 'audio_base64 is required.' }, 400);
+  }
+
+  const audioMimeType =
+    typeof body.value.audio_mime_type === 'string' && body.value.audio_mime_type.startsWith('audio/')
+      ? body.value.audio_mime_type
+      : 'audio/webm';
+
+  try {
+    const transcript = await transcribeSpeechFor3D(
+      {
+        audioBase64: body.value.audio_base64,
+        audioMimeType,
+      },
+      env,
+      deps,
+    );
+    const speechPrompt = await createSpeechImagePromptFor3D(transcript, env, deps);
+    const imageBase64 = await generateSpeechImageFor3D(speechPrompt.prompt, env, deps);
+
+    return startModalGenerationJob(url, env, deps, user, {
+      imageBase64,
+      imageMimeType: 'image/png',
+      targetObject: speechPrompt.object,
+      pipeline: 'speech',
+      sourceTranscript: transcript,
+      generationPrompt: speechPrompt.prompt,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Speech-to-3D generation failed.';
+    return jsonResponse({ error: message }, 502);
+  }
 }
 
 async function handleAuthRequest(
@@ -1579,6 +1652,162 @@ function imageMimeTypeFromDynamicResponse(body: DynamicImageResponse): string {
   return 'image/png';
 }
 
+async function transcribeSpeechFor3D(
+  input: {
+    audioBase64: string;
+    audioMimeType: string;
+  },
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', new Blob([base64ToArrayBuffer(input.audioBase64)], { type: input.audioMimeType }), audioFileName(input.audioMimeType));
+  formData.append('model', env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-transcribe');
+  formData.append('response_format', 'json');
+  formData.append(
+    'prompt',
+    'Transcribe the user request exactly for a 3D model generation pipeline. Preserve object names, materials, colors, dimensions, style, and shape details. Ignore filler words and do not add new objects.',
+  );
+
+  const response = await deps.fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI speech transcription failed: ${await response.text()}`);
+  }
+
+  const body = (await response.json()) as { text?: unknown };
+  const transcript = typeof body.text === 'string' ? body.text.trim() : '';
+  if (!transcript) {
+    throw new Error('OpenAI speech transcription did not detect a usable object request.');
+  }
+  return transcript;
+}
+
+async function createSpeechImagePromptFor3D(
+  transcript: string,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<{ object: string; prompt: string }> {
+  const response = await deps.fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: env.OPENAI_PROMPT_MODEL || 'gpt-5.5',
+      input: [
+        {
+          role: 'system',
+          content: [
+            {
+              type: 'input_text',
+              text:
+                'You convert a speech transcript into a single-object image prompt for image-to-3D reconstruction. The final product is a 3D model, so prioritize clean geometry, full visibility, a centered object, clear silhouette, neutral background, and practical physical structure.',
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: `Transcript: ${transcript}`,
+            },
+          ],
+        },
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'speech_to_3d_prompt',
+          strict: true,
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              object: {
+                type: 'string',
+                description: 'A short noun phrase naming the single object to generate.',
+              },
+              prompt: {
+                type: 'string',
+                description: 'A detailed image generation prompt optimized for image-to-3D reconstruction.',
+              },
+            },
+            required: ['object', 'prompt'],
+          },
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI speech prompt optimization failed: ${await response.text()}`);
+  }
+
+  const responseText = extractOpenAiResponseText(await response.json());
+  let parsed: { object?: unknown; prompt?: unknown };
+  try {
+    parsed = JSON.parse(responseText) as { object?: unknown; prompt?: unknown };
+  } catch {
+    throw new Error('OpenAI speech prompt optimization returned invalid JSON.');
+  }
+
+  const object = normalizeTargetObject(parsed.object);
+  const prompt = typeof parsed.prompt === 'string' ? parsed.prompt.trim() : '';
+  if (!object || !prompt) {
+    throw new Error('OpenAI speech prompt optimization did not return an object and prompt.');
+  }
+
+  return {
+    object,
+    prompt: enforce3DImagePrompt(prompt, object),
+  };
+}
+
+async function generateSpeechImageFor3D(prompt: string, env: WorkerEnv, deps: GenerateModelDeps): Promise<string> {
+  const response = await deps.fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
+      prompt,
+      n: 1,
+      size: '1024x1024',
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI speech image generation failed: ${await response.text()}`);
+  }
+
+  const body = (await response.json()) as { data?: Array<{ b64_json?: unknown; url?: unknown }> };
+  const image = body.data?.[0];
+  if (typeof image?.b64_json === 'string' && image.b64_json) {
+    return image.b64_json;
+  }
+
+  if (typeof image?.url === 'string' && image.url) {
+    const imageResponse = await deps.fetch(image.url);
+    if (!imageResponse.ok) {
+      throw new Error(`OpenAI speech image generation failed: could not download image (${imageResponse.status}).`);
+    }
+    return arrayBufferToBase64(await imageResponse.arrayBuffer());
+  }
+
+  throw new Error('OpenAI speech image generation failed: no image data returned.');
+}
+
 async function extractImageFor3D(
   input: {
     imageBase64: string;
@@ -1631,6 +1860,57 @@ function buildOpenAiExtractionPrompt(targetObject: string | null): string {
   return 'Extract the main, most prominent object from the image. Place it in a frontal-side position suitable for 3D generation, and make the background solid pure white. The final output must contain only a single object, in high quality (HQ), extremely sharp, with clear details and studio lighting, optimized for 3D reconstruction.';
 }
 
+function extractOpenAiResponseText(body: unknown): string {
+  if (body && typeof body === 'object' && 'output_text' in body && typeof body.output_text === 'string') {
+    return body.output_text;
+  }
+
+  if (!body || typeof body !== 'object' || !('output' in body) || !Array.isArray(body.output)) {
+    throw new Error('OpenAI response did not include output text.');
+  }
+
+  const textParts: string[] = [];
+  for (const output of body.output) {
+    if (!output || typeof output !== 'object' || !('content' in output) || !Array.isArray(output.content)) {
+      continue;
+    }
+    for (const content of output.content) {
+      if (content && typeof content === 'object' && 'text' in content && typeof content.text === 'string') {
+        textParts.push(content.text);
+      }
+    }
+  }
+
+  const text = textParts.join('\n').trim();
+  if (!text) {
+    throw new Error('OpenAI response did not include output text.');
+  }
+  return text;
+}
+
+function enforce3DImagePrompt(prompt: string, object: string): string {
+  const requiredTail =
+    'Single centered object, full object visible, clean silhouette, white or light neutral background, studio lighting, no text, no logos, no people, no hands, no clutter, no watermark, optimized for image-to-3D reconstruction and TRELLIS 3D model generation.';
+  const normalizedPrompt = prompt.trim().replace(/\s+/g, ' ');
+  if (normalizedPrompt.toLowerCase().includes('image-to-3d') && normalizedPrompt.toLowerCase().includes('single')) {
+    return normalizedPrompt;
+  }
+  return `${normalizedPrompt || object}. ${requiredTail}`;
+}
+
+function audioFileName(audioMimeType: string): string {
+  if (audioMimeType.includes('wav')) {
+    return 'speech.wav';
+  }
+  if (audioMimeType.includes('mpeg') || audioMimeType.includes('mp3')) {
+    return 'speech.mp3';
+  }
+  if (audioMimeType.includes('mp4') || audioMimeType.includes('m4a')) {
+    return 'speech.m4a';
+  }
+  return 'speech.webm';
+}
+
 function pipelineFromGeneratePath(pathname: string): GenerationPipeline {
   if (pathname === '/generate-3d/openai') {
     return 'openai-to-3d';
@@ -1638,6 +1918,10 @@ function pipelineFromGeneratePath(pathname: string): GenerationPipeline {
 
   if (pathname === '/generate-3d/dynamic') {
     return 'dynamic';
+  }
+
+  if (pathname === '/generate-3d/speech') {
+    return 'speech';
   }
 
   return 'trellis';
@@ -2316,6 +2600,8 @@ function toJobResponse(job: StoredJob): Record<string, unknown> {
     visibility: job.visibility,
     target_object: job.target_object,
     pipeline: job.pipeline,
+    source_transcript: job.source_transcript,
+    generation_prompt: job.generation_prompt,
     model_url: job.model_url,
     object_key: job.object_key,
     preview_url: job.preview_url,
