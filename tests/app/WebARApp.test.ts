@@ -104,6 +104,10 @@ describe('WebARApp animated GLB playback', () => {
       ensureARRuntime: ReturnType<typeof vi.fn>;
       hitTestManager: null;
       hud: {
+        isModelDownloaded: ReturnType<typeof vi.fn>;
+        markModelDownloadFailed: ReturnType<typeof vi.fn>;
+        markModelDownloaded: ReturnType<typeof vi.fn>;
+        markModelDownloadStarted: ReturnType<typeof vi.fn>;
         update: ReturnType<typeof vi.fn>;
         updateAnimationOptions: ReturnType<typeof vi.fn>;
         updateModelReady: ReturnType<typeof vi.fn>;
@@ -130,6 +134,7 @@ describe('WebARApp animated GLB playback', () => {
           loadingMessage: string;
           successMessage: string;
           sourceMessage: string;
+          selectedModelId?: string;
         },
       ): Promise<void>;
       render(time: number): void;
@@ -143,6 +148,10 @@ describe('WebARApp animated GLB playback', () => {
     app.ensureARRuntime = vi.fn(async () => app.arRuntime);
     app.hitTestManager = null;
     app.hud = {
+      isModelDownloaded: vi.fn(() => false),
+      markModelDownloadFailed: vi.fn(),
+      markModelDownloaded: vi.fn(),
+      markModelDownloadStarted: vi.fn(),
       update: vi.fn(),
       updateAnimationOptions: vi.fn(),
       updateModelReady: vi.fn(),
@@ -186,6 +195,39 @@ describe('WebARApp animated GLB playback', () => {
     updateSpy.mockRestore();
   });
 
+  it('marks the selected model as downloaded after a successful GLB load', async () => {
+    vi.mocked(loadGLBModel).mockResolvedValue(new THREE.Group());
+    const { app } = createAnimatedApp();
+
+    await app.loadModelFromUrl('https://assets.example/generated-chair.glb', 'Generated chair', {
+      loadingMessage: 'Loading Generated chair...',
+      successMessage: 'Generated chair loaded.',
+      sourceMessage: 'Cloudflare hosted model',
+      selectedModelId: 'generated-chair',
+    });
+
+    expect(app.hud.markModelDownloadStarted).toHaveBeenCalledWith('generated-chair');
+    expect(app.hud.markModelDownloaded).toHaveBeenCalledWith('generated-chair');
+    expect(app.hud.markModelDownloadFailed).not.toHaveBeenCalled();
+  });
+
+  it('does not restart the download state when loading an already downloaded model for AR', async () => {
+    vi.mocked(loadGLBModel).mockResolvedValue(new THREE.Group());
+    const { app } = createAnimatedApp();
+    app.hud.isModelDownloaded.mockReturnValue(true);
+
+    await app.loadModelFromUrl('https://assets.example/generated-chair.glb', 'Generated chair', {
+      loadingMessage: 'Loading Generated chair...',
+      successMessage: 'Generated chair loaded.',
+      sourceMessage: 'Cloudflare hosted model',
+      selectedModelId: 'generated-chair',
+    });
+
+    expect(app.hud.markModelDownloadStarted).not.toHaveBeenCalled();
+    expect(app.hud.markModelDownloaded).toHaveBeenCalledWith('generated-chair');
+    expect(app.hud.markModelDownloadFailed).not.toHaveBeenCalled();
+  });
+
   it('plays only the selected GLB animation clip and exposes choices to the HUD', async () => {
     const animatedModel = new THREE.Group();
     const idleClip = new THREE.AnimationClip('Idle', 1, []);
@@ -220,5 +262,78 @@ describe('WebARApp animated GLB playback', () => {
       clipActionSpy.mockRestore();
       stopAllActionSpy.mockRestore();
     }
+  });
+});
+
+describe('WebARApp model preview animations', () => {
+  it('publishes preview animation options and switches selected preview clips', async () => {
+    const previewAnimations = [
+      { index: 0, label: 'Idle' },
+      { index: 1, label: 'Walk' },
+    ];
+    const previewViewer = {
+      dispose: vi.fn(),
+      preview: vi.fn().mockResolvedValue({ animations: previewAnimations }),
+      selectAnimation: vi.fn(() => true),
+      setLightingIntensity: vi.fn(),
+      setLightDirectionDegrees: vi.fn(),
+    };
+    const app = new WebARApp(document.createElement('div')) as unknown as {
+      availableModels: Array<{ id: string; label: string; url: string }>;
+      hud: {
+        isModelDownloaded: ReturnType<typeof vi.fn>;
+        markModelDownloadFailed: ReturnType<typeof vi.fn>;
+        markModelDownloaded: ReturnType<typeof vi.fn>;
+        markModelDownloadStarted: ReturnType<typeof vi.fn>;
+        getModelPreviewLightDirectionDegrees: ReturnType<typeof vi.fn>;
+        getModelPreviewLightingIntensity: ReturnType<typeof vi.fn>;
+        modelPreviewViewport: HTMLElement;
+        showModelPreviewError: ReturnType<typeof vi.fn>;
+        showModelPreviewLoading: ReturnType<typeof vi.fn>;
+        showModelPreviewReady: ReturnType<typeof vi.fn>;
+        updateModelPreviewAnimationOptions: ReturnType<typeof vi.fn>;
+        updateSelectedModelPreviewAnimation: ReturnType<typeof vi.fn>;
+      };
+      modelPreviewViewer: typeof previewViewer;
+      previewModel(modelId: string): Promise<void>;
+      selectModelPreviewAnimation(animationIndex: number): void;
+    };
+
+    app.availableModels = [
+      {
+        id: 'animated-preview',
+        label: 'Animated preview',
+        url: 'https://assets.example/animated-preview.glb',
+      },
+    ];
+    app.hud = {
+      isModelDownloaded: vi.fn(() => false),
+      markModelDownloadFailed: vi.fn(),
+      markModelDownloaded: vi.fn(),
+      markModelDownloadStarted: vi.fn(),
+      getModelPreviewLightDirectionDegrees: vi.fn(() => 45),
+      getModelPreviewLightingIntensity: vi.fn(() => 1),
+      modelPreviewViewport: document.createElement('div'),
+      showModelPreviewError: vi.fn(),
+      showModelPreviewLoading: vi.fn(),
+      showModelPreviewReady: vi.fn(),
+      updateModelPreviewAnimationOptions: vi.fn(),
+      updateSelectedModelPreviewAnimation: vi.fn(),
+    };
+    app.modelPreviewViewer = previewViewer;
+
+    await app.previewModel('animated-preview');
+
+    expect(previewViewer.preview).toHaveBeenCalledWith(app.availableModels[0]);
+    expect(app.hud.markModelDownloadStarted).toHaveBeenCalledWith('animated-preview');
+    expect(app.hud.markModelDownloaded).toHaveBeenCalledWith('animated-preview');
+    expect(app.hud.markModelDownloadFailed).not.toHaveBeenCalled();
+    expect(app.hud.updateModelPreviewAnimationOptions).toHaveBeenCalledWith(previewAnimations, 0);
+    expect(app.hud.showModelPreviewReady).toHaveBeenCalledOnce();
+
+    app.selectModelPreviewAnimation(1);
+
+    expect(previewViewer.selectAnimation).toHaveBeenCalledWith(1);
+    expect(app.hud.updateSelectedModelPreviewAnimation).toHaveBeenCalledWith(1);
   });
 });

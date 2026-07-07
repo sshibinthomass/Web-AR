@@ -23,6 +23,15 @@ export interface GenerateSpeechModelInput {
   maxPolls?: number;
 }
 
+export interface GenerateTextModelInput {
+  apiUrl: string;
+  text: string;
+  authToken?: string | null;
+  fetchImpl?: typeof fetch;
+  pollIntervalMs?: number;
+  maxPolls?: number;
+}
+
 export type GenerationPipeline = 'trellis' | 'openai-to-3d' | 'dynamic';
 export type GenerationStage =
   | 'speech_input'
@@ -58,6 +67,8 @@ export interface StartSpeechModelJobResult extends StartGeneratedModelJobResult 
   transcript?: string;
   prompt?: string;
 }
+
+export type StartTextModelJobResult = StartSpeechModelJobResult;
 
 export interface GeneratedModelJobStatus {
   id: string;
@@ -286,6 +297,49 @@ export async function startSpeechModelJob({
 
   if (!('job_id' in body) || !body.job_id || !body.status_url) {
     throw new Error('Worker response did not include a speech generation job.');
+  }
+
+  return {
+    id: body.job_id,
+    label: body.label ?? body.job_id,
+    status: 'running',
+    statusUrl: body.status_url,
+    ...(isGenerationStage(body.stage) ? { stage: body.stage } : {}),
+    ...(body.transcript ? { transcript: body.transcript } : {}),
+    ...(body.prompt ? { prompt: body.prompt } : {}),
+  };
+}
+
+export async function startTextModelJob({
+  apiUrl,
+  text,
+  authToken,
+  fetchImpl = fetch,
+}: GenerateTextModelInput): Promise<StartTextModelJobResult> {
+  if (!apiUrl) {
+    throw new Error('Worker API URL is not configured.');
+  }
+
+  const normalizedText = text.trim().replace(/\s+/g, ' ');
+  if (!normalizedText) {
+    throw new Error('Describe the object before generating a 3D model.');
+  }
+
+  const response = await fetchImpl(textGenerateUrlFromGenerateUrl(apiUrl), {
+    method: 'POST',
+    headers: jsonHeaders(authToken),
+    body: JSON.stringify({
+      text: normalizedText,
+    }),
+  });
+
+  const body = (await response.json()) as WorkerJobResponse | WorkerErrorResponse;
+  if (!response.ok) {
+    throw new Error('error' in body && body.error ? body.error : `Text generation failed with HTTP ${response.status}.`);
+  }
+
+  if (!('job_id' in body) || !body.job_id || !body.status_url) {
+    throw new Error('Worker response did not include a text generation job.');
   }
 
   return {
@@ -809,6 +863,10 @@ function generateModelUrlForPipeline(apiUrl: string, generationPipeline: Generat
 
 function speechGenerateUrlFromGenerateUrl(apiUrl: string): string {
   return apiUrl.replace(/\/+$/, '').replace(/\/generate-3d$/, '/generate-3d/speech');
+}
+
+function textGenerateUrlFromGenerateUrl(apiUrl: string): string {
+  return apiUrl.replace(/\/+$/, '').replace(/\/generate-3d$/, '/generate-3d/text');
 }
 
 function mapGeneratedModelEntry(model: WorkerGeneratedModelEntry): ModelOption {

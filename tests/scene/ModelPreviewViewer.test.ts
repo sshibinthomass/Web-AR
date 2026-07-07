@@ -91,4 +91,75 @@ describe('ModelPreviewViewer', () => {
     expect(disconnectResize).toHaveBeenCalledTimes(1);
     expect(container.children).toHaveLength(0);
   });
+
+  it('plays preview animations and switches to the selected clip', async () => {
+    const container = document.createElement('div');
+    const renderer = {
+      domElement: document.createElement('canvas'),
+      setPixelRatio: vi.fn(),
+      setSize: vi.fn(),
+      render: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const controls = {
+      target: new THREE.Vector3(),
+      enableDamping: false,
+      enablePan: true,
+      minDistance: 0,
+      maxDistance: 0,
+      update: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const loadedModel = new THREE.Group();
+    loadedModel.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)));
+    const idleClip = new THREE.AnimationClip('Idle', 1, []);
+    const walkClip = new THREE.AnimationClip('Walk', 1, []);
+    loadedModel.userData.animations = [idleClip, walkClip];
+    let frameCallback: ((time: number) => void) | undefined;
+    const clipActionSpy = vi.spyOn(THREE.AnimationMixer.prototype, 'clipAction');
+    const stopAllActionSpy = vi.spyOn(THREE.AnimationMixer.prototype, 'stopAllAction');
+    const updateSpy = vi.spyOn(THREE.AnimationMixer.prototype, 'update');
+
+    const viewer = new ModelPreviewViewer(container, {
+      loadModel: vi.fn().mockResolvedValue(loadedModel),
+      createRenderer: () => renderer,
+      createControls: () => controls,
+      requestFrame: vi.fn((callback) => {
+        frameCallback = callback;
+        return 1;
+      }),
+      cancelFrame: vi.fn(),
+      observeResize: vi.fn(() => vi.fn()),
+    });
+
+    try {
+      const result = await viewer.preview({
+        id: 'animated-chair',
+        label: 'Animated chair',
+        url: 'https://assets.example/animated-chair.glb',
+      });
+
+      expect(result.animations).toEqual([
+        { index: 0, label: 'Idle' },
+        { index: 1, label: 'Walk' },
+      ]);
+      expect(clipActionSpy).toHaveBeenCalledTimes(1);
+      expect(clipActionSpy).toHaveBeenLastCalledWith(idleClip);
+
+      expect(frameCallback).toBeTypeOf('function');
+      frameCallback!(250);
+
+      expect(updateSpy).toHaveBeenCalledWith(0.25);
+      expect(viewer.selectAnimation(1)).toBe(true);
+      expect(stopAllActionSpy).toHaveBeenCalledOnce();
+      expect(clipActionSpy).toHaveBeenCalledTimes(2);
+      expect(clipActionSpy).toHaveBeenLastCalledWith(walkClip);
+      expect(viewer.selectAnimation(99)).toBe(false);
+    } finally {
+      clipActionSpy.mockRestore();
+      stopAllActionSpy.mockRestore();
+      updateSpy.mockRestore();
+      viewer.dispose();
+    }
+  });
 });

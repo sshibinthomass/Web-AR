@@ -27,6 +27,7 @@ interface HUDHandlers {
   onCloseModelPreview(): void;
   onPreviewLightingChange(intensity: number): void;
   onPreviewLightDirectionChange(degrees: number): void;
+  onPreviewAnimationSelect(animationIndex: number): void;
   onUpdateModelThumbnail(modelId: string, file: File): void;
   onReturnHome(): void;
   onLogin(email: string, password: string): void;
@@ -41,6 +42,7 @@ interface HUDHandlers {
   onStartSpeechRecording(): void;
   onStopSpeechRecording(): void;
   onGenerateSpeechModel(): void;
+  onGenerateTextModel(text: string): void;
   onAnimationSelect(animationIndex: number): void;
   onPrepareMultiObject(): void;
   onStartMultiObject(): void;
@@ -68,7 +70,15 @@ type HudRoute =
   | 'admin';
 type ModelLibraryFilter = 'all' | 'generated' | 'uploaded' | 'favorites' | 'recent';
 type AuthFormMode = 'login' | 'signup';
-type ModelActionIcon = 'preview' | 'favorite' | 'favorite-filled' | 'visibility-public' | 'visibility-private' | 'edit' | 'delete';
+type ModelActionIcon =
+  | 'preview'
+  | 'download'
+  | 'favorite'
+  | 'favorite-filled'
+  | 'visibility-public'
+  | 'visibility-private'
+  | 'edit'
+  | 'delete';
 type SpeechProcessStage =
   | 'speech_input'
   | 'detecting_speech'
@@ -116,6 +126,8 @@ export class ARHud {
   private readonly speechVisualizer: HTMLElement;
   private readonly speechTranscriptMessage: HTMLElement;
   private readonly speechBackgroundNote: HTMLElement;
+  private readonly speechTextInput: HTMLTextAreaElement;
+  private readonly speechTextGenerateButton: HTMLButtonElement;
   private readonly speechRecordButton: HTMLButtonElement;
   private readonly speechStopButton: HTMLButtonElement;
   private readonly speechGenerateButton: HTMLButtonElement;
@@ -135,6 +147,8 @@ export class ARHud {
   private readonly modelPreview: HTMLElement;
   private readonly modelPreviewTitle: HTMLElement;
   private readonly modelPreviewStatus: HTMLElement;
+  private readonly modelPreviewAnimationControl: HTMLLabelElement;
+  private readonly modelPreviewAnimationSelect: HTMLSelectElement;
   private readonly modelPreviewLightingInput: HTMLInputElement;
   private readonly modelPreviewLightingValue: HTMLOutputElement;
   private readonly modelPreviewDirectionInput: HTMLInputElement;
@@ -178,6 +192,8 @@ export class ARHud {
   private modelSearchQuery = '';
   private modelFilter: ModelLibraryFilter = 'all';
   private favoriteModelIds = new Set<string>();
+  private downloadedModelIds = new Set<string>();
+  private downloadingModelIds = new Set<string>();
   private recentModelIds: string[] = [];
   private rotationInputValue = 0;
   private arPlacementStarted = false;
@@ -189,6 +205,7 @@ export class ARHud {
   private adminJobs: AdminJobEntry[] = [];
   private modelEditDialog: HTMLElement | null = null;
   private readonly favoriteStorageKey = 'web-ar-model-favorites';
+  private readonly downloadedStorageKey = 'web-ar-model-downloads';
   private readonly recentStorageKey = 'web-ar-model-recents';
 
   constructor(
@@ -198,6 +215,7 @@ export class ARHud {
   ) {
     this.baseModelOptions = [...modelOptions];
     this.favoriteModelIds = new Set(this.readStoredModelIds(this.favoriteStorageKey));
+    this.downloadedModelIds = new Set(this.readStoredModelIds(this.downloadedStorageKey));
     this.recentModelIds = this.readStoredModelIds(this.recentStorageKey);
     const shell = document.createElement('div');
     shell.className = 'app-shell';
@@ -258,7 +276,7 @@ export class ARHud {
           this.createModeAction(this.createButton('Camera', '', () => this.navigateTo('camera')), 'CAM'),
           this.createModeAction(this.createButton('Upload Image', '', () => this.navigateTo('upload')), 'IMG'),
           this.createModeAction(this.createButton('Upload Model', '', () => this.navigateTo('upload-model')), 'GLB'),
-          this.createModeAction(this.createButton('Speech to 3D', '', () => this.navigateTo('speech')), 'MIC'),
+          this.createModeAction(this.createButton('Text or Voice to 3D', '', () => this.navigateTo('speech')), 'MIC'),
           this.createModeAction(this.createButton('Full Flow', '', () => this.navigateTo('full-flow')), 'AI'),
           this.createModeAction(this.createButton('Dynamic', '', () => this.navigateTo('dynamic')), 'DYN'),
         ],
@@ -369,9 +387,13 @@ export class ARHud {
       <div class="speech-panel-inner">
         <button class="page-back" type="button">Back</button>
         <div class="speech-panel-header">
-          <h2>Speech to 3D</h2>
-          <p class="speech-status">Push to talk, then generate a 3D-ready image and model.</p>
+          <h2>Text or Voice to 3D</h2>
+          <p class="speech-status">Type a description or push to talk, then generate a 3D-ready image and model.</p>
         </div>
+        <label class="speech-text-field">
+          <span>Describe the object</span>
+          <textarea class="speech-text-input" rows="4" placeholder="A compact walnut desk with rounded corners" spellcheck="true"></textarea>
+        </label>
         <div class="speech-visualizer" aria-hidden="true">
           <span></span>
           <span></span>
@@ -380,19 +402,19 @@ export class ARHud {
           <span></span>
         </div>
         <div class="speech-transcript-card">
-          <span>You said</span>
-          <p class="speech-transcript" aria-live="polite">No speech recorded yet.</p>
+          <span>Request</span>
+          <p class="speech-transcript" aria-live="polite">No request entered yet.</p>
         </div>
-        <ol class="speech-stage-list" aria-label="Speech to 3D progress">
+        <ol class="speech-stage-list" aria-label="Text or Voice to 3D progress">
           <li data-speech-stage="speech_input">
             <span class="speech-stage-marker"></span>
-            <strong>Speech input</strong>
-            <small>Record the object request</small>
+            <strong>Input request</strong>
+            <small>Type or record the object</small>
           </li>
           <li data-speech-stage="detecting_speech">
             <span class="speech-stage-marker"></span>
-            <strong>Detecting speech</strong>
-            <small>Convert audio into your prompt</small>
+            <strong>Preparing prompt</strong>
+            <small>Shape the request for 3D</small>
           </li>
           <li data-speech-stage="generating_image">
             <span class="speech-stage-marker"></span>
@@ -413,6 +435,7 @@ export class ARHud {
     this.speechStatusMessage = this.speechPanel.querySelector<HTMLElement>('.speech-status')!;
     this.speechVisualizer = this.speechPanel.querySelector<HTMLElement>('.speech-visualizer')!;
     this.speechTranscriptMessage = this.speechPanel.querySelector<HTMLElement>('.speech-transcript')!;
+    this.speechTextInput = this.speechPanel.querySelector<HTMLTextAreaElement>('.speech-text-input')!;
     this.speechBackgroundNote = this.speechPanel.querySelector<HTMLElement>('.speech-background-note')!;
     this.speechPanel.querySelectorAll<HTMLElement>('[data-speech-stage]').forEach((item) => {
       const stage = item.dataset.speechStage as SpeechProcessStage | undefined;
@@ -420,12 +443,24 @@ export class ARHud {
         this.speechStageItems.set(stage, item);
       }
     });
-    this.speechRecordButton = this.createButton('Record', 'primary', () => this.handlers.onStartSpeechRecording());
+    this.speechTextGenerateButton = this.createButton('Generate from Text', 'primary', () => {
+      this.handlers.onGenerateTextModel(this.speechTextInput.value.trim().replace(/\s+/g, ' '));
+    });
+    this.speechRecordButton = this.createButton('Record', '', () => this.handlers.onStartSpeechRecording());
     this.speechStopButton = this.createButton('Stop', '', () => this.handlers.onStopSpeechRecording());
-    this.speechGenerateButton = this.createButton('Generate Speech Model', '', () => this.handlers.onGenerateSpeechModel());
+    this.speechGenerateButton = this.createButton('Generate from Voice', '', () => this.handlers.onGenerateSpeechModel());
+    this.speechTextGenerateButton.disabled = true;
     this.speechStopButton.disabled = true;
     this.speechGenerateButton.disabled = true;
+    this.speechTextInput.addEventListener('input', () => {
+      this.speechTextGenerateButton.disabled = !this.speechTextInput.value.trim();
+      if (this.speechTextInput.value.trim()) {
+        this.speechTranscriptMessage.textContent = this.speechTextInput.value.trim();
+        this.setSpeechStage('speech_input');
+      }
+    });
     this.speechPanel.querySelector<HTMLElement>('.speech-actions')?.append(
+      this.speechTextGenerateButton,
       this.speechRecordButton,
       this.speechStopButton,
       this.speechGenerateButton,
@@ -470,6 +505,10 @@ export class ARHud {
             <h3 class="model-preview-title"></h3>
           </div>
           <div class="model-preview-controls" aria-label="Preview lighting controls">
+            <label class="model-preview-control model-preview-animation hidden">
+              <span>Animation</span>
+              <select class="model-preview-animation-select" name="modelPreviewAnimation" aria-label="Preview animation"></select>
+            </label>
             <label class="model-preview-control model-preview-lighting">
               <span>Lighting</span>
               <input class="model-preview-lighting-input" type="range" min="50" max="180" step="5" value="100" aria-label="Preview lighting intensity">
@@ -490,10 +529,18 @@ export class ARHud {
     this.modelPreviewViewport = this.modelPreview.querySelector<HTMLElement>('.model-preview-viewport')!;
     this.modelPreviewTitle = this.modelPreview.querySelector<HTMLElement>('.model-preview-title')!;
     this.modelPreviewStatus = this.modelPreview.querySelector<HTMLElement>('.model-preview-status')!;
+    this.modelPreviewAnimationControl = this.modelPreview.querySelector<HTMLLabelElement>('.model-preview-animation')!;
+    this.modelPreviewAnimationSelect = this.modelPreview.querySelector<HTMLSelectElement>('.model-preview-animation-select')!;
     this.modelPreviewLightingInput = this.modelPreview.querySelector<HTMLInputElement>('.model-preview-lighting-input')!;
     this.modelPreviewLightingValue = this.modelPreview.querySelector<HTMLOutputElement>('.model-preview-lighting-value')!;
     this.modelPreviewDirectionInput = this.modelPreview.querySelector<HTMLInputElement>('.model-preview-direction-input')!;
     this.modelPreviewDirectionValue = this.modelPreview.querySelector<HTMLOutputElement>('.model-preview-direction-value')!;
+    this.modelPreviewAnimationSelect.addEventListener('change', () => {
+      const animationIndex = Number(this.modelPreviewAnimationSelect.value);
+      if (Number.isInteger(animationIndex)) {
+        this.handlers.onPreviewAnimationSelect(animationIndex);
+      }
+    });
     this.modelPreviewLightingInput.addEventListener('input', () => this.handleModelPreviewLightingInput());
     this.modelPreviewDirectionInput.addEventListener('input', () => this.handleModelPreviewDirectionInput());
     this.modelPreview.querySelector<HTMLButtonElement>('.model-preview-close')?.addEventListener('click', () => {
@@ -821,7 +868,7 @@ export class ARHud {
     }
   }
 
-  showSpeechReady(message = 'Push to talk, then generate a 3D-ready image and model.'): void {
+  showSpeechReady(message = 'Type a description or push to talk, then generate a 3D-ready image and model.'): void {
     this.speechStatusMessage.textContent = message;
     this.speechVisualizer.classList.remove('is-listening', 'is-working');
     this.speechBackgroundNote.classList.add('hidden');
@@ -829,7 +876,7 @@ export class ARHud {
     this.speechRecordButton.disabled = false;
     this.speechStopButton.disabled = true;
     this.speechGenerateButton.disabled = true;
-    this.speechTranscriptMessage.textContent = 'No speech recorded yet.';
+    this.speechTranscriptMessage.textContent = 'No request entered yet.';
   }
 
   showSpeechRecording(): void {
@@ -866,12 +913,19 @@ export class ARHud {
     this.speechGenerateButton.disabled = !transcript;
   }
 
-  showSpeechDetecting(): void {
-    this.speechStatusMessage.textContent = 'Detecting speech and shaping the request for 3D generation...';
+  showSpeechDetecting(requestText?: string): void {
+    const normalizedRequest = requestText?.trim();
+    this.speechStatusMessage.textContent = normalizedRequest
+      ? 'Preparing request for 3D generation...'
+      : 'Detecting speech and shaping the request for 3D generation...';
     this.speechVisualizer.classList.remove('is-listening');
     this.speechVisualizer.classList.add('is-working');
     this.speechBackgroundNote.classList.add('hidden');
     this.setSpeechStage('detecting_speech');
+    if (normalizedRequest) {
+      this.speechTranscriptMessage.textContent = normalizedRequest;
+    }
+    this.speechTextGenerateButton.disabled = true;
     this.speechRecordButton.disabled = true;
     this.speechStopButton.disabled = true;
     this.speechGenerateButton.disabled = true;
@@ -1097,6 +1151,27 @@ export class ARHud {
     this.renderModelManagerList();
   }
 
+  markModelDownloadStarted(modelId: string): void {
+    this.downloadingModelIds.add(modelId);
+    this.renderModelDownloadState();
+  }
+
+  markModelDownloaded(modelId: string): void {
+    this.downloadingModelIds.delete(modelId);
+    this.downloadedModelIds.add(modelId);
+    this.writeStoredModelIds(this.downloadedStorageKey, [...this.downloadedModelIds]);
+    this.renderModelDownloadState();
+  }
+
+  markModelDownloadFailed(modelId: string): void {
+    this.downloadingModelIds.delete(modelId);
+    this.renderModelDownloadState();
+  }
+
+  isModelDownloaded(modelId: string): boolean {
+    return this.downloadedModelIds.has(modelId);
+  }
+
   updateModelManagerStatus(message: string): void {
     this.modelManagerMessage.textContent = message;
   }
@@ -1114,6 +1189,7 @@ export class ARHud {
     this.modelPreviewTitle.textContent = modelLabel;
     this.modelPreviewStatus.textContent = 'Loading preview...';
     this.modelPreviewViewport.replaceChildren();
+    this.updateModelPreviewAnimationOptions([], -1);
     this.updateModelPreviewLightingLabel();
     this.updateModelPreviewDirectionLabel();
     this.modelPreview.classList.remove('hidden');
@@ -1121,6 +1197,25 @@ export class ARHud {
 
   showModelPreviewReady(): void {
     this.modelPreviewStatus.textContent = 'Preview ready.';
+  }
+
+  updateModelPreviewAnimationOptions(options: AnimationOption[], selectedIndex: number): void {
+    this.modelPreviewAnimationSelect.replaceChildren();
+    options.forEach((option) => {
+      this.modelPreviewAnimationSelect.append(new Option(option.label, String(option.index)));
+    });
+
+    const hasMultipleAnimations = options.length > 1;
+    this.modelPreviewAnimationControl.classList.toggle('hidden', !hasMultipleAnimations);
+    this.modelPreviewAnimationSelect.disabled = !hasMultipleAnimations;
+
+    if (options.some((option) => option.index === selectedIndex)) {
+      this.modelPreviewAnimationSelect.value = String(selectedIndex);
+    }
+  }
+
+  updateSelectedModelPreviewAnimation(animationIndex: number): void {
+    this.modelPreviewAnimationSelect.value = String(animationIndex);
   }
 
   showModelPreviewError(message: string): void {
@@ -1141,6 +1236,7 @@ export class ARHud {
     this.modelPreviewTitle.textContent = '';
     this.modelPreviewStatus.textContent = 'Loading preview...';
     this.modelPreviewViewport.replaceChildren();
+    this.updateModelPreviewAnimationOptions([], -1);
   }
 
   setCameraPanelVisible(isVisible: boolean): void {
@@ -1243,7 +1339,7 @@ export class ARHud {
       case 'dynamic':
         return 'Sign in to use Dynamic.';
       case 'speech':
-        return 'Sign in to use Speech to 3D.';
+        return 'Sign in to use Text or Voice to 3D.';
       default:
         return 'Sign in with an approved account.';
     }
@@ -1796,6 +1892,12 @@ export class ARHud {
     this.renderARModelPicker();
   }
 
+  private renderModelDownloadState(): void {
+    this.renderModelManagerList();
+    this.renderARModelPicker();
+    this.renderModelRail();
+  }
+
   private allModelOptions(): ModelOption[] {
     return [...this.baseModelOptions, ...this.generatedModelOptions, ...this.uploadedModelOptions];
   }
@@ -1913,8 +2015,18 @@ export class ARHud {
       const isUploaded = modelKind === 'uploaded';
       const canUpdateThumbnail = model.id.startsWith('generated-');
       const canManageModel = this.canManageModel(model);
+      const downloadState = this.modelDownloadState(model.id);
       const row = document.createElement('article');
-      row.className = `model-manager-row has-preview${isGenerated ? ' is-generated' : ''}${isUploaded ? ' is-uploaded' : ''}`;
+      row.className = [
+        'model-manager-row',
+        'has-preview',
+        isGenerated ? 'is-generated' : '',
+        isUploaded ? 'is-uploaded' : '',
+        downloadState === 'downloaded' ? 'is-downloaded' : 'is-not-downloaded',
+        downloadState === 'downloading' ? 'is-downloading' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
       row.dataset.modelId = model.id;
       row.tabIndex = 0;
       row.setAttribute('role', 'button');
@@ -1959,6 +2071,11 @@ export class ARHud {
         details.appendChild(owner);
       }
 
+      const meta = document.createElement('div');
+      meta.className = 'model-manager-meta';
+      meta.append(this.createModelDownloadStatus(model.id), this.createModelSizePill(model));
+      details.appendChild(meta);
+
       const label = document.createElement('p');
       label.className = 'model-manager-name';
       label.textContent = model.label;
@@ -1969,6 +2086,7 @@ export class ARHud {
       const actions = document.createElement('div');
       actions.className = 'model-manager-actions';
       actions.append(this.createModelActionButton(`Preview ${model.label}`, 'preview', 'preview', '', () => this.handlers.onPreviewModel(model.id)));
+      actions.append(this.createDownloadModelButton(model));
       actions.append(this.createFavoriteButton(model));
       if (canManageModel && model.id.startsWith('generated-') && (isGenerated || isUploaded)) {
         const nextVisibility: ModelVisibility = model.visibility === 'public' ? 'private' : 'public';
@@ -2123,9 +2241,16 @@ export class ARHud {
     this.modelRail.replaceChildren();
 
     this.selectableModelOptions().forEach((model) => {
+      const downloadState = this.modelDownloadState(model.id);
       const item = document.createElement('button');
       item.type = 'button';
-      item.className = 'model-rail-item';
+      item.className = [
+        'model-rail-item',
+        downloadState === 'downloaded' ? 'is-downloaded' : 'is-not-downloaded',
+        downloadState === 'downloading' ? 'is-downloading' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
       item.dataset.modelId = model.id;
       item.setAttribute('aria-label', `Select ${model.label}`);
       item.setAttribute('aria-pressed', selectedModelId === model.id ? 'true' : 'false');
@@ -2172,9 +2297,16 @@ export class ARHud {
     }
 
     models.forEach((model) => {
+      const downloadState = this.modelDownloadState(model.id);
       const item = document.createElement('button');
       item.type = 'button';
-      item.className = 'ar-model-card';
+      item.className = [
+        'ar-model-card',
+        downloadState === 'downloaded' ? 'is-downloaded' : 'is-not-downloaded',
+        downloadState === 'downloading' ? 'is-downloading' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
       item.dataset.modelId = model.id;
       item.setAttribute('aria-label', `Select ${model.label}`);
       item.setAttribute('aria-pressed', selectedModelId === model.id ? 'true' : 'false');
@@ -2197,7 +2329,13 @@ export class ARHud {
       label.className = 'ar-model-card-label';
       label.textContent = model.label;
 
-      item.append(thumbnail, label);
+      const meta = document.createElement('span');
+      meta.className = 'ar-model-card-meta';
+      meta.textContent = `${this.modelDownloadStatusText(downloadState)} - ${
+        typeof model.bytes === 'number' ? this.formatBytes(model.bytes) : 'Size unknown'
+      }`;
+
+      item.append(thumbnail, label, meta);
       this.arModelList.appendChild(item);
     });
 
@@ -2312,6 +2450,65 @@ export class ARHud {
     );
     button.setAttribute('aria-pressed', isFavorite ? 'true' : 'false');
     return button;
+  }
+
+  private createDownloadModelButton(model: ModelOption): HTMLButtonElement {
+    const downloadState = this.modelDownloadState(model.id);
+    const label =
+      downloadState === 'downloaded'
+        ? `Downloaded ${model.label}`
+        : downloadState === 'downloading'
+          ? `Downloading ${model.label}`
+          : `Download ${model.label}`;
+    const button = this.createModelActionButton(label, 'download', 'download', '', () => {
+      this.markModelDownloadStarted(model.id);
+      this.modelSelect.value = model.id;
+      this.updateModelRailSelection(model.id);
+      this.updateARModelPickerSelection(model.id);
+      this.handlers.onModelSelect(model.id);
+    });
+    button.classList.toggle('is-downloading', downloadState === 'downloading');
+    button.classList.toggle('is-complete', downloadState === 'downloaded');
+    button.disabled = downloadState === 'downloaded';
+    button.setAttribute('aria-pressed', downloadState === 'downloaded' ? 'true' : 'false');
+    return button;
+  }
+
+  private createModelDownloadStatus(modelId: string): HTMLElement {
+    const state = this.modelDownloadState(modelId);
+    const status = document.createElement('span');
+    status.className = `model-download-pill is-${state}`;
+    status.textContent =
+      state === 'downloaded' ? 'Downloaded' : state === 'downloading' ? 'Downloading' : 'Not downloaded';
+    return status;
+  }
+
+  private createModelSizePill(model: ModelOption): HTMLElement {
+    const size = document.createElement('span');
+    size.className = 'model-size-pill';
+    size.textContent = typeof model.bytes === 'number' ? this.formatBytes(model.bytes) : 'Size unknown';
+    return size;
+  }
+
+  private modelDownloadState(modelId: string): 'downloaded' | 'downloading' | 'not-downloaded' {
+    if (this.downloadingModelIds.has(modelId)) {
+      return 'downloading';
+    }
+    if (this.downloadedModelIds.has(modelId)) {
+      return 'downloaded';
+    }
+    return 'not-downloaded';
+  }
+
+  private modelDownloadStatusText(state: 'downloaded' | 'downloading' | 'not-downloaded'): string {
+    switch (state) {
+      case 'downloaded':
+        return 'Downloaded';
+      case 'downloading':
+        return 'Downloading';
+      case 'not-downloaded':
+        return 'Not downloaded';
+    }
   }
 
   private toggleFavorite(modelId: string): void {
@@ -2744,6 +2941,7 @@ export class ARHud {
         'M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z',
         'M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z',
       ],
+      download: ['M12 4v10', 'M8 10l4 4 4-4', 'M5 20h14'],
       favorite: ['M12 3.6l2.6 5.2 5.7.8-4.1 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4.1-4 5.7-.8L12 3.6Z'],
       'favorite-filled': ['M12 3.6l2.6 5.2 5.7.8-4.1 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4.1-4 5.7-.8L12 3.6Z'],
       'visibility-public': ['M6 10V8a6 6 0 0 1 11.6-2', 'M7 10h10a2 2 0 0 1 2 2v7H5v-7a2 2 0 0 1 2-2Z'],

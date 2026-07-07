@@ -29,6 +29,7 @@ import {
   renameGeneratedModel as renameGeneratedModelRequest,
   retryAdminJob as retryAdminJobRequest,
   startSpeechModelJob,
+  startTextModelJob,
   startGeneratedModelJob,
   storeUploadedModel as storeUploadedModelRequest,
   toggleGeneratedModelVisibility as toggleGeneratedModelVisibilityRequest,
@@ -120,6 +121,7 @@ export class WebARApp {
       onCloseModelPreview: () => this.closeModelPreview(),
       onPreviewLightingChange: (intensity) => this.updateModelPreviewLighting(intensity),
       onPreviewLightDirectionChange: (degrees) => this.updateModelPreviewLightDirection(degrees),
+      onPreviewAnimationSelect: (animationIndex) => this.selectModelPreviewAnimation(animationIndex),
       onUpdateModelThumbnail: (modelId, file) => void this.updateModelThumbnail(modelId, file),
       onReturnHome: () => void this.returnHome(),
       onLogin: (email, password) => void this.login(email, password),
@@ -134,6 +136,7 @@ export class WebARApp {
       onStartSpeechRecording: () => void this.startSpeechRecording(),
       onStopSpeechRecording: () => void this.stopSpeechRecording(),
       onGenerateSpeechModel: () => void this.generateSpeechModel(),
+      onGenerateTextModel: (text) => void this.generateTextModel(text),
       onAnimationSelect: (animationIndex) => this.selectModelAnimation(animationIndex),
       onPrepareMultiObject: () => void this.prepareMultiObject(),
       onStartMultiObject: () => void this.startMultiObjectSession(),
@@ -409,6 +412,10 @@ export class WebARApp {
     this.appState.modelLoaded = false;
     this.hud?.updateModelReady(false);
     this.hud?.updateSelectedModel(modelOption.id);
+    const shouldMarkDownload = !(this.hud?.isModelDownloaded(modelOption.id) ?? false);
+    if (shouldMarkDownload) {
+      this.hud?.markModelDownloadStarted(modelOption.id);
+    }
     this.hud?.updateModelSource('Layout object');
     this.hud?.showMultiObjectMessage(`Loading ${modelOption.label} for multi-object placement...`);
 
@@ -424,11 +431,15 @@ export class WebARApp {
       this.appState.modelLoaded = true;
       this.appState.setMode('readyToPlace');
       this.hud?.updateModelReady(true);
+      this.hud?.markModelDownloaded(modelOption.id);
       this.hud?.update(this.appState.mode, `${modelOption.label} ready. Tap Place to add it to this layout.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown model loading error.';
       this.appState.modelLoaded = false;
       this.hud?.updateModelReady(false);
+      if (shouldMarkDownload) {
+        this.hud?.markModelDownloadFailed(modelOption.id);
+      }
       this.hud?.showMultiObjectMessage(`Could not load ${modelOption.label}: ${message}`);
     }
   }
@@ -449,8 +460,13 @@ export class WebARApp {
     const wasPlaced = this.appState.mode === 'placed' || this.appState.mode === 'editing';
     this.appState.modelLoaded = false;
     this.hud?.updateModelReady(false);
+    const shouldMarkDownload =
+      options.selectedModelId ? !(this.hud?.isModelDownloaded(options.selectedModelId) ?? false) : false;
     if (options.selectedModelId) {
       this.hud?.updateSelectedModel(options.selectedModelId);
+      if (shouldMarkDownload) {
+        this.hud?.markModelDownloadStarted(options.selectedModelId);
+      }
     }
     this.hud?.updateModelSource(options.sourceMessage);
     this.hud?.update(this.appState.mode, options.loadingMessage);
@@ -469,10 +485,16 @@ export class WebARApp {
         sceneContext.modelRoot.visible = false;
       }
       this.hud?.update(this.appState.mode, options.successMessage);
+      if (options.selectedModelId) {
+        this.hud?.markModelDownloaded(options.selectedModelId);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown model loading error.';
       this.appState.modelLoaded = false;
       this.hud?.updateModelReady(false);
+      if (options.selectedModelId && shouldMarkDownload) {
+        this.hud?.markModelDownloadFailed(options.selectedModelId);
+      }
       this.appState.setError(`Could not load ${label}: ${message}`);
       this.hud?.update(this.appState.mode, this.appState.lastError ?? undefined);
     }
@@ -751,6 +773,35 @@ export class WebARApp {
     }
   }
 
+  private async generateTextModel(text: string): Promise<void> {
+    const authToken = this.requireAuthToken('Sign in to use Text or Voice to 3D.');
+    if (!authToken) {
+      return;
+    }
+
+    const normalizedText = text.trim().replace(/\s+/g, ' ');
+    if (!normalizedText) {
+      this.hud?.showSpeechError('Describe the object before generating a 3D model.');
+      return;
+    }
+
+    this.hud?.showSpeechDetecting(normalizedText);
+
+    try {
+      const job = await startTextModelJob({
+        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        text: normalizedText,
+        authToken,
+      });
+      this.hud?.showSpeechBackgroundJob(job);
+      void this.refreshGeneratedModels();
+      void this.watchSpeechGenerationJob(job);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Text to 3D failed.';
+      this.hud?.showSpeechError(`Text generation failed: ${message}`);
+    }
+  }
+
   private async watchSpeechGenerationJob(job: StartSpeechModelJobResult): Promise<void> {
     const watchToken = ++this.speechJobWatchToken;
     await this.pollSpeechGenerationJob(job, watchToken);
@@ -965,6 +1016,10 @@ export class WebARApp {
     }
 
     this.hud?.showModelPreviewLoading(modelOption.label);
+    const shouldMarkDownload = !(this.hud?.isModelDownloaded(modelId) ?? false);
+    if (shouldMarkDownload) {
+      this.hud?.markModelDownloadStarted(modelId);
+    }
     if (!this.modelPreviewViewer) {
       const { ModelPreviewViewer: ModelPreviewViewerCtor } = await import('../scene/ModelPreviewViewer');
       this.modelPreviewViewer = new ModelPreviewViewerCtor(previewViewport);
@@ -973,10 +1028,15 @@ export class WebARApp {
     try {
       this.modelPreviewViewer.setLightingIntensity(this.hud?.getModelPreviewLightingIntensity() ?? 1);
       this.modelPreviewViewer.setLightDirectionDegrees(this.hud?.getModelPreviewLightDirectionDegrees() ?? 45);
-      await this.modelPreviewViewer.preview(modelOption);
+      const result = await this.modelPreviewViewer.preview(modelOption);
+      this.hud?.markModelDownloaded(modelId);
+      this.hud?.updateModelPreviewAnimationOptions(result.animations, result.animations.length > 0 ? 0 : -1);
       this.hud?.showModelPreviewReady();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown model preview error.';
+      if (shouldMarkDownload) {
+        this.hud?.markModelDownloadFailed(modelId);
+      }
       this.hud?.showModelPreviewError(`Preview failed: ${message}`);
     }
   }
@@ -993,6 +1053,12 @@ export class WebARApp {
 
   private updateModelPreviewLightDirection(degrees: number): void {
     this.modelPreviewViewer?.setLightDirectionDegrees(degrees);
+  }
+
+  private selectModelPreviewAnimation(animationIndex: number): void {
+    if (this.modelPreviewViewer?.selectAnimation(animationIndex)) {
+      this.hud?.updateSelectedModelPreviewAnimation(animationIndex);
+    }
   }
 
   private async uploadImage(file: File): Promise<void> {

@@ -59,6 +59,10 @@ interface GenerateSpeechRequestBody {
   audio_mime_type?: unknown;
 }
 
+interface GenerateTextRequestBody {
+  text?: unknown;
+}
+
 interface DynamicImageResponse {
   image_base64?: unknown;
   image_format?: unknown;
@@ -88,7 +92,7 @@ interface AuthRequestBody {
   status?: unknown;
 }
 
-type GenerationPipeline = 'trellis' | 'openai-to-3d' | 'dynamic' | 'speech';
+type GenerationPipeline = 'trellis' | 'openai-to-3d' | 'dynamic' | 'speech' | 'text';
 type GenerationStage =
   | 'speech_input'
   | 'detecting_speech'
@@ -463,6 +467,7 @@ async function routeGenerateModelRequest(
     url.pathname !== '/generate-3d/openai' &&
     url.pathname !== '/generate-3d/dynamic' &&
     url.pathname !== '/generate-3d/speech' &&
+    url.pathname !== '/generate-3d/text' &&
     url.pathname !== '/extract-image'
   ) {
     return jsonResponse({ error: 'Not found.' }, 404);
@@ -475,6 +480,10 @@ async function routeGenerateModelRequest(
 
   if (url.pathname === '/generate-3d/speech') {
     return handleSpeechGenerationRequest(request, env, deps, url, auth.user, ctx);
+  }
+
+  if (url.pathname === '/generate-3d/text') {
+    return handleTextGenerationRequest(request, env, deps, url, auth.user, ctx);
   }
 
   const pipeline = pipelineFromGeneratePath(url.pathname);
@@ -705,6 +714,72 @@ async function handleSpeechGenerationRequest(
   );
 }
 
+async function handleTextGenerationRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  url: URL,
+  user: StoredUser,
+  ctx?: ExecutionContext,
+): Promise<Response> {
+  const configError = validateEnv(env, 'text');
+  if (configError) {
+    return jsonResponse({ error: configError }, 500);
+  }
+
+  const body = await readJsonBody<GenerateTextRequestBody>(request);
+  if (!body.ok) {
+    return jsonResponse({ error: body.error }, 400);
+  }
+
+  const text = typeof body.value.text === 'string' ? body.value.text.trim().replace(/\s+/g, ' ') : '';
+  if (!text) {
+    return jsonResponse({ error: 'text is required.' }, 400);
+  }
+
+  const now = deps.now();
+  const job: StoredJob = {
+    id: createTextJobId(now, text),
+    label: `Text object - ${formatDisplayTimestamp(now)}`,
+    status: 'running',
+    stage: 'detecting_speech',
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+    pipeline: 'text',
+    source_transcript: text,
+    owner_email: user.email,
+    visibility: 'private',
+  };
+  await saveJob(env, job);
+  await addPendingJob(env, job.id);
+
+  const backgroundJob = processTextGenerationJob(
+    {
+      job,
+      url,
+    },
+    env,
+    deps,
+  );
+  if (ctx) {
+    ctx.waitUntil(backgroundJob);
+  } else {
+    void backgroundJob;
+  }
+
+  return jsonResponse(
+    {
+      job_id: job.id,
+      label: job.label,
+      status: job.status,
+      stage: job.stage,
+      transcript: text,
+      status_url: `${url.origin}/generate-3d/jobs/${encodeURIComponent(job.id)}`,
+    },
+    202,
+  );
+}
+
 async function processSpeechGenerationJob(
   input: {
     audioBase64: string;
@@ -722,6 +797,28 @@ async function processSpeechGenerationJob(
         requestOrigin: input.url.origin,
         audioBase64: input.audioBase64,
         audioMimeType: input.audioMimeType,
+      },
+      env,
+      deps,
+    );
+  } catch (error) {
+    await failSpeechGenerationJob(env, deps, input.job, error);
+  }
+}
+
+async function processTextGenerationJob(
+  input: {
+    job: StoredJob;
+    url: URL;
+  },
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<void> {
+  try {
+    await advanceSpeechGenerationJob(
+      {
+        job: input.job,
+        requestOrigin: input.url.origin,
       },
       env,
       deps,
@@ -1737,7 +1834,7 @@ async function processModalJob(
       updated_at: now.toISOString(),
       pipeline: 'trellis',
     } satisfies StoredJob);
-  if (job.pipeline === 'speech' && !job.modal_call_id) {
+  if (isInputTo3DJob(job) && !job.modal_call_id) {
     try {
       const resumedJob = await advanceSpeechGenerationJob(
         {
@@ -1768,7 +1865,7 @@ async function processModalJob(
     const runningJob: StoredJob = {
       ...job,
       status: 'running',
-      stage: job.stage ?? (job.pipeline === 'speech' ? 'generating_3d' : undefined),
+      stage: job.stage ?? (isInputTo3DJob(job) ? 'generating_3d' : undefined),
       updated_at: now.toISOString(),
     };
     await saveJob(env, runningJob);
@@ -1815,6 +1912,10 @@ async function processModalJob(
   await upsertGeneratedModel(env, completedJob);
   await removePendingJob(env, jobId);
   return { state: 'completed', job: completedJob };
+}
+
+function isInputTo3DJob(job: StoredJob): boolean {
+  return job.pipeline === 'speech' || job.pipeline === 'text';
 }
 
 function validateEnv(env: WorkerEnv, pipeline?: GenerationPipeline): string | null {
@@ -2003,7 +2104,7 @@ async function createSpeechImagePromptFor3D(
             {
               type: 'input_text',
               text:
-                'You convert a speech transcript into a single-object image prompt for image-to-3D reconstruction. The final product is a 3D model, so prioritize clean geometry, full visibility, a centered object, clear silhouette, neutral background, and practical physical structure.',
+                'You convert a user object request into a single-object image prompt for image-to-3D reconstruction. The final product is a 3D model, so prioritize clean geometry, full visibility, a centered object, clear silhouette, neutral background, and practical physical structure.',
             },
           ],
         },
@@ -2012,7 +2113,7 @@ async function createSpeechImagePromptFor3D(
           content: [
             {
               type: 'input_text',
-              text: `Transcript: ${transcript}`,
+              text: `User object request: ${transcript}`,
             },
           ],
         },
@@ -2233,6 +2334,10 @@ function pipelineFromGeneratePath(pathname: string): GenerationPipeline {
 
   if (pathname === '/generate-3d/speech') {
     return 'speech';
+  }
+
+  if (pathname === '/generate-3d/text') {
+    return 'text';
   }
 
   return 'trellis';
@@ -3068,6 +3173,10 @@ function formatJobLabel(date: Date, targetObject: string | null): string {
 
 function createSpeechJobId(date: Date, audioBase64: string): string {
   return `speech-${formatTimestamp(date).replace('-', '')}-${fnv1aHash(audioBase64)}`;
+}
+
+function createTextJobId(date: Date, text: string): string {
+  return `text-${formatTimestamp(date).replace('-', '')}-${fnv1aHash(text)}`;
 }
 
 function fnv1aHash(value: string): string {

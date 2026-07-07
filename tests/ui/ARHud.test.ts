@@ -39,6 +39,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onCloseModelPreview: vi.fn(),
     onPreviewLightingChange: vi.fn(),
     onPreviewLightDirectionChange: vi.fn(),
+    onPreviewAnimationSelect: vi.fn(),
     onUpdateModelThumbnail: vi.fn(),
     onReturnHome: vi.fn(),
     onLogin: vi.fn(),
@@ -53,6 +54,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onStartSpeechRecording: vi.fn(),
     onStopSpeechRecording: vi.fn(),
     onGenerateSpeechModel: vi.fn(),
+    onGenerateTextModel: vi.fn(),
     onAnimationSelect: vi.fn(),
     onPrepareMultiObject: vi.fn(),
     onStartMultiObject: vi.fn(),
@@ -77,6 +79,7 @@ const adminUser = {
 describe('ARHud', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/');
+    window.localStorage.clear();
   });
 
   it('starts on a branded first screen with public and login-required actions grouped', () => {
@@ -108,7 +111,7 @@ describe('ARHud', () => {
       'Camera',
       'Upload Image',
       'Upload Model',
-      'Speech to 3D',
+      'Text or Voice to 3D',
       'Full Flow',
       'Dynamic',
     ]);
@@ -122,7 +125,7 @@ describe('ARHud', () => {
       'Camera',
       'Upload Image',
       'Upload Model',
-      'Speech to 3D',
+      'Text or Voice to 3D',
       'Full Flow',
       'Dynamic',
     ]);
@@ -159,31 +162,43 @@ describe('ARHud', () => {
     expect(root.querySelector('.model-manager')?.classList.contains('hidden')).toBe(false);
   });
 
-  it('requires login for Speech to 3D and shows push-to-talk controls to approved users', () => {
+  it('requires login for Text or Voice to 3D and shows text plus push-to-talk controls to approved users', () => {
     const guestRoot = document.createElement('div');
     new ARHud(guestRoot, modelOptions, createHandlers());
 
-    [...guestRoot.querySelectorAll('button')].find((button) => button.textContent === 'Speech to 3D')?.click();
+    [...guestRoot.querySelectorAll('button')].find((button) => button.textContent === 'Text or Voice to 3D')?.click();
 
     expect(window.location.hash).toBe('#/login');
-    expect(guestRoot.textContent).toContain('Sign in to use Speech to 3D.');
+    expect(guestRoot.textContent).toContain('Sign in to use Text or Voice to 3D.');
 
     const root = document.createElement('div');
     const onStartSpeechRecording = vi.fn();
     const onStopSpeechRecording = vi.fn();
     const onGenerateSpeechModel = vi.fn();
+    const onGenerateTextModel = vi.fn();
     const hud = new ARHud(
       root,
       modelOptions,
-      createHandlers({ onStartSpeechRecording, onStopSpeechRecording, onGenerateSpeechModel }),
+      createHandlers({ onStartSpeechRecording, onStopSpeechRecording, onGenerateSpeechModel, onGenerateTextModel }),
     );
     hud.updateAuthState(activeUser);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Speech to 3D')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Text or Voice to 3D')?.click();
 
     expect(window.location.hash).toBe('#/speech');
     expect(root.querySelector('.speech-panel')?.classList.contains('hidden')).toBe(false);
-    expect(root.textContent).toContain('Push to talk');
+    expect(root.textContent).toContain('Type a description or push to talk');
+
+    const textInput = root.querySelector<HTMLTextAreaElement>('.speech-text-input')!;
+    const generateTextButton = [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Generate from Text',
+    ) as HTMLButtonElement;
+    expect(generateTextButton.disabled).toBe(true);
+    textInput.value = 'a red modern chair';
+    textInput.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(generateTextButton.disabled).toBe(false);
+    generateTextButton.click();
+    expect(onGenerateTextModel).toHaveBeenCalledWith('a red modern chair');
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Record')?.click();
     expect(onStartSpeechRecording).toHaveBeenCalledTimes(1);
@@ -194,7 +209,7 @@ describe('ARHud', () => {
 
     hud.showSpeechDetected('a red modern chair');
     const generateButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate Speech Model',
+      (button) => button.textContent === 'Generate from Voice',
     ) as HTMLButtonElement;
     expect(generateButton.disabled).toBe(false);
     generateButton.click();
@@ -208,10 +223,10 @@ describe('ARHud', () => {
     const hud = new ARHud(root, modelOptions, createHandlers());
     hud.updateAuthState(activeUser);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Speech to 3D')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Text or Voice to 3D')?.click();
 
-    expect(root.textContent).toContain('Speech input');
-    expect(root.textContent).toContain('Detecting speech');
+    expect(root.textContent).toContain('Input request');
+    expect(root.textContent).toContain('Preparing prompt');
     expect(root.textContent).toContain('Generating image');
     expect(root.textContent).toContain('Generating 3D model');
 
@@ -221,13 +236,16 @@ describe('ARHud', () => {
 
     hud.showSpeechCaptured();
     expect(root.textContent).toContain('Audio captured. Speech will appear after detection.');
-    expect(root.querySelector<HTMLButtonElement>('.speech-actions button:nth-child(3)')?.disabled).toBe(false);
+    const generateVoiceButton = [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Generate from Voice',
+    ) as HTMLButtonElement;
+    expect(generateVoiceButton.disabled).toBe(false);
 
     hud.showSpeechDetecting();
     expect(root.querySelector('[data-speech-stage="detecting_speech"]')?.classList.contains('is-active')).toBe(true);
 
     hud.showSpeechGeneratingImage('make a red modern chair');
-    expect(root.textContent).toContain('You said');
+    expect(root.textContent).toContain('Request');
     expect(root.textContent).toContain('make a red modern chair');
     expect(root.querySelector('[data-speech-stage="generating_image"]')?.classList.contains('is-active')).toBe(true);
 
@@ -607,6 +625,7 @@ describe('ARHud', () => {
     );
     expect([...root.querySelectorAll('.model-manager-row.is-generated button')].map((button) => button.getAttribute('aria-label'))).toEqual([
       'Preview chair - 2026-07-04 12:00:00 UTC',
+      'Download chair - 2026-07-04 12:00:00 UTC',
       'Favorite chair - 2026-07-04 12:00:00 UTC',
     ]);
     expect(manager?.textContent).toContain('Private');
@@ -638,8 +657,8 @@ describe('ARHud', () => {
 
     const guestGeneratedRows = [...root.querySelectorAll('.model-manager-row.is-generated')];
     expect(guestGeneratedRows.map((row) => [...row.querySelectorAll('button')].map((button) => button.getAttribute('data-action')))).toEqual([
-      ['preview', 'favorite'],
-      ['preview', 'favorite'],
+      ['preview', 'download', 'favorite'],
+      ['preview', 'download', 'favorite'],
     ]);
 
     hud.updateAuthState(activeUser);
@@ -649,12 +668,17 @@ describe('ARHud', () => {
 
     expect([...ownerRow.querySelectorAll('button')].map((button) => button.getAttribute('data-action'))).toEqual([
       'preview',
+      'download',
       'favorite',
       'visibility',
       'edit',
       'delete',
     ]);
-    expect([...otherRow.querySelectorAll('button')].map((button) => button.getAttribute('data-action'))).toEqual(['preview', 'favorite']);
+    expect([...otherRow.querySelectorAll('button')].map((button) => button.getAttribute('data-action'))).toEqual([
+      'preview',
+      'download',
+      'favorite',
+    ]);
     expect(ownerRow.querySelector<HTMLButtonElement>('button[data-action="edit"]')?.getAttribute('aria-label')).toBe('Edit Chair');
     expect(ownerRow.querySelector<HTMLButtonElement>('button[data-action="delete"]')?.getAttribute('aria-label')).toBe('Delete Chair');
   });
@@ -770,11 +794,13 @@ describe('ARHud', () => {
     const onCloseModelPreview = vi.fn();
     const onPreviewLightingChange = vi.fn();
     const onPreviewLightDirectionChange = vi.fn();
+    const onPreviewAnimationSelect = vi.fn();
     const hud = new ARHud(root, modelOptions, createHandlers({
       onPreviewModel,
       onCloseModelPreview,
       onPreviewLightingChange,
       onPreviewLightDirectionChange,
+      onPreviewAnimationSelect,
     }));
     hud.updateGeneratedModels([
       {
@@ -813,9 +839,78 @@ describe('ARHud', () => {
     expect(root.querySelector('.model-preview-direction-value')?.textContent).toBe('225 deg');
     expect(hud.getModelPreviewLightDirectionDegrees()).toBe(225);
 
+    expect(root.querySelector('.model-preview-animation')?.classList.contains('hidden')).toBe(true);
+
+    hud.updateModelPreviewAnimationOptions([
+      { index: 0, label: 'Idle' },
+      { index: 1, label: 'Walk' },
+    ], 0);
+
+    const animationControl = root.querySelector('.model-preview-animation');
+    const animationSelect = root.querySelector<HTMLSelectElement>('select[name="modelPreviewAnimation"]')!;
+    expect(animationControl?.classList.contains('hidden')).toBe(false);
+    expect([...animationSelect.options].map((option) => option.textContent)).toEqual(['Idle', 'Walk']);
+    expect(animationSelect.value).toBe('0');
+
+    animationSelect.value = '1';
+    animationSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(onPreviewAnimationSelect).toHaveBeenCalledWith(1);
+
+    hud.updateSelectedModelPreviewAnimation(0);
+
+    expect(animationSelect.value).toBe('0');
+
     root.querySelector<HTMLButtonElement>('.model-preview-close')?.click();
 
     expect(onCloseModelPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows model size, local download state, and animates the model download action', () => {
+    const root = document.createElement('div');
+    const onModelSelect = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onModelSelect }));
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-fc-123',
+        label: 'Generated chair',
+        url: 'https://assets.example/generated-chair.glb',
+        bytes: 12_399_224,
+        visibility: 'public',
+      },
+    ]);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
+
+    const generatedRow = root.querySelector<HTMLElement>('.model-manager-row[data-model-id="generated-fc-123"]')!;
+    const downloadButton = generatedRow.querySelector<HTMLButtonElement>('button[data-action="download"]')!;
+
+    expect(generatedRow.classList.contains('is-not-downloaded')).toBe(true);
+    expect(generatedRow.textContent).toContain('Not downloaded');
+    expect(generatedRow.textContent).toContain('11.8 MB');
+    expect(downloadButton).not.toBeNull();
+
+    downloadButton.click();
+
+    expect(onModelSelect).toHaveBeenCalledWith('generated-fc-123');
+    const downloadingRow = root.querySelector<HTMLElement>('.model-manager-row[data-model-id="generated-fc-123"]')!;
+    const downloadingButton = downloadingRow.querySelector<HTMLButtonElement>('button[data-action="download"]')!;
+    expect(downloadingButton.classList.contains('is-downloading')).toBe(true);
+    expect(downloadingRow.textContent).toContain('Downloading');
+
+    hud.markModelDownloaded('generated-fc-123');
+
+    const downloadedRow = root.querySelector<HTMLElement>('.model-manager-row[data-model-id="generated-fc-123"]')!;
+    const downloadedButton = downloadedRow.querySelector<HTMLButtonElement>('button[data-action="download"]')!;
+    expect(downloadedRow.classList.contains('is-downloaded')).toBe(true);
+    expect(downloadedRow.textContent).toContain('Downloaded');
+    expect(downloadedButton.classList.contains('is-complete')).toBe(true);
+    expect(downloadedButton.disabled).toBe(true);
+
+    onModelSelect.mockClear();
+    downloadedButton.click();
+
+    expect(onModelSelect).not.toHaveBeenCalled();
   });
 
   it('shows persisted uploaded models in the full-page AR picker and post-placement rail', () => {
@@ -880,6 +975,7 @@ describe('ARHud', () => {
     expect(uploadedRow.querySelector('.model-manager-thumbnail')?.textContent).toBe('GLB');
     expect([...uploadedRow.querySelectorAll('button')].map((button) => button.getAttribute('data-action'))).toEqual([
       'preview',
+      'download',
       'favorite',
     ]);
     expect(onDeleteGeneratedModel).not.toHaveBeenCalled();

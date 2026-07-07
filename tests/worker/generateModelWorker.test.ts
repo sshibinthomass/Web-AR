@@ -92,6 +92,14 @@ function speechGenerationRequest(body: unknown): Request {
   });
 }
 
+function textGenerationRequest(body: unknown): Request {
+  return new Request('https://worker.example/generate-3d/text', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 async function createAdminToken(
   env: WorkerEnv,
   deps: { fetch: typeof fetch; now: () => Date } = {
@@ -799,6 +807,121 @@ describe('handleGenerateModelRequest', () => {
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: 'Login required.' });
+  });
+
+  it('queues approved text as a background job, then optimizes it and starts a TRELLIS job', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify({
+              object: 'small walnut desk',
+              prompt:
+                'Single centered small walnut desk with rounded corners, full object visible, clean silhouette, white background, studio lighting, no text, optimized for image-to-3D reconstruction.',
+            }),
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ b64_json: 'text-image-base64' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ call_id: 'text-modal-123' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const env = createEnv();
+    const deps = { fetch: fetchMock, now: () => new Date('2026-06-28T12:00:00Z') };
+    const token = await createAdminToken(env, deps);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const response = await handleGenerateModelRequest(
+      withAuth(textGenerationRequest({
+        text: 'Make a small walnut desk with rounded corners.',
+      }), token),
+      env,
+      deps,
+      {
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(202);
+    const queuedJob = (await response.json()) as {
+      job_id: string;
+      label: string;
+      status: string;
+      stage: string;
+      status_url: string;
+      transcript: string;
+    };
+    expect(queuedJob).toEqual({
+      job_id: 'text-20260628120000-3b9f3d84',
+      label: 'Text object - 2026-06-28 12:00:00 UTC',
+      status: 'running',
+      stage: 'detecting_speech',
+      status_url: 'https://worker.example/generate-3d/jobs/text-20260628120000-3b9f3d84',
+      transcript: 'Make a small walnut desk with rounded corners.',
+    });
+    expect(waitUntilPromises).toHaveLength(1);
+
+    await waitUntilPromises[0];
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.openai.com/v1/responses');
+    const promptBody = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(promptBody.model).toBe('gpt-5.5');
+    expect(JSON.stringify(promptBody)).toContain('image-to-3D');
+    expect(JSON.stringify(promptBody)).toContain('Make a small walnut desk with rounded corners.');
+
+    expect(fetchMock.mock.calls[1][0]).toBe('https://api.openai.com/v1/images/generations');
+    const imageBody = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body));
+    expect(imageBody.prompt).toContain('small walnut desk');
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      'https://modal.example/start',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Modal-Key': 'modal-key',
+          'Modal-Secret': 'modal-secret',
+        },
+        body: JSON.stringify({
+          image_base64: 'text-image-base64',
+          seed: 42,
+          pipeline_type: '512',
+          decimation_target: 100000,
+          texture_size: 1024,
+        }),
+      }),
+    );
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/jobs/text-20260628120000-3b9f3d84.json',
+      expect.stringContaining('"pipeline":"text"'),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/jobs/text-20260628120000-3b9f3d84.json',
+      expect.stringContaining('"source_transcript":"Make a small walnut desk with rounded corners."'),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
+    expect(env.MODEL_BUCKET.put).toHaveBeenCalledWith(
+      'models/generated/jobs/text-20260628120000-3b9f3d84.json',
+      expect.stringContaining('"modal_call_id":"text-modal-123"'),
+      { httpMetadata: { contentType: 'application/json' } },
+    );
   });
 
   it('queues approved speech as a background job, then updates stages and starts a TRELLIS job', async () => {

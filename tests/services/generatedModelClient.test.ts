@@ -11,6 +11,7 @@ import {
   retryAdminJob,
   startGeneratedModelJob,
   startSpeechModelJob,
+  startTextModelJob,
   storeUploadedModel,
   toggleGeneratedModelVisibility,
   cleanupFailedJobArtifacts,
@@ -962,6 +963,64 @@ describe('startSpeechModelJob', () => {
       stage: 'detecting_speech',
       statusUrl: 'https://worker.example/generate-3d/jobs/speech-20260707-abc123',
     });
+  });
+});
+
+describe('startTextModelJob', () => {
+  it('starts a text-to-3D background job without polling for completion', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          job_id: 'text-20260707-abc123',
+          label: 'Text object - 2026-07-07 08:30:00 UTC',
+          status: 'running',
+          stage: 'detecting_speech',
+          status_url: 'https://worker.example/generate-3d/jobs/text-20260707-abc123',
+          transcript: 'a small wooden chair',
+        }),
+        {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const job = await startTextModelJob({
+      apiUrl: 'https://worker.example/generate-3d',
+      text: ' a small wooden chair ',
+      authToken: 'signed-token',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://worker.example/generate-3d/text',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer signed-token' },
+        body: JSON.stringify({
+          text: 'a small wooden chair',
+        }),
+      }),
+    );
+    expect(job).toEqual({
+      id: 'text-20260707-abc123',
+      label: 'Text object - 2026-07-07 08:30:00 UTC',
+      status: 'running',
+      stage: 'detecting_speech',
+      statusUrl: 'https://worker.example/generate-3d/jobs/text-20260707-abc123',
+      transcript: 'a small wooden chair',
+    });
+  });
+
+  it('requires text before calling the Worker text endpoint', async () => {
+    await expect(
+      startTextModelJob({
+        apiUrl: 'https://worker.example/generate-3d',
+        text: '   ',
+        fetchImpl: vi.fn(),
+      }),
+    ).rejects.toThrow('Describe the object before generating a 3D model.');
   });
 });
 

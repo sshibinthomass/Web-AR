@@ -30,6 +30,15 @@ type PreviewLighting = {
   rimLight: THREE.DirectionalLight;
 };
 
+export interface ModelPreviewAnimationOption {
+  index: number;
+  label: string;
+}
+
+export interface ModelPreviewResult {
+  animations: ModelPreviewAnimationOption[];
+}
+
 const basePreviewLighting = {
   hemisphere: 1.5,
   ambient: 0.45,
@@ -60,6 +69,11 @@ export class ModelPreviewViewer {
   private renderer: PreviewRenderer | null = null;
   private controls: PreviewControls | null = null;
   private model: THREE.Object3D | null = null;
+  private animationMixer: THREE.AnimationMixer | null = null;
+  private animationRoot: THREE.Object3D | null = null;
+  private animationClips: THREE.AnimationClip[] = [];
+  private activeAnimationIndex = -1;
+  private lastFrameTime: number | null = null;
   private shadowFloor: THREE.Mesh | null = null;
   private previewLighting: PreviewLighting | null = null;
   private lightingIntensity = 1;
@@ -83,7 +97,7 @@ export class ModelPreviewViewer {
     this.observeResize = options.observeResize ?? observeElementResize;
   }
 
-  async preview(modelOption: Pick<ModelOption, 'id' | 'label' | 'url'>): Promise<void> {
+  async preview(modelOption: Pick<ModelOption, 'id' | 'label' | 'url'>): Promise<ModelPreviewResult> {
     this.dispose();
     const version = this.requestVersion + 1;
     this.requestVersion = version;
@@ -127,7 +141,7 @@ export class ModelPreviewViewer {
       const loadedModel = await this.loadModel(modelOption.url);
       if (this.requestVersion !== version) {
         disposeObject(loadedModel);
-        return;
+        return { animations: [] };
       }
 
       this.model = loadedModel;
@@ -142,11 +156,25 @@ export class ModelPreviewViewer {
       this.applyLightingIntensity();
       this.applyLightDirection();
       this.frameCameraToModel(loadedModel, bounds);
+      const animations = this.startModelAnimations(loadedModel);
       this.startRenderLoop();
+      return { animations };
     } catch (error) {
       this.dispose();
       throw error;
     }
+  }
+
+  selectAnimation(animationIndex: number): boolean {
+    if (!Number.isInteger(animationIndex) || animationIndex < 0 || animationIndex >= this.animationClips.length) {
+      return false;
+    }
+
+    if (animationIndex === this.activeAnimationIndex) {
+      return true;
+    }
+
+    return this.playModelAnimation(animationIndex, true);
   }
 
   dispose(): void {
@@ -162,6 +190,8 @@ export class ModelPreviewViewer {
 
     this.controls?.dispose();
     this.controls = null;
+
+    this.stopModelAnimations();
 
     if (this.model) {
       disposeObject(this.model);
@@ -247,7 +277,8 @@ export class ModelPreviewViewer {
   }
 
   private startRenderLoop(): void {
-    const animate = () => {
+    const animate = (time = 0) => {
+      this.updateModelAnimation(time);
       this.controls?.update();
       this.renderFrame();
       this.frameId = this.requestFrame(animate);
@@ -260,6 +291,66 @@ export class ModelPreviewViewer {
     if (this.renderer && this.scene && this.camera) {
       this.renderer.render(this.scene, this.camera);
     }
+  }
+
+  private startModelAnimations(model: THREE.Object3D): ModelPreviewAnimationOption[] {
+    const clips = Array.isArray(model.userData.animations)
+      ? (model.userData.animations as THREE.AnimationClip[])
+      : [];
+    this.animationClips = clips;
+    this.lastFrameTime = null;
+    if (clips.length === 0) {
+      return [];
+    }
+
+    this.animationRoot = model;
+    this.animationMixer = new THREE.AnimationMixer(model);
+    this.playModelAnimation(0, false);
+    return clips.map((clip, index) => ({
+      index,
+      label: clip.name.trim() || `Animation ${index + 1}`,
+    }));
+  }
+
+  private playModelAnimation(animationIndex: number, stopExisting: boolean): boolean {
+    if (!this.animationMixer) {
+      return false;
+    }
+
+    const clip = this.animationClips[animationIndex];
+    if (!clip) {
+      return false;
+    }
+
+    if (stopExisting) {
+      this.animationMixer.stopAllAction();
+    }
+    this.animationMixer.clipAction(clip).reset().play();
+    this.activeAnimationIndex = animationIndex;
+    return true;
+  }
+
+  private updateModelAnimation(time: number): void {
+    if (!this.animationMixer) {
+      return;
+    }
+
+    const previousTime = this.lastFrameTime;
+    this.lastFrameTime = time;
+    const delta = previousTime === null ? 0 : Math.max(0, (time - previousTime) / 1000);
+    this.animationMixer.update(delta);
+  }
+
+  private stopModelAnimations(): void {
+    if (this.animationMixer && this.animationRoot) {
+      this.animationMixer.stopAllAction();
+      this.animationMixer.uncacheRoot(this.animationRoot);
+    }
+    this.animationMixer = null;
+    this.animationRoot = null;
+    this.animationClips = [];
+    this.activeAnimationIndex = -1;
+    this.lastFrameTime = null;
   }
 
   private applyLightingIntensity(): void {
