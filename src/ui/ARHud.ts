@@ -41,10 +41,16 @@ interface HUDHandlers {
   onStartSpeechRecording(): void;
   onStopSpeechRecording(): void;
   onGenerateSpeechModel(): void;
+  onAnimationSelect(animationIndex: number): void;
   onPrepareMultiObject(): void;
   onStartMultiObject(): void;
   onAddLayoutObject(): void;
   onDeleteLayoutObject(): void;
+}
+
+interface AnimationOption {
+  index: number;
+  label: string;
 }
 
 type HudRoute =
@@ -154,6 +160,8 @@ export class ARHud {
   private readonly placeButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
   private readonly resetScaleButton: HTMLButtonElement;
+  private readonly animationControl: HTMLLabelElement;
+  private readonly animationSelect: HTMLSelectElement;
   private readonly rotateControl: HTMLLabelElement;
   private rotateInput!: HTMLInputElement;
   private readonly addLayoutObjectButton: HTMLButtonElement;
@@ -654,6 +662,9 @@ export class ARHud {
     this.arButtonSlot.setAttribute('aria-hidden', 'true');
     this.hudActions.appendChild(this.arButtonSlot);
 
+    const animationControl = this.createAnimationControl();
+    this.animationControl = animationControl.control;
+    this.animationSelect = animationControl.select;
     this.rotateControl = this.createRotateControl();
     this.placeButton = this.createHudActionButton('Place', 'Place', 'primary', this.handlers.onPlace);
     this.resetScaleButton = this.createHudActionButton('Scale 1x', '1x', '', this.handlers.onResetScale);
@@ -664,6 +675,7 @@ export class ARHud {
     this.deleteLayoutObjectButton.classList.add('layout-action', 'hidden');
 
     this.hudActions.append(
+      this.animationControl,
       this.rotateControl,
       this.placeButton,
       this.resetScaleButton,
@@ -772,6 +784,25 @@ export class ARHud {
   updateModelReady(isReady: boolean): void {
     this.modelReady = isReady;
     this.updateARPlaceButton();
+  }
+
+  updateAnimationOptions(options: AnimationOption[], selectedIndex: number): void {
+    this.animationSelect.replaceChildren();
+    options.forEach((option) => {
+      this.animationSelect.append(new Option(option.label, String(option.index)));
+    });
+
+    const hasMultipleAnimations = options.length > 1;
+    this.animationControl.classList.toggle('hidden', !hasMultipleAnimations);
+    this.animationSelect.disabled = !hasMultipleAnimations;
+
+    if (options.some((option) => option.index === selectedIndex)) {
+      this.animationSelect.value = String(selectedIndex);
+    }
+  }
+
+  updateSelectedAnimation(animationIndex: number): void {
+    this.animationSelect.value = String(animationIndex);
   }
 
   updateSelectedModel(modelId: string): void {
@@ -2641,6 +2672,28 @@ export class ARHud {
     this.rotateInput = input;
     control.append(label, input);
     return control;
+  }
+
+  private createAnimationControl(): { control: HTMLLabelElement; select: HTMLSelectElement } {
+    const control = document.createElement('label');
+    control.className = 'animation-control hidden';
+
+    const label = document.createElement('span');
+    label.textContent = 'Animation';
+
+    const select = document.createElement('select');
+    select.name = 'animationClip';
+    select.setAttribute('aria-label', 'Animation clip');
+    select.disabled = true;
+    select.addEventListener('change', () => {
+      const animationIndex = Number(select.value);
+      if (Number.isInteger(animationIndex)) {
+        this.handlers.onAnimationSelect(animationIndex);
+      }
+    });
+
+    control.append(label, select);
+    return { control, select };
   }
 
   private handleRotationInput(): void {

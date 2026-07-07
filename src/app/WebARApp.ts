@@ -66,6 +66,12 @@ export class WebARApp {
   private transformController: ObjectTransformController | null = null;
   private layoutSceneManager: InstanceType<ARRuntime['LayoutSceneManager']> | null = null;
   private clock: Three.Clock | null = null;
+  private activeModelAnimation: {
+    mixer: Three.AnimationMixer;
+    root: Three.Object3D;
+    clips: Three.AnimationClip[];
+    activeIndex: number;
+  } | null = null;
   private cameraStream: MediaStream | null = null;
   private capturedImage: CapturedImage | null = null;
   private capturedImageGenerationPipeline: GenerationPipeline = 'openai-to-3d';
@@ -128,6 +134,7 @@ export class WebARApp {
       onStartSpeechRecording: () => void this.startSpeechRecording(),
       onStopSpeechRecording: () => void this.stopSpeechRecording(),
       onGenerateSpeechModel: () => void this.generateSpeechModel(),
+      onAnimationSelect: (animationIndex) => this.selectModelAnimation(animationIndex),
       onPrepareMultiObject: () => void this.prepareMultiObject(),
       onStartMultiObject: () => void this.startMultiObjectSession(),
       onAddLayoutObject: () => this.promptForLayoutObject(),
@@ -451,8 +458,10 @@ export class WebARApp {
     try {
       const { loadGLBModel } = await import('../scene/loadModel');
       const model = await loadGLBModel(modelUrl);
+      this.stopModelAnimations();
       this.removeLoadedModels(sceneContext.modelRoot);
       sceneContext.modelRoot.add(model);
+      this.startModelAnimations(model);
       transformController.setTarget(sceneContext.modelRoot);
       this.appState.modelLoaded = true;
       this.hud?.updateModelReady(true);
@@ -1119,6 +1128,80 @@ export class WebARApp {
       });
   }
 
+  private startModelAnimations(model: Three.Object3D): void {
+    const clips = Array.isArray(model.userData.animations)
+      ? (model.userData.animations as Three.AnimationClip[])
+      : [];
+    if (clips.length === 0) {
+      this.hud?.updateAnimationOptions([], -1);
+      return;
+    }
+
+    const { THREE } = this.requireARRuntime();
+    const mixer = new THREE.AnimationMixer(model);
+    this.activeModelAnimation = {
+      mixer,
+      root: model,
+      clips,
+      activeIndex: 0,
+    };
+    this.hud?.updateAnimationOptions(this.createAnimationOptions(clips), 0);
+    this.playModelAnimation(0, false);
+  }
+
+  private selectModelAnimation(animationIndex: number): void {
+    const activeAnimation = this.activeModelAnimation;
+    if (!activeAnimation || !Number.isInteger(animationIndex)) {
+      return;
+    }
+
+    if (animationIndex < 0 || animationIndex >= activeAnimation.clips.length) {
+      return;
+    }
+
+    if (animationIndex === activeAnimation.activeIndex) {
+      this.hud?.updateSelectedAnimation(animationIndex);
+      return;
+    }
+
+    this.playModelAnimation(animationIndex, true);
+  }
+
+  private playModelAnimation(animationIndex: number, stopExisting: boolean): void {
+    const activeAnimation = this.activeModelAnimation;
+    if (!activeAnimation) {
+      return;
+    }
+
+    const clip = activeAnimation.clips[animationIndex];
+    if (!clip) {
+      return;
+    }
+
+    if (stopExisting) {
+      activeAnimation.mixer.stopAllAction();
+    }
+    activeAnimation.mixer.clipAction(clip).reset().play();
+    activeAnimation.activeIndex = animationIndex;
+    this.hud?.updateSelectedAnimation(animationIndex);
+  }
+
+  private createAnimationOptions(clips: Three.AnimationClip[]): Array<{ index: number; label: string }> {
+    return clips.map((clip, index) => ({
+      index,
+      label: clip.name.trim() || `Animation ${index + 1}`,
+    }));
+  }
+
+  private stopModelAnimations(): void {
+    if (this.activeModelAnimation) {
+      this.activeModelAnimation.mixer.stopAllAction();
+      this.activeModelAnimation.mixer.uncacheRoot(this.activeModelAnimation.root);
+      this.activeModelAnimation = null;
+    }
+    this.hud?.updateAnimationOptions([], -1);
+  }
+
   private disposeModel(root: Three.Object3D): void {
     const { THREE } = this.requireARRuntime();
     root.traverse((child) => {
@@ -1190,7 +1273,8 @@ export class WebARApp {
       this.lastHudMode = this.appState.mode;
     }
 
-    clock.getDelta();
+    const delta = clock.getDelta();
+    this.activeModelAnimation?.mixer.update(delta);
     sceneContext.renderer.render(sceneContext.scene, sceneContext.camera);
   }
 

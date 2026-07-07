@@ -35,6 +35,7 @@ export async function loadGLBModel(url: string): Promise<THREE.Group> {
 
   const group = new THREE.Group();
   group.name = 'loaded-glb-model';
+  group.userData.animations = gltf.animations;
   group.add(model);
   group.visible = true;
 

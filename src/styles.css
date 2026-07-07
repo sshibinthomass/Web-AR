@@ -436,7 +436,8 @@ canvas {
   touch-action: manipulation;
 }
 
-.rotate-control {
+.rotate-control,
+.animation-control {
   order: -1;
   flex: 1 0 100%;
   display: grid;
@@ -454,18 +455,40 @@ canvas {
   backdrop-filter: blur(14px);
 }
 
-.rotate-control span {
+.animation-control {
+  order: -2;
+}
+
+.rotate-control span,
+.animation-control span {
   font-size: 12px;
   font-weight: 850;
 }
 
-.rotate-control input {
+.rotate-control input,
+.animation-control select {
   width: 100%;
   min-width: 0;
+}
+
+.rotate-control input {
   accent-color: #5eead4;
 }
 
-.rotate-control input:disabled {
+.animation-control select {
+  min-height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: #f8fafc;
+  background: rgba(5, 10, 14, 0.72);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.rotate-control input:disabled,
+.animation-control select:disabled {
   opacity: 0.48;
 }
 

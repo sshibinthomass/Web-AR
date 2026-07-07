@@ -53,6 +53,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onStartSpeechRecording: vi.fn(),
     onStopSpeechRecording: vi.fn(),
     onGenerateSpeechModel: vi.fn(),
+    onAnimationSelect: vi.fn(),
     onPrepareMultiObject: vi.fn(),
     onStartMultiObject: vi.fn(),
     onAddLayoutObject: vi.fn(),
@@ -389,6 +390,38 @@ describe('ARHud', () => {
     expect(actionButtons.every((button) => button.classList.contains('hud-action-chip'))).toBe(true);
     expect(actionButtons.every((button) => button.querySelector('svg') === null)).toBe(true);
     expect(root.querySelector<HTMLInputElement>('.rotate-control input[type="range"]')).toBeInstanceOf(HTMLInputElement);
+  });
+
+  it('shows an animation selector for models with multiple clips', () => {
+    const root = document.createElement('div');
+    const onAnimationSelect = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onAnimationSelect }));
+
+    expect(root.querySelector('.animation-control')?.classList.contains('hidden')).toBe(true);
+
+    hud.updateAnimationOptions([{ index: 0, label: 'Idle' }], 0);
+
+    expect(root.querySelector('.animation-control')?.classList.contains('hidden')).toBe(true);
+
+    hud.updateAnimationOptions([
+      { index: 0, label: 'Idle' },
+      { index: 1, label: 'Walk' },
+    ], 0);
+
+    const animationControl = root.querySelector('.animation-control');
+    const animationSelect = root.querySelector<HTMLSelectElement>('select[name="animationClip"]')!;
+    expect(animationControl?.classList.contains('hidden')).toBe(false);
+    expect([...animationSelect.options].map((option) => option.textContent)).toEqual(['Idle', 'Walk']);
+    expect(animationSelect.value).toBe('0');
+
+    animationSelect.value = '1';
+    animationSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(onAnimationSelect).toHaveBeenCalledWith(1);
+
+    hud.updateSelectedAnimation(0);
+
+    expect(animationSelect.value).toBe('0');
   });
 
   it('opens Full Flow from the first screen as a capture page', () => {
