@@ -44,7 +44,6 @@ interface HUDHandlers {
   onGenerateSpeechModel(): void;
   onGenerateTextModel(text: string): void;
   onAnimationSelect(animationIndex: number): void;
-  onPrepareMultiObject(): void;
   onStartMultiObject(): void;
   onAddLayoutObject(): void;
   onDeleteLayoutObject(): void;
@@ -1428,7 +1427,7 @@ export class ARHud {
     }
 
     if (route === 'multi-object') {
-      this.openMultiObjectPage();
+      this.openMultiObjectEditor();
       return;
     }
 
@@ -1681,30 +1680,6 @@ export class ARHud {
     this.cameraPanel.classList.remove('fullscreen');
     this.fullFlowLoading.classList.add('hidden');
     this.renderModelManagerList();
-  }
-
-  private openMultiObjectPage(): void {
-    this.closeModelPreviewIfOpen();
-    this.clearFullFlowModelOption();
-    this.arPlacementStarted = false;
-    this.landing.classList.add('hidden');
-    this.authPanel.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.remove('hidden');
-    this.statusPanel.classList.add('hidden');
-    this.statusPanel.classList.remove('camera-active', 'ar-picker-active', 'full-flow-active', 'layout-active');
-    this.hudActions.classList.add('hidden');
-    this.showLayoutActionButtons(false);
-    this.modelRail.classList.add('hidden');
-    this.arModelPicker.classList.add('hidden');
-    this.gestureSurface.classList.add('hidden');
-    this.cameraPanel.classList.add('hidden');
-    this.cameraPanel.classList.remove('fullscreen');
-    this.fullFlowLoading.classList.add('hidden');
-    this.layoutManagerMessage.textContent = 'No layout is saved or reopened.';
-    this.handlers.onPrepareMultiObject();
   }
 
   private openAuthPage(message = 'Sign in with an approved account, or create one for admin approval.'): void {

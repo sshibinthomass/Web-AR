@@ -56,7 +56,6 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onGenerateSpeechModel: vi.fn(),
     onGenerateTextModel: vi.fn(),
     onAnimationSelect: vi.fn(),
-    onPrepareMultiObject: vi.fn(),
     onStartMultiObject: vi.fn(),
     onAddLayoutObject: vi.fn(),
     onDeleteLayoutObject: vi.fn(),
@@ -138,7 +137,8 @@ describe('ARHud', () => {
   it('prompts guests to sign in for protected actions while leaving AR View, Models, and Multi Object public', () => {
     const root = document.createElement('div');
     const onStartCamera = vi.fn();
-    new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
+    const onStartMultiObject = vi.fn();
+    new ARHud(root, modelOptions, createHandlers({ onStartCamera, onStartMultiObject }));
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera')?.click();
 
@@ -149,7 +149,8 @@ describe('ARHud', () => {
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Multi Object')?.click();
 
     expect(window.location.hash).toBe('#/multi-object');
-    expect(root.querySelector('.layout-manager')?.classList.contains('hidden')).toBe(false);
+    expect(onStartMultiObject).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('.layout-manager')?.classList.contains('hidden')).toBe(true);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
 
@@ -472,7 +473,7 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('dynamic image');
   });
 
-  it('opens Multi Object for guests as a fresh AR placement session without saved layouts', () => {
+  it('opens Multi Object for guests directly as a fresh AR placement session without saved layouts', () => {
     const root = document.createElement('div');
     const onStartMultiObject = vi.fn();
     const hud = new ARHud(root, modelOptions, createHandlers({ onStartMultiObject }));
@@ -485,17 +486,13 @@ describe('ARHud', () => {
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Multi Object')?.click();
 
     expect(window.location.hash).toBe('#/multi-object');
-    expect(root.querySelector('.layout-manager')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
-    expect(root.textContent).toContain('This session starts empty each time.');
+    expect(root.querySelector('.layout-manager')?.classList.contains('hidden')).toBe(true);
     expect(root.textContent).not.toContain('Save Layout');
     expect(root.querySelector('.layout-row')).toBeNull();
-
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Start Session')?.click();
-
     expect(startArCamera).toHaveBeenCalledTimes(1);
     expect(onStartMultiObject).toHaveBeenCalledTimes(1);
-    expect(root.querySelector('.layout-manager')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.status-panel')?.classList.contains('layout-active')).toBe(true);
   });
 
   it('shows session-only controls for adding multiple objects', () => {

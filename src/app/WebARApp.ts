@@ -138,7 +138,6 @@ export class WebARApp {
       onGenerateSpeechModel: () => void this.generateSpeechModel(),
       onGenerateTextModel: (text) => void this.generateTextModel(text),
       onAnimationSelect: (animationIndex) => this.selectModelAnimation(animationIndex),
-      onPrepareMultiObject: () => void this.prepareMultiObject(),
       onStartMultiObject: () => void this.startMultiObjectSession(),
       onAddLayoutObject: () => this.promptForLayoutObject(),
       onDeleteLayoutObject: () => this.deleteSelectedLayoutObject(),
