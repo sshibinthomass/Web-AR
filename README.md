@@ -71,7 +71,7 @@ npm run worker:dev
 
 This app targets Android Chrome WebXR. It is local-only and tested through USB port forwarding. Full semantic floor meshing is not guaranteed by browser WebXR; the app uses hit testing as the reliable floor-placement baseline and plane detection when available.
 
-Model files are hosted in the Cloudflare Pages project `web-ar-model-assets`. The app does not commit GLB files to GitHub and does not use a local model fallback.
+The app ships without built-in GLB models. Generated and uploaded models are stored in Cloudflare R2 and served through the Worker; GLB files are not committed to GitHub.
 
 ## Cloudflare Worker Setup
 

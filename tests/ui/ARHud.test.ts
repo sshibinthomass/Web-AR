@@ -3,14 +3,14 @@ import { ARHud } from '../../src/ui/ARHud';
 
 const modelOptions = [
   {
-    id: 'trellis-fast-output',
-    label: 'Fast output',
-    url: 'https://web-ar-model-assets.pages.dev/models/trellis-2-4b-fast-output.glb',
+    id: 'built-in-alpha',
+    label: 'Built-in alpha',
+    url: 'https://assets.example/models/built-in-alpha.glb',
   },
   {
-    id: 'img4-output',
-    label: 'Image 4 output',
-    url: 'https://web-ar-model-assets.pages.dev/models/img4_20260628_153027.glb',
+    id: 'built-in-beta',
+    label: 'Built-in beta',
+    url: 'https://assets.example/models/built-in-beta.glb',
   },
 ];
 
@@ -365,10 +365,10 @@ describe('ARHud', () => {
     expect(modelPicker?.classList.contains('hidden')).toBe(true);
     expect(arModelPicker?.classList.contains('hidden')).toBe(false);
     expect(modelRail?.classList.contains('hidden')).toBe(true);
-    expect(modelCards.map((button) => button.dataset.modelId)).toEqual(['trellis-fast-output', 'img4-output']);
+    expect(modelCards.map((button) => button.dataset.modelId)).toEqual(['built-in-alpha', 'built-in-beta']);
     expect(modelCards.map((button) => button.getAttribute('aria-label'))).toEqual([
-      'Select Fast output',
-      'Select Image 4 output',
+      'Select Built-in alpha',
+      'Select Built-in beta',
     ]);
   });
 
@@ -384,11 +384,11 @@ describe('ARHud', () => {
     expect(root.querySelector('.ar-button-slot')?.classList.contains('hidden')).toBe(true);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
-    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="img4-output"]')?.click();
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-beta"]')?.click();
 
     const placeArButton = root.querySelector<HTMLButtonElement>('.ar-model-place-button')!;
-    expect(onModelSelect).toHaveBeenCalledWith('img4-output');
-    expect(root.querySelector('.ar-model-card.is-selected')?.textContent).toContain('Image 4 output');
+    expect(onModelSelect).toHaveBeenCalledWith('built-in-beta');
+    expect(root.querySelector('.ar-model-card.is-selected')?.textContent).toContain('Built-in beta');
     expect(placeArButton.disabled).toBe(true);
 
     hud.updateModelReady(true);
@@ -399,7 +399,7 @@ describe('ARHud', () => {
     expect(root.querySelector('.model-rail')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
-    expect(root.querySelector('.model-rail-item.is-selected')?.textContent).toContain('Image 4 output');
+    expect(root.querySelector('.model-rail-item.is-selected')?.textContent).toContain('Built-in beta');
     const actionButtons = [...root.querySelectorAll<HTMLButtonElement>('.hud-actions > button')];
     expect(actionButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Place',
@@ -614,8 +614,8 @@ describe('ARHud', () => {
     expect(manager?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
     expect(rows.map((row) => (row as HTMLElement).dataset.modelId)).toEqual(['generated-fc-123']);
-    expect(manager?.textContent).not.toContain('Fast output');
-    expect(manager?.textContent).not.toContain('Image 4 output');
+    expect(manager?.textContent).not.toContain('Built-in alpha');
+    expect(manager?.textContent).not.toContain('Built-in beta');
     expect(manager?.textContent).toContain('chair - 2026-07-04 12:00:00 UTC');
     expect(root.querySelector<HTMLImageElement>('.model-manager-thumbnail img')?.src).toBe(
       'https://assets.example/previews/generated-chair.png',
@@ -938,8 +938,8 @@ describe('ARHud', () => {
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
     const modelCards = [...root.querySelectorAll<HTMLButtonElement>('.ar-model-card')];
     expect(modelCards.map((button) => button.dataset.modelId)).toEqual([
-      'trellis-fast-output',
-      'img4-output',
+      'built-in-alpha',
+      'built-in-beta',
       'generated-fc-123',
       'generated-upload-123-chair',
     ]);
@@ -954,8 +954,8 @@ describe('ARHud', () => {
     root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
     const railItems = [...root.querySelectorAll<HTMLButtonElement>('.model-rail-item')];
     expect(railItems.map((button) => button.dataset.modelId)).toEqual([
-      'trellis-fast-output',
-      'img4-output',
+      'built-in-alpha',
+      'built-in-beta',
       'generated-fc-123',
       'generated-upload-123-chair',
     ]);
@@ -1290,7 +1290,7 @@ describe('ARHud', () => {
     hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
-    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="trellis-fast-output"]')?.click();
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-alpha"]')?.click();
     hud.updateModelReady(true);
     root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
 
@@ -1306,7 +1306,7 @@ describe('ARHud', () => {
     hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
-    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="trellis-fast-output"]')?.click();
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-alpha"]')?.click();
     hud.updateModelReady(true);
     root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
 
@@ -1348,7 +1348,7 @@ describe('ARHud', () => {
     const modelCards = [...root.querySelectorAll<HTMLButtonElement>('.ar-model-card')];
 
     expect(root.querySelector('.ar-model-card.is-selected')).toBeNull();
-    expect(modelCards.map((button) => button.dataset.modelId)).toEqual(['trellis-fast-output', 'img4-output']);
+    expect(modelCards.map((button) => button.dataset.modelId)).toEqual(['built-in-alpha', 'built-in-beta']);
     expect(root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.disabled).toBe(true);
   });
 
@@ -1360,15 +1360,15 @@ describe('ARHud', () => {
     expect(onModelSelect).not.toHaveBeenCalled();
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
-    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="img4-output"]')?.click();
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-beta"]')?.click();
 
-    expect(onModelSelect).toHaveBeenCalledWith('img4-output');
+    expect(onModelSelect).toHaveBeenCalledWith('built-in-beta');
 
     hud.updateModelReady(true);
     root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
-    root.querySelector<HTMLButtonElement>('.model-rail-item[data-model-id="trellis-fast-output"]')?.click();
+    root.querySelector<HTMLButtonElement>('.model-rail-item[data-model-id="built-in-alpha"]')?.click();
 
-    expect(onModelSelect).toHaveBeenLastCalledWith('trellis-fast-output');
+    expect(onModelSelect).toHaveBeenLastCalledWith('built-in-alpha');
   });
 
   it('renders camera capture controls', () => {
@@ -1533,8 +1533,8 @@ describe('ARHud', () => {
     }));
 
     expect(pickerItems).toEqual([
-      { label: 'Fast output', value: 'trellis-fast-output' },
-      { label: 'Image 4 output', value: 'img4-output' },
+      { label: 'Built-in alpha', value: 'built-in-alpha' },
+      { label: 'Built-in beta', value: 'built-in-beta' },
       { label: '2026-06-28 12:00:00 UTC', value: 'generated-fc-123' },
     ]);
 
@@ -1547,8 +1547,8 @@ describe('ARHud', () => {
     }));
 
     expect(railItems).toEqual([
-      { label: 'Fast output', value: 'trellis-fast-output' },
-      { label: 'Image 4 output', value: 'img4-output' },
+      { label: 'Built-in alpha', value: 'built-in-alpha' },
+      { label: 'Built-in beta', value: 'built-in-beta' },
       { label: '2026-06-28 12:00:00 UTC', value: 'generated-fc-123' },
     ]);
   });
