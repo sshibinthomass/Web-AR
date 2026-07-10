@@ -415,17 +415,21 @@ describe('ARHud', () => {
     const root = document.createElement('div');
     const onAnimationSelect = vi.fn();
     const hud = new ARHud(root, modelOptions, createHandlers({ onAnimationSelect }));
+    const modelRail = root.querySelector('.model-rail');
 
     expect(root.querySelector('.animation-control')?.classList.contains('hidden')).toBe(true);
+    expect(modelRail?.classList.contains('has-animation-control')).toBe(false);
 
     hud.updateAnimationOptions([{ index: 0, label: 'Idle' }], 0);
 
     expect(root.querySelector('.animation-control')?.classList.contains('hidden')).toBe(true);
+    expect(modelRail?.classList.contains('has-animation-control')).toBe(false);
 
     hud.updateAnimationOptions([
       { index: 0, label: 'Idle' },
       { index: 1, label: 'Walk' },
     ], 0);
+    expect(modelRail?.classList.contains('has-animation-control')).toBe(true);
 
     const animationControl = root.querySelector('.animation-control');
     const animationSelect = root.querySelector<HTMLSelectElement>('select[name="animationClip"]')!;
@@ -441,6 +445,9 @@ describe('ARHud', () => {
     hud.updateSelectedAnimation(0);
 
     expect(animationSelect.value).toBe('0');
+
+    hud.updateAnimationOptions([{ index: 0, label: 'Idle' }], 0);
+    expect(modelRail?.classList.contains('has-animation-control')).toBe(false);
   });
 
   it('opens Full Flow from the first screen as a capture page', () => {
