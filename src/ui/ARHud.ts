@@ -840,6 +840,7 @@ export class ARHud {
 
     const hasMultipleAnimations = options.length > 1;
     this.animationControl.classList.toggle('hidden', !hasMultipleAnimations);
+    this.modelRail.classList.toggle('has-animation-control', hasMultipleAnimations);
     this.animationSelect.disabled = !hasMultipleAnimations;
 
     if (options.some((option) => option.index === selectedIndex)) {
