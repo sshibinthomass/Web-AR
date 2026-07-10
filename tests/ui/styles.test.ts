@@ -22,10 +22,41 @@ describe('AR overlay styles', () => {
     const controlRule = cssRule('.rotate-control,\n.animation-control');
 
     expect(hudActionsRule).toContain('gap: 6px;');
-    expect(chipRule).toContain('min-height: 44px;');
-    expect(chipRule).toContain('padding: 0 12px;');
+    expect(chipRule).toContain('min-height: 38px;');
+    expect(chipRule).toContain('padding: 0 10px;');
     expect(controlRule).toContain('flex: 1 0 100%;');
     expect(controlRule).toContain('grid-template-columns: auto minmax(0, 1fr);');
+  });
+
+  it('raises the compact model rail when Animation is visible', () => {
+    const animatedRailRule = cssRule('.model-rail.has-animation-control');
+    const itemRule = cssRule('.model-rail-item');
+    const thumbRule = cssRule('.model-rail-thumb');
+    const labelRule = cssRule('.model-rail-label');
+
+    expect(animatedRailRule).toContain(
+      'bottom: calc(max(18px, env(safe-area-inset-bottom)) + 160px);',
+    );
+    expect(itemRule).toContain('flex: 0 0 76px;');
+    expect(itemRule).toContain('grid-template-rows: 48px 2.5em;');
+    expect(itemRule).toContain('min-height: 88px;');
+    expect(thumbRule).toContain('height: 48px;');
+    expect(labelRule).toContain('font-size: 10px;');
+  });
+
+  it('uses one compact light surface for placed-object controls', () => {
+    const chipRule = cssRule('.hud-actions button.hud-action-chip');
+    const controlRule = cssRule('.rotate-control,\n.animation-control');
+    const selectRule = cssRule('.animation-control select');
+
+    expect(chipRule).toContain('min-height: 38px;');
+    expect(chipRule).toContain('padding: 0 10px;');
+    expect(chipRule).toContain('font-size: 12px;');
+    expect(controlRule).toContain('min-height: 38px;');
+    expect(controlRule).toContain('color: #102326;');
+    expect(controlRule).toContain('background: rgba(255, 255, 255, 0.86);');
+    expect(selectRule).toContain('color: #102326;');
+    expect(selectRule).toContain('background: rgba(255, 255, 255, 0.88);');
   });
 
   it('keeps the AR model search controls in the page flow above model cards', () => {
