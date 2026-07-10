@@ -263,21 +263,21 @@ export class ARHud {
         'Available as guest',
         'View saved 3D models or place one or more objects in AR without signing in.',
         [
-          this.createModeAction(this.createButton('AR View', 'primary', () => this.navigateTo('ar')), 'AR'),
-          this.createModeAction(this.createButton('Models', '', () => this.navigateTo('models')), '3D'),
-          this.createModeAction(this.createButton('Multi Object', '', () => this.navigateTo('multi-object')), '3D'),
+          this.createModeAction(this.createButton('Single-Object AR', 'primary', () => this.navigateTo('ar')), 'AR'),
+          this.createModeAction(this.createButton('Model Library', '', () => this.navigateTo('models')), '3D'),
+          this.createModeAction(this.createButton('Multi-Object AR', '', () => this.navigateTo('multi-object')), '3D'),
         ],
       ),
       this.createModeGroup(
         'Login required',
         'Create, upload, and manage models with an approved account.',
         [
-          this.createModeAction(this.createButton('Camera', '', () => this.navigateTo('camera')), 'CAM'),
-          this.createModeAction(this.createButton('Upload Image', '', () => this.navigateTo('upload')), 'IMG'),
-          this.createModeAction(this.createButton('Upload Model', '', () => this.navigateTo('upload-model')), 'GLB'),
+          this.createModeAction(this.createButton('Camera to 3D', '', () => this.navigateTo('camera')), 'CAM'),
+          this.createModeAction(this.createButton('Image to 3D', '', () => this.navigateTo('upload')), 'IMG'),
+          this.createModeAction(this.createButton('Upload 3D Model', '', () => this.navigateTo('upload-model')), 'GLB'),
           this.createModeAction(this.createButton('Text or Voice to 3D', '', () => this.navigateTo('speech')), 'MIC'),
-          this.createModeAction(this.createButton('Full Flow', '', () => this.navigateTo('full-flow')), 'AI'),
-          this.createModeAction(this.createButton('Dynamic', '', () => this.navigateTo('dynamic')), 'DYN'),
+          this.createModeAction(this.createButton('Photo to AR', '', () => this.navigateTo('full-flow')), 'AI'),
+          this.createModeAction(this.createButton('AI-Enhanced Photo to AR', '', () => this.navigateTo('dynamic')), 'DYN'),
         ],
       ),
     );
@@ -1142,13 +1142,17 @@ export class ARHud {
   updateGeneratedModels(generatedModels: ModelOption[]): void {
     this.generatedModelOptions = [...generatedModels];
     this.renderModelSelect();
-    this.renderModelManagerList();
+    if (!this.modelEditDialog) {
+      this.renderModelManagerList();
+    }
   }
 
   updateUploadedModels(uploadedModels: ModelOption[]): void {
     this.uploadedModelOptions = [...uploadedModels];
     this.renderModelSelect();
-    this.renderModelManagerList();
+    if (!this.modelEditDialog) {
+      this.renderModelManagerList();
+    }
   }
 
   markModelDownloadStarted(modelId: string): void {
