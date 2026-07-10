@@ -411,6 +411,43 @@ describe('ARHud', () => {
     expect(root.querySelector<HTMLInputElement>('.rotate-control input[type="range"]')).toBeInstanceOf(HTMLInputElement);
   });
 
+  it('dispatches the visible placed-object action buttons to their handlers', () => {
+    const root = document.createElement('div');
+    const onPlace = vi.fn();
+    const onResetScale = vi.fn();
+    const onReset = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onPlace, onResetScale, onReset }));
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AR View')?.click();
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-alpha"]')?.click();
+    hud.updateModelReady(true);
+    root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
+    hud.update('scanning');
+
+    const placeButton = root.querySelector<HTMLButtonElement>('.hud-actions > button[aria-label="Place"]')!;
+    const resetScaleButton = root.querySelector<HTMLButtonElement>('.hud-actions > button[aria-label="Scale 1x"]')!;
+    const resetButton = root.querySelector<HTMLButtonElement>('.hud-actions > button[aria-label="Reset"]')!;
+
+    expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
+    expect(placeButton.classList.contains('hidden')).toBe(false);
+    expect(placeButton.disabled).toBe(false);
+    placeButton.click();
+
+    hud.update('placed');
+
+    for (const button of [resetScaleButton, resetButton]) {
+      expect(button.classList.contains('hidden')).toBe(false);
+      expect(button.disabled).toBe(false);
+    }
+
+    resetScaleButton.click();
+    resetButton.click();
+
+    expect(onPlace).toHaveBeenCalledTimes(1);
+    expect(onResetScale).toHaveBeenCalledTimes(1);
+    expect(onReset).toHaveBeenCalledTimes(1);
+  });
+
   it('shows an animation selector for models with multiple clips', () => {
     const root = document.createElement('div');
     const onAnimationSelect = vi.fn();
