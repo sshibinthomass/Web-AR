@@ -2248,14 +2248,12 @@ canvas {
 }
 
 .ar-model-card.is-not-downloaded,
-.model-manager-row.is-not-downloaded,
-.model-rail-item.is-not-downloaded {
+.model-manager-row.is-not-downloaded {
   border-color: rgba(37, 99, 235, 0.24);
 }
 
 .ar-model-card.is-downloading,
-.model-manager-row.is-downloading,
-.model-rail-item.is-downloading {
+.model-manager-row.is-downloading {
   border-color: rgba(37, 99, 235, 0.52);
   background:
     linear-gradient(160deg, rgba(191, 219, 254, 0.64), rgba(255, 255, 255, 0.94) 54%),
@@ -2263,8 +2261,7 @@ canvas {
 }
 
 .ar-model-card.is-downloaded,
-.model-manager-row.is-downloaded,
-.model-rail-item.is-downloaded {
+.model-manager-row.is-downloaded {
   border-color: rgba(37, 99, 235, 0.62);
   background:
     linear-gradient(160deg, rgba(147, 197, 253, 0.72), rgba(255, 255, 255, 0.94) 50%),

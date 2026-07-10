@@ -11,6 +11,12 @@ function cssRule(selector: string): string {
   return styles.match(new RegExp(`${escapedSelector} \\{[\\s\\S]*?\\n\\}`))?.[0] ?? '';
 }
 
+function cssRulesForSelector(selector: string): string[] {
+  return [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, selectorList]) => selectorList.split(',').some((candidate) => candidate.trim() === selector))
+    .map(([rule]) => rule);
+}
+
 describe('AR overlay styles', () => {
   it('keeps the model rail close above the bottom AR controls', () => {
     expect(styles).toContain('bottom: calc(max(18px, env(safe-area-inset-bottom)) + 118px);');
@@ -57,6 +63,30 @@ describe('AR overlay styles', () => {
     expect(controlRule).toContain('background: rgba(255, 255, 255, 0.86);');
     expect(selectRule).toContain('color: #102326;');
     expect(selectRule).toContain('background: rgba(255, 255, 255, 0.88);');
+  });
+
+  it('keeps blue download-state colors off every model rail card', () => {
+    const railSurfaceRule = cssRule('.ar-model-card,\n.model-manager-row,\n.model-rail-item');
+    const blueStatePalette = /rgba\((?:37, 99, 235|147, 197, 253|191, 219, 254)/;
+
+    expect(railSurfaceRule).toContain('color: #102326;');
+    expect(railSurfaceRule).toContain('background: rgba(255, 255, 255, 0.82);');
+
+    for (const state of ['is-not-downloaded', 'is-downloading', 'is-downloaded']) {
+      const stateRules = cssRulesForSelector(`.model-rail-item.${state}`).join('\n');
+
+      expect(stateRules).not.toMatch(blueStatePalette);
+    }
+  });
+
+  it('keeps Place, Scale 1x, and Reset on the light HUD button surface', () => {
+    const hudButtonRule = cssRule('.model-manager-actions button,\n.hud-actions button,\n#ARButton');
+    const primaryRule = cssRule('.hud-actions button.primary');
+
+    expect(hudButtonRule).toContain('color: #102326;');
+    expect(hudButtonRule).toContain('background: rgba(255, 255, 255, 0.86);');
+    expect(primaryRule).toContain('color: #102326;');
+    expect(primaryRule).toContain('background: rgba(255, 255, 255, 0.86);');
   });
 
   it('keeps the AR model search controls in the page flow above model cards', () => {
