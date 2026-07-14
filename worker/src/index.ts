@@ -209,15 +209,31 @@ type ImageTargetPlacement = {
   offset_x: number;
   offset_y: number;
   height: number;
+  rotation_x: number;
+  rotation_y: number;
+  rotation_z: number;
 };
 
 type ImageTargetSpinAxis = 'none' | 'x' | 'y' | 'z';
+type ImageTargetAnimationPreset = 'none' | 'gentle-float' | 'turntable' | 'showcase' | 'sway' | 'pulse' | 'orbit' | 'bounce' | 'custom';
+type ImageTargetAnimationProperty = 'position_x' | 'position_y' | 'position_z' | 'rotation_x' | 'rotation_y' | 'rotation_z' | 'scale';
+type ImageTargetAnimationMotion = 'smooth' | 'triangle' | 'spin';
+
+type ImageTargetAnimationTrack = {
+  property: ImageTargetAnimationProperty;
+  motion: ImageTargetAnimationMotion;
+  amount: number;
+  speed: number;
+  phase: number;
+};
 
 type ImageTargetAnimation = {
-  spin_axis: ImageTargetSpinAxis;
-  spin_speed: number;
-  bob_height: number;
-  bob_speed: number;
+  preset?: ImageTargetAnimationPreset;
+  tracks?: ImageTargetAnimationTrack[];
+  spin_axis?: ImageTargetSpinAxis;
+  spin_speed?: number;
+  bob_height?: number;
+  bob_speed?: number;
 };
 
 type ImageTargetModel = {
@@ -227,11 +243,39 @@ type ImageTargetModel = {
   preview_url?: string;
 };
 
-type ImageTargetObject = {
+type ImageTargetText = {
+  value: string;
+  language: 'english' | 'german' | 'tamil';
+  font: string;
+  color: string;
+  fill_mode: 'solid' | 'gradient';
+  gradient_start: string;
+  gradient_end: string;
+  gradient_direction: 'horizontal' | 'vertical' | 'diagonal' | 'depth';
+  side_color: string;
+  depth: number;
+  bevel: number;
+  gloss: number;
+  style_preset: string;
+};
+
+type ImageTargetObjectBase = {
   id: string;
-  model: ImageTargetModel;
   placement: ImageTargetPlacement;
   animation?: ImageTargetAnimation;
+  group_id?: string;
+  local_placement?: ImageTargetPlacement;
+};
+
+type ImageTargetModelObject = ImageTargetObjectBase & { kind: 'model'; model: ImageTargetModel };
+type ImageTargetTextObject = ImageTargetObjectBase & { kind: 'text'; text: ImageTargetText };
+type ImageTargetObject = ImageTargetModelObject | ImageTargetTextObject;
+
+type ImageTargetGroup = {
+  id: string;
+  label: string;
+  placement: ImageTargetPlacement;
+  animation: ImageTargetAnimation;
 };
 
 type ImageTargetEntry = {
@@ -239,9 +283,10 @@ type ImageTargetEntry = {
   label: string;
   image_url: string;
   image_object_key: string;
-  model: ImageTargetModel;
-  placement: ImageTargetPlacement;
+  model?: ImageTargetModel;
+  placement?: ImageTargetPlacement;
   objects: ImageTargetObject[];
+  groups: ImageTargetGroup[];
   owner_email?: string;
   visibility?: ImageTargetVisibility;
   created_at: string;
@@ -259,6 +304,7 @@ type ImageTargetRequestBody = {
   model?: unknown;
   placement?: unknown;
   objects?: unknown;
+  groups?: unknown;
   visibility?: unknown;
 };
 
@@ -297,6 +343,15 @@ const imageTargetRecordPrefix = 'image-targets/records/';
 const imageTargetImagePrefix = 'image-targets/images/';
 const maxImageTargetBytes = 5 * 1024 * 1024;
 const allowedImageTargetMimeTypes = ['image/png', 'image/jpeg', 'image/webp'] as const;
+const imageTargetTextLanguages = new Set(['english', 'german', 'tamil']);
+const imageTargetTextFonts = new Set([
+  'studio-sans', 'studio-sans-bold', 'studio-serif', 'studio-serif-bold',
+  'droid-serif', 'droid-serif-bold', 'optimer', 'optimer-bold',
+  'helvetiker', 'helvetiker-bold', 'studio-mono', 'tamil-ui',
+]);
+const imageTargetTextFillModes = new Set(['solid', 'gradient']);
+const imageTargetTextGradientDirections = new Set(['horizontal', 'vertical', 'diagonal', 'depth']);
+const imageTargetTextStylePresets = new Set(['blue-shine', 'gold-bevel', 'neon-cyan', 'red-gloss', 'tamil-classic']);
 const usersIndexKey = 'auth/users/index.json';
 const revokedSessionsIndexKey = 'auth/sessions/revoked.json';
 const auditLogIndexKey = 'security/audit/events.json';
@@ -1351,11 +1406,18 @@ async function handleImageTargetCreateRequest(
     return jsonResponse({ error: 'image_base64 is required.' }, 400);
   }
 
-  const imageTargetObjects = normalizeImageTargetObjects(body.value.objects, body.value.model, body.value.placement);
+  const normalizedGroups = normalizeImageTargetGroups(body.value.groups);
+  const imageTargetObjects = normalizeImageTargetObjects(
+    body.value.objects,
+    body.value.model,
+    body.value.placement,
+    normalizedGroups,
+  );
   if (imageTargetObjects.length === 0) {
-    return jsonResponse({ error: 'objects must include at least one model with id, label, and url.' }, 400);
+    return jsonResponse({ error: 'objects must include at least one valid model or text object.' }, 400);
   }
-  const firstObject = imageTargetObjects[0];
+  const groups = usedImageTargetGroups(normalizedGroups, imageTargetObjects);
+  const firstModel = imageTargetObjects.find(isImageTargetModelObject);
 
   const now = deps.now();
   const label = normalizeModelLabel(body.value.label) ?? 'Image target';
@@ -1373,9 +1435,9 @@ async function handleImageTargetCreateRequest(
     label,
     image_url: `${getPublicOrigin(env, url.origin)}/${objectKey}`,
     image_object_key: objectKey,
-    model: firstObject.model,
-    placement: firstObject.placement,
+    ...(firstModel ? { model: firstModel.model, placement: firstModel.placement } : {}),
     objects: imageTargetObjects,
+    groups,
     owner_email: user.email,
     visibility: 'private',
     created_at: now.toISOString(),
@@ -1519,18 +1581,23 @@ async function updateImageTarget(
     return jsonResponse({ error: 'Only the owner or an admin can manage this image target.' }, 403);
   }
 
-  const nextObjects = nextImageTargetObjectsForUpdate(existingTarget, body.value);
+  const requestedGroups = body.value.groups !== undefined
+    ? normalizeImageTargetGroups(body.value.groups)
+    : normalizeImageTargetGroups(existingTarget.groups);
+  const nextObjects = nextImageTargetObjectsForUpdate(existingTarget, body.value, requestedGroups);
   if (nextObjects.length === 0) {
-    return jsonResponse({ error: 'objects must include at least one model with id, label, and url.' }, 400);
+    return jsonResponse({ error: 'objects must include at least one valid model or text object.' }, 400);
   }
-  const firstObject = nextObjects[0];
+  const nextGroups = usedImageTargetGroups(requestedGroups, nextObjects);
+  const firstModel = nextObjects.find(isImageTargetModelObject);
+  const { model: _existingModel, placement: _existingPlacement, ...existingWithoutAliases } = existingTarget;
   const now = deps.now();
   const nextTarget: ImageTargetEntry = {
-    ...existingTarget,
+    ...existingWithoutAliases,
     label: normalizeModelLabel(body.value.label) ?? existingTarget.label,
-    model: firstObject.model,
-    placement: firstObject.placement,
+    ...(firstModel ? { model: firstModel.model, placement: firstModel.placement } : {}),
     objects: nextObjects,
+    groups: nextGroups,
     visibility: normalizeModelVisibility(body.value.visibility) ?? existingTarget.visibility ?? 'private',
     updated_at: now.toISOString(),
   };
@@ -2409,11 +2476,18 @@ function normalizeImageTargetObjects(
   objectsValue: unknown,
   legacyModelValue?: unknown,
   legacyPlacementValue?: unknown,
+  groups: ImageTargetGroup[] = [],
 ): ImageTargetObject[] {
   if (Array.isArray(objectsValue)) {
-    return objectsValue
-      .map((value, index) => normalizeImageTargetObject(value, index))
-      .filter((object): object is ImageTargetObject => Boolean(object));
+    const seenIds = new Set<string>();
+    return objectsValue.flatMap((value, index) => {
+      const object = normalizeImageTargetObject(value, index, groups);
+      if (!object || seenIds.has(object.id)) {
+        return [];
+      }
+      seenIds.add(object.id);
+      return [object];
+    });
   }
 
   const legacyModel = normalizeImageTargetModel(legacyModelValue);
@@ -2422,33 +2496,59 @@ function normalizeImageTargetObjects(
   }
 
   return [{
+    kind: 'model',
     id: 'object-1',
     model: legacyModel,
     placement: normalizeImageTargetPlacement(legacyPlacementValue),
   }];
 }
 
-function normalizeImageTargetObject(value: unknown, index: number): ImageTargetObject | null {
+function normalizeImageTargetObject(
+  value: unknown,
+  index: number,
+  groups: ImageTargetGroup[],
+): ImageTargetObject | null {
   if (!value || typeof value !== 'object') {
     return null;
   }
 
   const candidate = value as Record<string, unknown>;
+  const id = typeof candidate.id === 'string' && candidate.id.trim() ? candidate.id.trim() : `object-${index + 1}`;
+  const placement = normalizeImageTargetPlacement(candidate.placement);
+  const groupId = typeof candidate.group_id === 'string' ? candidate.group_id.trim() : '';
+  const group = groupId ? groups.find((item) => item.id === groupId) : undefined;
+  const groupFields = group && candidate.local_placement && typeof candidate.local_placement === 'object'
+    ? { group_id: group.id, local_placement: normalizeImageTargetPlacement(candidate.local_placement, defaultLocalImageTargetPlacement()) }
+    : {};
+  const animationFields = candidate.animation
+    ? { animation: normalizeImageTargetAnimation(candidate.animation) }
+    : {};
+
+  if (candidate.kind === 'text') {
+    const text = normalizeImageTargetText(candidate.text);
+    return text ? { kind: 'text', id, text, placement, ...groupFields, ...animationFields } : null;
+  }
+  if (candidate.kind !== undefined && candidate.kind !== 'model') {
+    return null;
+  }
   const model = normalizeImageTargetModel(candidate.model);
   if (!model) {
     return null;
   }
 
   return {
-    id: typeof candidate.id === 'string' && candidate.id.trim() ? candidate.id.trim() : `object-${index + 1}`,
+    kind: 'model',
+    id,
     model,
-    placement: normalizeImageTargetPlacement(candidate.placement),
-    ...(candidate.animation ? { animation: normalizeImageTargetAnimation(candidate.animation) } : {}),
+    placement,
+    ...groupFields,
+    ...animationFields,
   };
 }
 
 function imageTargetObjectsFromStoredTarget(target: ImageTargetEntry): ImageTargetObject[] {
-  const objects = normalizeImageTargetObjects(target.objects);
+  const groups = normalizeImageTargetGroups(target.groups);
+  const objects = normalizeImageTargetObjects(target.objects, undefined, undefined, groups);
   if (objects.length > 0) {
     return objects;
   }
@@ -2459,29 +2559,36 @@ function imageTargetObjectsFromStoredTarget(target: ImageTargetEntry): ImageTarg
 function nextImageTargetObjectsForUpdate(
   existingTarget: ImageTargetEntry,
   body: ImageTargetRequestBody,
+  groups: ImageTargetGroup[],
 ): ImageTargetObject[] {
   if (body.objects !== undefined) {
-    return normalizeImageTargetObjects(body.objects);
+    return normalizeImageTargetObjects(body.objects, undefined, undefined, groups);
   }
 
-  const existingObjects = imageTargetObjectsFromStoredTarget(existingTarget);
-  const firstObject = existingObjects[0];
-  if (!firstObject) {
-    return normalizeImageTargetObjects(undefined, body.model, body.placement);
+  const existingObjects = normalizeImageTargetObjects(
+    imageTargetObjectsFromStoredTarget(existingTarget),
+    undefined,
+    undefined,
+    groups,
+  );
+  const firstModelIndex = existingObjects.findIndex(isImageTargetModelObject);
+  if (firstModelIndex === -1) {
+    return existingObjects.length > 0
+      ? existingObjects
+      : normalizeImageTargetObjects(undefined, body.model, body.placement, groups);
   }
 
   if (body.model === undefined && body.placement === undefined) {
     return existingObjects;
   }
 
-  return [
-    {
-      ...firstObject,
-      model: normalizeImageTargetModel(body.model) ?? firstObject.model,
-      placement: normalizeImageTargetPlacement(body.placement, firstObject.placement),
-    },
-    ...existingObjects.slice(1),
-  ];
+  return existingObjects.map((object, index) => index === firstModelIndex && isImageTargetModelObject(object)
+    ? {
+        ...object,
+        model: normalizeImageTargetModel(body.model) ?? object.model,
+        placement: normalizeImageTargetPlacement(body.placement, object.placement),
+      }
+    : object);
 }
 
 function normalizeImageTargetPlacement(
@@ -2497,11 +2604,18 @@ function normalizeImageTargetPlacement(
     offset_x: normalizeFinitePlacementNumber(candidate.offset_x, fallback.offset_x, -1, 1),
     offset_y: normalizeFinitePlacementNumber(candidate.offset_y, fallback.offset_y, -1, 1),
     height: normalizeFinitePlacementNumber(candidate.height, fallback.height, 0, 1),
+    rotation_x: normalizeImageTargetDegrees(candidate.rotation_x, fallback.rotation_x),
+    rotation_y: normalizeImageTargetDegrees(candidate.rotation_y, fallback.rotation_y),
+    rotation_z: normalizeImageTargetDegrees(candidate.rotation_z, fallback.rotation_z),
   };
 }
 
 function defaultImageTargetPlacement(): ImageTargetPlacement {
-  return { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 };
+  return { scale: 1, offset_x: 0, offset_y: 0, height: 0.12, rotation_x: 0, rotation_y: 0, rotation_z: 0 };
+}
+
+function defaultLocalImageTargetPlacement(): ImageTargetPlacement {
+  return { scale: 1, offset_x: 0, offset_y: 0, height: 0, rotation_x: 0, rotation_y: 0, rotation_z: 0 };
 }
 
 function normalizeFinitePlacementNumber(value: unknown, fallback: number, min: number, max: number): number {
@@ -2511,22 +2625,44 @@ function normalizeFinitePlacementNumber(value: unknown, fallback: number, min: n
   return Math.min(max, Math.max(min, value));
 }
 
+function normalizeImageTargetDegrees(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  const wrapped = ((((value + 180) % 360) + 360) % 360) - 180;
+  return wrapped === -180 ? 180 : Number(wrapped.toFixed(3));
+}
+
 function normalizeImageTargetAnimation(value: unknown): ImageTargetAnimation {
   if (!value || typeof value !== 'object') {
     return defaultImageTargetAnimation();
   }
 
   const candidate = value as Record<string, unknown>;
+  if (Array.isArray(candidate.tracks)) {
+    const tracks = candidate.tracks
+      .map(normalizeImageTargetAnimationTrack)
+      .filter((track): track is ImageTargetAnimationTrack => Boolean(track))
+      .slice(0, 16);
+    return {
+      preset: normalizeImageTargetAnimationPreset(candidate.preset) ?? (tracks.length > 0 ? 'custom' : 'none'),
+      tracks,
+      ...(candidate.spin_axis !== undefined ? { spin_axis: normalizeImageTargetSpinAxis(candidate.spin_axis) } : {}),
+      ...(typeof candidate.spin_speed === 'number' ? { spin_speed: normalizeFiniteAnimationNumber(candidate.spin_speed, 0, -6, 6) } : {}),
+      ...(typeof candidate.bob_height === 'number' ? { bob_height: normalizeFiniteAnimationNumber(candidate.bob_height, 0, 0, 1) } : {}),
+      ...(typeof candidate.bob_speed === 'number' ? { bob_speed: normalizeFiniteAnimationNumber(candidate.bob_speed, 0, 0, 8) } : {}),
+    };
+  }
   return {
     spin_axis: normalizeImageTargetSpinAxis(candidate.spin_axis),
-    spin_speed: normalizeFiniteAnimationNumber(candidate.spin_speed, defaultImageTargetAnimation().spin_speed, -6, 6),
-    bob_height: normalizeFiniteAnimationNumber(candidate.bob_height, defaultImageTargetAnimation().bob_height, 0, 1),
-    bob_speed: normalizeFiniteAnimationNumber(candidate.bob_speed, defaultImageTargetAnimation().bob_speed, 0, 8),
+    spin_speed: normalizeFiniteAnimationNumber(candidate.spin_speed, 0.22, -6, 6),
+    bob_height: normalizeFiniteAnimationNumber(candidate.bob_height, 0, 0, 1),
+    bob_speed: normalizeFiniteAnimationNumber(candidate.bob_speed, 0, 0, 8),
   };
 }
 
 function defaultImageTargetAnimation(): ImageTargetAnimation {
-  return { spin_axis: 'z', spin_speed: 0.22, bob_height: 0, bob_speed: 0 };
+  return { preset: 'none', tracks: [] };
 }
 
 function normalizeImageTargetSpinAxis(value: unknown): ImageTargetSpinAxis {
@@ -2538,6 +2674,140 @@ function normalizeFiniteAnimationNumber(value: unknown, fallback: number, min: n
     return fallback;
   }
   return Math.min(max, Math.max(min, value));
+}
+
+function normalizeImageTargetAnimationPreset(value: unknown): ImageTargetAnimationPreset | null {
+  return value === 'none' || value === 'gentle-float' || value === 'turntable' || value === 'showcase'
+    || value === 'sway' || value === 'pulse' || value === 'orbit' || value === 'bounce' || value === 'custom'
+    ? value
+    : null;
+}
+
+function normalizeImageTargetAnimationTrack(value: unknown): ImageTargetAnimationTrack | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const property = normalizeImageTargetAnimationProperty(candidate.property);
+  if (!property) {
+    return null;
+  }
+  const requestedMotion = candidate.motion === 'smooth' || candidate.motion === 'triangle' || candidate.motion === 'spin'
+    ? candidate.motion
+    : 'smooth';
+  const motion = requestedMotion === 'spin' && !property.startsWith('rotation_') ? 'smooth' : requestedMotion;
+  const amountBounds = property.startsWith('position_') ? [-2, 2]
+    : property.startsWith('rotation_') ? [-720, 720]
+      : [-0.9, 3];
+  const rawPhase = normalizeFiniteAnimationNumber(candidate.phase, 0, -3600, 3600) % 360;
+  return {
+    property,
+    motion,
+    amount: normalizeFiniteAnimationNumber(candidate.amount, 0, amountBounds[0], amountBounds[1]),
+    speed: normalizeFiniteAnimationNumber(candidate.speed, 0, -4, 4),
+    phase: rawPhase < 0 ? rawPhase + 360 : rawPhase,
+  };
+}
+
+function normalizeImageTargetAnimationProperty(value: unknown): ImageTargetAnimationProperty | null {
+  return value === 'position_x' || value === 'position_y' || value === 'position_z'
+    || value === 'rotation_x' || value === 'rotation_y' || value === 'rotation_z' || value === 'scale'
+    ? value
+    : null;
+}
+
+function normalizeImageTargetGroups(value: unknown): ImageTargetGroup[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seenIds = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') {
+      return [];
+    }
+    const candidate = item as Record<string, unknown>;
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+    const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
+    if (!id || !label || seenIds.has(id)) {
+      return [];
+    }
+    seenIds.add(id);
+    return [{
+      id,
+      label,
+      placement: normalizeImageTargetPlacement(candidate.placement),
+      animation: normalizeImageTargetAnimation(candidate.animation),
+    }];
+  });
+}
+
+function usedImageTargetGroups(groups: ImageTargetGroup[], objects: ImageTargetObject[]): ImageTargetGroup[] {
+  const usedIds = new Set(objects.flatMap((object) => object.group_id ? [object.group_id] : []));
+  return groups.filter((group) => usedIds.has(group.id));
+}
+
+function isImageTargetModelObject(object: ImageTargetObject): object is ImageTargetModelObject {
+  return object.kind === 'model';
+}
+
+function normalizeImageTargetText(value: unknown): ImageTargetText | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const textValue = typeof candidate.value === 'string' ? candidate.value.trim() : '';
+  if (!textValue || [...textValue].length > 512) {
+    return null;
+  }
+  const language = normalizeImageTargetTextEnum(candidate.language, imageTargetTextLanguages, 'english');
+  const font = normalizeImageTargetTextEnum(candidate.font, imageTargetTextFonts, 'studio-sans');
+  const fillMode = normalizeImageTargetTextEnum(candidate.fill_mode, imageTargetTextFillModes, 'solid');
+  const gradientDirection = normalizeImageTargetTextEnum(
+    candidate.gradient_direction,
+    imageTargetTextGradientDirections,
+    'horizontal',
+  );
+  const stylePreset = normalizeImageTargetTextEnum(candidate.style_preset, imageTargetTextStylePresets, 'blue-shine');
+  const color = normalizeImageTargetColor(candidate.color, '#2563eb');
+  const gradientStart = normalizeImageTargetColor(candidate.gradient_start, '#2563eb');
+  const gradientEnd = normalizeImageTargetColor(candidate.gradient_end, '#60a5fa');
+  const sideColor = normalizeImageTargetColor(candidate.side_color, '#1d4ed8');
+  if (!language || !font || !fillMode || !gradientDirection || !stylePreset || !color || !gradientStart || !gradientEnd || !sideColor) {
+    return null;
+  }
+  return {
+    value: textValue,
+    language: language as ImageTargetText['language'],
+    font,
+    color,
+    fill_mode: fillMode as ImageTargetText['fill_mode'],
+    gradient_start: gradientStart,
+    gradient_end: gradientEnd,
+    gradient_direction: gradientDirection as ImageTargetText['gradient_direction'],
+    side_color: sideColor,
+    depth: normalizeFiniteAnimationNumber(candidate.depth, 0.055, 0.02, 0.16),
+    bevel: normalizeFiniteAnimationNumber(candidate.bevel, 0.004, 0, 0.024),
+    gloss: normalizeFiniteAnimationNumber(candidate.gloss, 0.68, 0, 1),
+    style_preset: stylePreset,
+  };
+}
+
+function normalizeImageTargetTextEnum(
+  value: unknown,
+  allowed: Set<string>,
+  fallback: string,
+): string | null {
+  if (value === undefined) {
+    return fallback;
+  }
+  return typeof value === 'string' && allowed.has(value) ? value : null;
+}
+
+function normalizeImageTargetColor(value: unknown, fallback: string): string | null {
+  if (value === undefined) {
+    return fallback;
+  }
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : null;
 }
 
 function normalizeEmail(value: unknown): string | null {
@@ -2834,15 +3104,19 @@ function createUniqueImageTargetId(existingTargets: ImageTargetEntry[], now: Dat
 }
 
 function normalizeStoredImageTarget(target: ImageTargetEntry): ImageTargetEntry {
-  const objects = imageTargetObjectsFromStoredTarget(target);
-  const firstObject = objects[0];
+  const normalizedGroups = normalizeImageTargetGroups(target.groups);
+  const objects = normalizeImageTargetObjects(target.objects, target.model, target.placement, normalizedGroups);
+  const groups = usedImageTargetGroups(normalizedGroups, objects);
+  const firstModel = objects.find(isImageTargetModelObject);
+  const { model: _storedModel, placement: _storedPlacement, ...targetWithoutAliases } = target;
   return {
-    ...target,
-    ...(firstObject ? {
-      model: firstObject.model,
-      placement: firstObject.placement,
+    ...targetWithoutAliases,
+    ...(firstModel ? {
+      model: firstModel.model,
+      placement: firstModel.placement,
     } : {}),
     objects,
+    groups,
     visibility: target.visibility ?? 'private',
   };
 }

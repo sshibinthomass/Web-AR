@@ -2200,6 +2200,199 @@ describe('handleGenerateModelRequest', () => {
     );
   });
 
+  it('persists mixed model and text target groups with complete authoring state', async () => {
+    const { bucket, objects } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({ targets: [] }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket, PUBLIC_MODEL_ORIGIN: '' });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:10:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    const group = {
+      id: 'group-1',
+      label: 'Group 1',
+      placement: { scale: 1.2, offset_x: 0.15, offset_y: -0.1, height: 0.3, rotation_x: 10, rotation_y: 20, rotation_z: 30 },
+      animation: {
+        preset: 'gentle-float',
+        tracks: [{ property: 'position_y', motion: 'smooth', amount: 0.08, speed: 0.5, phase: 15 }],
+      },
+    };
+    const text = {
+      value: 'Hallo AR',
+      language: 'german',
+      font: 'studio-sans-bold',
+      color: '#112233',
+      fill_mode: 'gradient',
+      gradient_start: '#223344',
+      gradient_end: '#334455',
+      gradient_direction: 'diagonal',
+      side_color: '#445566',
+      depth: 0.08,
+      bevel: 0.01,
+      gloss: 0.9,
+      style_preset: 'gold-bevel',
+    };
+
+    const response = await handleGenerateModelRequest(
+      withAuth(
+        new Request('https://worker.example/generate-3d/image-targets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            label: 'Mixed target',
+            image_base64: 'aW1hZ2U=',
+            image_mime_type: 'image/png',
+            groups: [group],
+            objects: [
+              {
+                kind: 'model',
+                id: 'model-1',
+                model: { id: 'chair', label: 'Chair', url: 'https://worker.example/chair.glb' },
+                placement: { scale: 1, offset_x: 0.25, offset_y: -0.1, height: 0.4, rotation_x: 10, rotation_y: 35, rotation_z: 30 },
+                group_id: 'group-1',
+                local_placement: { scale: 0.8, offset_x: 0.1, offset_y: 0, height: 0.1, rotation_x: 0, rotation_y: 15, rotation_z: 0 },
+              },
+              {
+                kind: 'text',
+                id: 'text-1',
+                text,
+                placement: { scale: 0.9, offset_x: 0.05, offset_y: 0.1, height: 0.35, rotation_x: 0, rotation_y: 20, rotation_z: 0 },
+                animation: {
+                  preset: 'custom',
+                  tracks: [{ property: 'rotation_y', motion: 'spin', amount: 360, speed: 0.25, phase: 0 }],
+                },
+              },
+            ],
+          }),
+        }),
+        ownerToken,
+      ),
+      env,
+      deps,
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      id: 'target-20260705-181000-mixed-target',
+      model: { id: 'chair', label: 'Chair', url: 'https://worker.example/chair.glb' },
+      objects: [
+        expect.objectContaining({
+          kind: 'model',
+          id: 'model-1',
+          group_id: 'group-1',
+          local_placement: expect.objectContaining({ rotation_y: 15 }),
+          placement: expect.objectContaining({ rotation_y: 35 }),
+        }),
+        expect.objectContaining({
+          kind: 'text',
+          id: 'text-1',
+          text,
+          animation: {
+            preset: 'custom',
+            tracks: [{ property: 'rotation_y', motion: 'spin', amount: 360, speed: 0.25, phase: 0 }],
+          },
+        }),
+      ],
+      groups: [group],
+    });
+
+    const storedIndex = JSON.parse(objects.get('image-targets/index.json') as string);
+    const storedRecord = JSON.parse(objects.get('image-targets/records/target-20260705-181000-mixed-target.json') as string);
+    expect(storedIndex.targets[0]).toMatchObject(body);
+    expect(storedRecord).toMatchObject(body);
+  });
+
+  it('updates an existing target to a text-only scene without replacing its image', async () => {
+    const targetId = 'text-target';
+    const imageUrl = `https://worker.example/image-targets/images/${targetId}.jpg`;
+    const { bucket, objects } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({
+        targets: [{
+          id: targetId,
+          label: 'Old target',
+          image_url: imageUrl,
+          image_object_key: `image-targets/images/${targetId}.jpg`,
+          model: { id: 'chair', label: 'Chair', url: 'https://worker.example/chair.glb' },
+          placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+          owner_email: 'maker@example.com',
+          visibility: 'private',
+          created_at: '2026-07-05T18:00:00.000Z',
+          updated_at: '2026-07-05T18:00:00.000Z',
+        }],
+      }),
+      [`image-targets/images/${targetId}.jpg`]: new Uint8Array([1, 2, 3]).buffer,
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket, PUBLIC_MODEL_ORIGIN: '' });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:30:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const response = await handleGenerateModelRequest(
+      withAuth(new Request(`https://worker.example/generate-3d/image-targets/${targetId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: 'Text target',
+          objects: [{
+            kind: 'text',
+            id: 'text-1',
+            text: { value: 'Reusable text', language: 'english', font: 'studio-serif-bold', color: '#123456' },
+            placement: { scale: 1.1, offset_x: 0.2, offset_y: 0, height: 0.2, rotation_y: 45 },
+          }],
+          groups: [],
+        }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      id: targetId,
+      label: 'Text target',
+      image_url: imageUrl,
+      objects: [expect.objectContaining({ kind: 'text', id: 'text-1', text: expect.objectContaining({ value: 'Reusable text' }) })],
+    });
+    expect(body).not.toHaveProperty('model');
+    expect(body).not.toHaveProperty('placement');
+    expect(objects.get(`image-targets/images/${targetId}.jpg`)).toEqual(new Uint8Array([1, 2, 3]).buffer);
+    expect(JSON.parse(objects.get(`image-targets/records/${targetId}.json`) as string)).toMatchObject(body);
+  });
+
+  it('rejects invalid typed target objects when no renderable object remains', async () => {
+    const env = createEnv();
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:40:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const invalidObjects = [
+      { kind: 'text', id: 'empty', text: { value: '   ' }, placement: {} },
+      { kind: 'text', id: 'long', text: { value: 'x'.repeat(513) }, placement: {} },
+      { kind: 'text', id: 'color', text: { value: 'Visible', color: 'red' }, placement: {} },
+      { kind: 'unknown', id: 'unknown', placement: {} },
+    ];
+
+    for (const object of invalidObjects) {
+      const response = await handleGenerateModelRequest(
+        withAuth(new Request('https://worker.example/generate-3d/image-targets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            label: 'Invalid target',
+            image_base64: 'aW1hZ2U=',
+            image_mime_type: 'image/png',
+            objects: [object],
+          }),
+        }), adminToken),
+        env,
+        deps,
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'objects must include at least one valid model or text object.' });
+    }
+  });
+
   it('creates a unique image target id when the first-format id already exists', async () => {
     const existingId = 'target-20260705-180000-product-box';
     const { bucket, objects } = createMemoryBucket({
