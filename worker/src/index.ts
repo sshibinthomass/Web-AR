@@ -1606,6 +1606,7 @@ async function updateImageTarget(
   if (body.value.image_mime_type !== undefined && !imageMimeType) {
     return jsonResponse({ error: 'image_mime_type must be image/png, image/jpeg, or image/webp.' }, 400);
   }
+  let replacement: { objectKey: string; imageBytes: ArrayBuffer; mimeType: 'image/png' | 'image/jpeg' | 'image/webp' } | undefined;
   if (typeof body.value.image_base64 === 'string' && body.value.image_base64.length > 0) {
     if (!imageMimeType) {
       return jsonResponse({ error: 'image_mime_type is required when image_base64 is provided.' }, 400);
@@ -1615,20 +1616,49 @@ async function updateImageTarget(
     if (imageBytes.byteLength > maxImageTargetBytes) {
       return jsonResponse({ error: 'Image target uploads must be 5 MB or smaller.' }, 400);
     }
-    const objectKey = `${imageTargetImagePrefix}${targetId}.${imageTargetExtension(mimeType)}`;
-    if (objectKey !== existingTarget.image_object_key) {
-      await env.MODEL_BUCKET.delete?.(existingTarget.image_object_key);
-    }
-    await env.MODEL_BUCKET.put(objectKey, imageBytes, {
-      httpMetadata: { contentType: mimeType },
-    });
+    const objectKey = replacementImageTargetObjectKey(targetId, mimeType, body.value.image_base64, now);
+    replacement = { objectKey, imageBytes, mimeType };
     nextTarget.image_object_key = objectKey;
     nextTarget.image_url = `${getPublicOrigin(env, url.origin)}/${objectKey}`;
   }
 
-  index.targets[targetIndex] = nextTarget;
-  await writeImageTargetsIndex(env, index);
-  await writeJsonObject(env, imageTargetRecordKey(targetId), nextTarget);
+  const recordKey = imageTargetRecordKey(targetId);
+  let previousStoredRecord: ImageTargetEntry | null = null;
+  let recordWritten = false;
+  try {
+    previousStoredRecord = await readJsonObject<ImageTargetEntry | null>(env, recordKey, null);
+    if (replacement) {
+      await env.MODEL_BUCKET.put(replacement.objectKey, replacement.imageBytes, {
+        httpMetadata: { contentType: replacement.mimeType },
+      });
+    }
+    await writeJsonObject(env, recordKey, nextTarget);
+    recordWritten = true;
+    index.targets[targetIndex] = nextTarget;
+    await writeImageTargetsIndex(env, index);
+  } catch {
+    const rollbackTasks: Promise<unknown>[] = [];
+    if (recordWritten) {
+      if (previousStoredRecord) {
+        rollbackTasks.push(writeJsonObject(env, recordKey, previousStoredRecord));
+      } else if (env.MODEL_BUCKET.delete) {
+        rollbackTasks.push(env.MODEL_BUCKET.delete(recordKey));
+      }
+    }
+    if (replacement && env.MODEL_BUCKET.delete) {
+      rollbackTasks.push(env.MODEL_BUCKET.delete(replacement.objectKey));
+    }
+    await Promise.allSettled(rollbackTasks);
+    return jsonResponse({ error: 'Unable to update image target.' }, 500);
+  }
+
+  if (replacement && replacement.objectKey !== existingTarget.image_object_key && env.MODEL_BUCKET.delete) {
+    try {
+      await env.MODEL_BUCKET.delete(existingTarget.image_object_key);
+    } catch {
+      // The versioned replacement is already durable; a stale object can be cleaned up later.
+    }
+  }
   await appendAuditEvent(env, deps, {
     actor: user.email,
     action: 'image-target.update',
@@ -2448,6 +2478,16 @@ function imageTargetExtension(mimeType: 'image/png' | 'image/jpeg' | 'image/webp
   return 'jpg';
 }
 
+function replacementImageTargetObjectKey(
+  targetId: string,
+  mimeType: 'image/png' | 'image/jpeg' | 'image/webp',
+  imageBase64: string,
+  now: Date,
+): string {
+  const version = `${now.getTime().toString(36)}-${fnv1aHash(stripDataUrlPrefix(imageBase64))}`;
+  return `${imageTargetImagePrefix}${safeObjectKeyPart(targetId)}-${version}.${imageTargetExtension(mimeType)}`;
+}
+
 function normalizeImageTargetModel(value: unknown): ImageTargetModel | null {
   if (!value || typeof value !== 'object') {
     return null;
@@ -2518,7 +2558,7 @@ function normalizeImageTargetObject(
   const groupId = typeof candidate.group_id === 'string' ? candidate.group_id.trim() : '';
   const group = groupId ? groups.find((item) => item.id === groupId) : undefined;
   const groupFields = group && candidate.local_placement && typeof candidate.local_placement === 'object'
-    ? { group_id: group.id, local_placement: normalizeImageTargetPlacement(candidate.local_placement, defaultLocalImageTargetPlacement()) }
+    ? { group_id: group.id, local_placement: normalizeLocalImageTargetPlacement(candidate.local_placement) }
     : {};
   const animationFields = candidate.animation
     ? { animation: normalizeImageTargetAnimation(candidate.animation) }
@@ -2616,6 +2656,23 @@ function defaultImageTargetPlacement(): ImageTargetPlacement {
 
 function defaultLocalImageTargetPlacement(): ImageTargetPlacement {
   return { scale: 1, offset_x: 0, offset_y: 0, height: 0, rotation_x: 0, rotation_y: 0, rotation_z: 0 };
+}
+
+function normalizeLocalImageTargetPlacement(value: unknown): ImageTargetPlacement {
+  const fallback = defaultLocalImageTargetPlacement();
+  if (!value || typeof value !== 'object') {
+    return fallback;
+  }
+  const candidate = value as Record<string, unknown>;
+  return {
+    scale: normalizeFinitePlacementNumber(candidate.scale, fallback.scale, 0.1, 5),
+    offset_x: normalizeFinitePlacementNumber(candidate.offset_x, fallback.offset_x, -2, 2),
+    offset_y: normalizeFinitePlacementNumber(candidate.offset_y, fallback.offset_y, -2, 2),
+    height: normalizeFinitePlacementNumber(candidate.height, fallback.height, -2, 2),
+    rotation_x: normalizeImageTargetDegrees(candidate.rotation_x, fallback.rotation_x),
+    rotation_y: normalizeImageTargetDegrees(candidate.rotation_y, fallback.rotation_y),
+    rotation_z: normalizeImageTargetDegrees(candidate.rotation_z, fallback.rotation_z),
+  };
 }
 
 function normalizeFinitePlacementNumber(value: unknown, fallback: number, min: number, max: number): number {

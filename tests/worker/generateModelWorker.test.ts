@@ -2250,7 +2250,15 @@ describe('handleGenerateModelRequest', () => {
                 model: { id: 'chair', label: 'Chair', url: 'https://worker.example/chair.glb' },
                 placement: { scale: 1, offset_x: 0.25, offset_y: -0.1, height: 0.4, rotation_x: 10, rotation_y: 35, rotation_z: 30 },
                 group_id: 'group-1',
-                local_placement: { scale: 0.8, offset_x: 0.1, offset_y: 0, height: 0.1, rotation_x: 0, rotation_y: 15, rotation_z: 0 },
+                local_placement: {
+                  scale: 0.8,
+                  offset_x: 1.5,
+                  offset_y: -1.75,
+                  height: -0.5,
+                  rotation_x: 0,
+                  rotation_y: 15,
+                  rotation_z: 0,
+                },
               },
               {
                 kind: 'text',
@@ -2281,7 +2289,12 @@ describe('handleGenerateModelRequest', () => {
           kind: 'model',
           id: 'model-1',
           group_id: 'group-1',
-          local_placement: expect.objectContaining({ rotation_y: 15 }),
+          local_placement: expect.objectContaining({
+            offset_x: 1.5,
+            offset_y: -1.75,
+            height: -0.5,
+            rotation_y: 15,
+          }),
           placement: expect.objectContaining({ rotation_y: 35 }),
         }),
         expect.objectContaining({
@@ -2736,6 +2749,157 @@ describe('handleGenerateModelRequest', () => {
       error: 'image_mime_type is required when image_base64 is provided.',
     });
     expect(storedObjects.get('image-targets/images/private-target.jpg')).toEqual(new Uint8Array([1, 2, 3]).buffer);
+  });
+
+  it('versions replacement image URLs even when the MIME type stays the same', async () => {
+    const targetId = 'private-target';
+    const oldImageKey = `image-targets/images/${targetId}.jpg`;
+    const storedTarget = {
+      id: targetId,
+      label: 'Private target',
+      image_url: `https://worker.example/${oldImageKey}`,
+      image_object_key: oldImageKey,
+      model: { id: 'm-private', label: 'Private chair', url: 'https://worker.example/private.glb' },
+      placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+      owner_email: 'maker@example.com',
+      visibility: 'private',
+      created_at: '2026-07-05T18:01:00.000Z',
+      updated_at: '2026-07-05T18:01:00.000Z',
+    };
+    const { bucket, objects } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({ targets: [storedTarget] }),
+      [`image-targets/records/${targetId}.json`]: JSON.stringify(storedTarget),
+      [oldImageKey]: new Uint8Array([1, 2, 3]).buffer,
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket, PUBLIC_MODEL_ORIGIN: '' });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:20:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const response = await handleGenerateModelRequest(
+      withAuth(new Request(`https://worker.example/generate-3d/image-targets/${targetId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_base64: 'bmV3LWltYWdl', image_mime_type: 'image/jpeg' }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { image_object_key: string; image_url: string };
+    expect(body.image_object_key).not.toBe(oldImageKey);
+    expect(body.image_object_key).toMatch(/^image-targets\/images\/private-target-.+\.jpg$/);
+    expect(body.image_url).toBe(`https://worker.example/${body.image_object_key}`);
+    expect(objects.has(oldImageKey)).toBe(false);
+    expect(objects.get(body.image_object_key)).toEqual(
+      new Uint8Array([110, 101, 119, 45, 105, 109, 97, 103, 101]).buffer,
+    );
+  });
+
+  it('keeps the previous image and metadata when a replacement upload fails', async () => {
+    const targetId = 'private-target';
+    const oldImageKey = `image-targets/images/${targetId}.jpg`;
+    const storedTarget = {
+      id: targetId,
+      label: 'Private target',
+      image_url: `https://worker.example/${oldImageKey}`,
+      image_object_key: oldImageKey,
+      model: { id: 'm-private', label: 'Private chair', url: 'https://worker.example/private.glb' },
+      placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+      owner_email: 'maker@example.com',
+      visibility: 'private',
+      created_at: '2026-07-05T18:01:00.000Z',
+      updated_at: '2026-07-05T18:01:00.000Z',
+    };
+    const { bucket, objects } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({ targets: [storedTarget] }),
+      [`image-targets/records/${targetId}.json`]: JSON.stringify(storedTarget),
+      [oldImageKey]: new Uint8Array([1, 2, 3]).buffer,
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket, PUBLIC_MODEL_ORIGIN: '' });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:20:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    bucket.put.mockImplementation((key: string, value: ArrayBuffer | ReadableStream | string) => {
+      if (key.startsWith('image-targets/images/') && key !== oldImageKey) {
+        return Promise.reject(new Error('R2 image put failed'));
+      }
+      if (typeof value === 'string' || value instanceof ArrayBuffer) {
+        objects.set(key, value);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const response = await handleGenerateModelRequest(
+      withAuth(new Request(`https://worker.example/generate-3d/image-targets/${targetId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_base64: 'bmV3LWltYWdl', image_mime_type: 'image/png' }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Unable to update image target.' });
+    expect(objects.get(oldImageKey)).toEqual(new Uint8Array([1, 2, 3]).buffer);
+    expect(JSON.parse(objects.get('image-targets/index.json') as string)).toEqual({ targets: [storedTarget] });
+    expect(JSON.parse(objects.get(`image-targets/records/${targetId}.json`) as string)).toEqual(storedTarget);
+  });
+
+  it('rolls back a replacement image when the target index write fails', async () => {
+    const targetId = 'private-target';
+    const oldImageKey = `image-targets/images/${targetId}.jpg`;
+    const storedTarget = {
+      id: targetId,
+      label: 'Private target',
+      image_url: `https://worker.example/${oldImageKey}`,
+      image_object_key: oldImageKey,
+      model: { id: 'm-private', label: 'Private chair', url: 'https://worker.example/private.glb' },
+      placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+      owner_email: 'maker@example.com',
+      visibility: 'private',
+      created_at: '2026-07-05T18:01:00.000Z',
+      updated_at: '2026-07-05T18:01:00.000Z',
+    };
+    const { bucket, objects } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({ targets: [storedTarget] }),
+      [`image-targets/records/${targetId}.json`]: JSON.stringify(storedTarget),
+      [oldImageKey]: new Uint8Array([1, 2, 3]).buffer,
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket, PUBLIC_MODEL_ORIGIN: '' });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:20:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    let failTargetIndexWrite = true;
+    bucket.put.mockImplementation((key: string, value: ArrayBuffer | ReadableStream | string) => {
+      if (key === 'image-targets/index.json' && failTargetIndexWrite) {
+        failTargetIndexWrite = false;
+        return Promise.reject(new Error('R2 index put failed'));
+      }
+      if (typeof value === 'string' || value instanceof ArrayBuffer) {
+        objects.set(key, value);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const response = await handleGenerateModelRequest(
+      withAuth(new Request(`https://worker.example/generate-3d/image-targets/${targetId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_base64: 'bmV3LWltYWdl', image_mime_type: 'image/png' }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Unable to update image target.' });
+    expect(objects.get(oldImageKey)).toEqual(new Uint8Array([1, 2, 3]).buffer);
+    expect([...objects.keys()].filter((key) => key.startsWith('image-targets/images/'))).toEqual([oldImageKey]);
+    expect(JSON.parse(objects.get('image-targets/index.json') as string)).toEqual({ targets: [storedTarget] });
+    expect(JSON.parse(objects.get(`image-targets/records/${targetId}.json`) as string)).toEqual(storedTarget);
   });
 
   it('treats image targets without visibility as private', async () => {
