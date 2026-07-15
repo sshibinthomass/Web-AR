@@ -2057,7 +2057,11 @@ describe('handleGenerateModelRequest', () => {
       'image-targets/index.json': JSON.stringify({ targets: [] }),
     });
     const env = createEnv({ MODEL_BUCKET: bucket, PUBLIC_MODEL_ORIGIN: '' });
-    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:00:00Z') };
+    const deps = {
+      fetch: vi.fn(),
+      now: () => new Date('2026-07-05T18:00:00Z'),
+      randomUUID: () => '11111111-2222-4333-8444-555555555555',
+    };
     const adminToken = await createAdminToken(env, deps);
     const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
 
@@ -2101,6 +2105,9 @@ describe('handleGenerateModelRequest', () => {
       placement: { scale: 1.2, offset_x: 0.1, offset_y: -0.2, height: 0.16 },
       owner_email: 'maker@example.com',
       visibility: 'private',
+      scan_id: '11111111-2222-4333-8444-555555555555',
+      access_mode: 'owner_only',
+      allowed_emails: [],
       created_at: '2026-07-05T18:00:00.000Z',
       updated_at: '2026-07-05T18:00:00.000Z',
     });
@@ -2113,6 +2120,108 @@ describe('handleGenerateModelRequest', () => {
     expect(JSON.parse(objects.get('image-targets/records/target-20260705-180000-product-box.json') as string)).toEqual(
       expect.objectContaining({ id: 'target-20260705-180000-product-box' }),
     );
+  });
+
+  it('normalizes shared target accounts and keeps the scan id stable across access updates', async () => {
+    const { bucket } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({ targets: [] }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket, PUBLIC_MODEL_ORIGIN: '' });
+    const deps = {
+      fetch: vi.fn(),
+      now: () => new Date('2026-07-05T18:02:00Z'),
+      randomUUID: () => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const created = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/image-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: 'Shared card',
+          image_base64: 'aW1hZ2U=',
+          image_mime_type: 'image/jpeg',
+          model: { id: 'm1', label: 'Chair', url: 'https://worker.example/chair.glb' },
+          access_mode: 'specific_accounts',
+          allowed_emails: [
+            ' Friend@Example.com ',
+            'friend@example.com',
+            'SECOND@example.com',
+            'maker@example.com',
+          ],
+        }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+    const createdBody = await created.json() as Record<string, unknown>;
+
+    expect(created.status).toBe(201);
+    expect(createdBody).toMatchObject({
+      scan_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      access_mode: 'specific_accounts',
+      allowed_emails: ['friend@example.com', 'second@example.com'],
+    });
+
+    const updated = await handleGenerateModelRequest(
+      withAuth(new Request(`https://worker.example/generate-3d/image-targets/${createdBody.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          access_mode: 'any_signed_in',
+          allowed_emails: ['ignored@example.com'],
+        }),
+      }), ownerToken),
+      env,
+      { ...deps, now: () => new Date('2026-07-05T18:03:00Z') },
+    );
+
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({
+      scan_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      access_mode: 'any_signed_in',
+      allowed_emails: [],
+    });
+  });
+
+  it('rejects invalid target access modes and empty account allowlists', async () => {
+    const env = createEnv();
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:04:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const baseBody = {
+      label: 'Restricted card',
+      image_base64: 'aW1hZ2U=',
+      image_mime_type: 'image/jpeg',
+      model: { id: 'm1', label: 'Chair', url: 'https://worker.example/chair.glb' },
+    };
+
+    const invalidMode = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/image-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...baseBody, access_mode: 'team' }),
+      }), adminToken),
+      env,
+      deps,
+    );
+    const emptyAccounts = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/image-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...baseBody, access_mode: 'specific_accounts', allowed_emails: [] }),
+      }), adminToken),
+      env,
+      deps,
+    );
+
+    expect(invalidMode.status).toBe(400);
+    await expect(invalidMode.json()).resolves.toEqual({ error: 'access_mode is invalid.' });
+    expect(emptyAccounts.status).toBe(400);
+    await expect(emptyAccounts.json()).resolves.toEqual({
+      error: 'specific_accounts requires at least one account email other than the owner.',
+    });
   });
 
   it('creates image targets with multiple placed objects while preserving legacy model fields', async () => {
@@ -2592,6 +2701,122 @@ describe('handleGenerateModelRequest', () => {
     ]);
   });
 
+  it('authorizes one scan target through all four access modes', async () => {
+    const target = (
+      id: string,
+      scanId: string,
+      accessMode: 'anyone_with_link' | 'any_signed_in' | 'owner_only' | 'specific_accounts',
+      allowedEmails: string[] = [],
+    ) => ({
+      id,
+      label: id,
+      image_url: `https://worker.example/image-targets/images/${id}.jpg`,
+      image_object_key: `image-targets/images/${id}.jpg`,
+      model: { id: `model-${id}`, label: 'Chair', url: `https://worker.example/${id}.glb` },
+      placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+      owner_email: 'maker@example.com',
+      visibility: 'private',
+      scan_id: scanId,
+      access_mode: accessMode,
+      allowed_emails: allowedEmails,
+      created_at: '2026-07-05T18:00:00.000Z',
+      updated_at: '2026-07-05T18:00:00.000Z',
+    });
+    const { bucket } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({
+        targets: [
+          target('link-target', 'scan-link', 'anyone_with_link'),
+          target('signed-target', 'scan-signed', 'any_signed_in'),
+          target('owner-target', 'scan-owner', 'owner_only'),
+          target('shared-target', 'scan-shared', 'specific_accounts', ['friend@example.com']),
+        ],
+      }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:10:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    const friendToken = await createApprovedUserToken(env, deps, adminToken, 'friend@example.com');
+    const otherToken = await createApprovedUserToken(env, deps, adminToken, 'other@example.com');
+    const scan = (scanId: string, token?: string) => handleGenerateModelRequest(
+      token
+        ? withAuth(new Request(`https://worker.example/generate-3d/image-targets/scan/${scanId}`), token)
+        : new Request(`https://worker.example/generate-3d/image-targets/scan/${scanId}`),
+      env,
+      deps,
+    );
+
+    const linkResponse = await scan('scan-link');
+    const signedOutResponse = await scan('scan-signed');
+    const signedInResponse = await scan('scan-signed', otherToken);
+    const ownerDeniedResponse = await scan('scan-owner', otherToken);
+    const ownerResponse = await scan('scan-owner', ownerToken);
+    const sharedResponse = await scan('scan-shared', friendToken);
+    const sharedDeniedResponse = await scan('scan-shared', otherToken);
+    const adminResponse = await scan('scan-owner', adminToken);
+    const missingResponse = await scan('scan-missing');
+
+    expect(linkResponse.status).toBe(200);
+    await expect(linkResponse.json()).resolves.toMatchObject({ id: 'link-target', scan_id: 'scan-link' });
+    expect(signedOutResponse.status).toBe(401);
+    await expect(signedOutResponse.json()).resolves.toEqual({ error: 'Login required.' });
+    expect(signedInResponse.status).toBe(200);
+    expect(ownerDeniedResponse.status).toBe(403);
+    await expect(ownerDeniedResponse.json()).resolves.toEqual({ error: 'You do not have access to this image target.' });
+    expect(ownerResponse.status).toBe(200);
+    expect(sharedResponse.status).toBe(200);
+    expect(sharedDeniedResponse.status).toBe(403);
+    expect(adminResponse.status).toBe(200);
+    expect(missingResponse.status).toBe(404);
+    await expect(missingResponse.json()).resolves.toEqual({ error: 'Image target not found.' });
+  });
+
+  it('backfills and persists a stable scan id when an owner lists a legacy target', async () => {
+    const legacyTarget = {
+      id: 'legacy-target',
+      label: 'Legacy target',
+      image_url: 'https://worker.example/image-targets/images/legacy-target.jpg',
+      image_object_key: 'image-targets/images/legacy-target.jpg',
+      model: { id: 'legacy-model', label: 'Chair', url: 'https://worker.example/legacy.glb' },
+      placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+      owner_email: 'maker@example.com',
+      visibility: 'private',
+      created_at: '2026-07-05T18:00:00.000Z',
+      updated_at: '2026-07-05T18:00:00.000Z',
+    };
+    const { bucket, objects } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({ targets: [legacyTarget] }),
+      'image-targets/records/legacy-target.json': JSON.stringify(legacyTarget),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = {
+      fetch: vi.fn(),
+      now: () => new Date('2026-07-05T18:10:00Z'),
+      randomUUID: () => '99999999-8888-4777-8666-555555555555',
+    };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const response = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/image-targets'), ownerToken),
+      env,
+      deps,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      targets: [expect.objectContaining({
+        id: 'legacy-target',
+        scan_id: '99999999-8888-4777-8666-555555555555',
+        access_mode: 'owner_only',
+      })],
+    });
+    expect(JSON.parse(objects.get('image-targets/index.json') as string).targets[0].scan_id)
+      .toBe('99999999-8888-4777-8666-555555555555');
+    expect(JSON.parse(objects.get('image-targets/records/legacy-target.json') as string).scan_id)
+      .toBe('99999999-8888-4777-8666-555555555555');
+  });
+
   it('allows only owners or admins to update and delete image targets', async () => {
     const storedObjects = new Map<string, string | ArrayBuffer>();
     storedObjects.set('image-targets/images/private-target.jpg', new Uint8Array([1, 2, 3]).buffer);
@@ -2942,6 +3167,8 @@ describe('handleGenerateModelRequest', () => {
         expect.objectContaining({
           id: 'legacy-private-target',
           visibility: 'private',
+          access_mode: 'owner_only',
+          allowed_emails: [],
         }),
       ],
     });

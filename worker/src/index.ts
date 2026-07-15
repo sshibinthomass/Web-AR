@@ -46,6 +46,7 @@ interface ExecutionContext {
 interface GenerateModelDeps {
   fetch: typeof fetch;
   now: () => Date;
+  randomUUID?: () => string;
 }
 
 interface GenerateModelRequestBody {
@@ -203,6 +204,7 @@ interface GeneratedModelsIndex {
 }
 
 type ImageTargetVisibility = ModelVisibility;
+type ImageTargetAccessMode = 'anyone_with_link' | 'any_signed_in' | 'owner_only' | 'specific_accounts';
 
 type ImageTargetPlacement = {
   scale: number;
@@ -289,6 +291,9 @@ type ImageTargetEntry = {
   groups: ImageTargetGroup[];
   owner_email?: string;
   visibility?: ImageTargetVisibility;
+  scan_id?: string;
+  access_mode?: ImageTargetAccessMode;
+  allowed_emails?: string[];
   created_at: string;
   updated_at: string;
 };
@@ -306,6 +311,8 @@ type ImageTargetRequestBody = {
   objects?: unknown;
   groups?: unknown;
   visibility?: unknown;
+  access_mode?: unknown;
+  allowed_emails?: unknown;
 };
 
 interface ScheduledPollResult {
@@ -444,9 +451,18 @@ async function routeGenerateModelRequest(
     return handleUploadedModelRequest(request, env, deps, url, auth.user);
   }
 
+  const imageTargetScanPrefix = '/generate-3d/image-targets/scan/';
+  if (request.method === 'GET' && url.pathname.startsWith(imageTargetScanPrefix)) {
+    const scanId = decodeURIComponent(url.pathname.slice(imageTargetScanPrefix.length));
+    return handleImageTargetScanRequest(request, env, deps, scanId);
+  }
+
   if (request.method === 'GET' && url.pathname === '/generate-3d/image-targets') {
     const index = await readImageTargetsIndex(env);
     const auth = await readOptionalApprovedUser(request, env, deps);
+    if (auth) {
+      await ensureImageTargetScanIds(env, index, auth.user, deps);
+    }
     const visibleTargets = index.targets.filter((target) => isImageTargetVisibleToUser(target, auth?.user ?? null));
     return jsonResponse({
       targets: visibleTargets.sort((left, right) => right.created_at.localeCompare(left.created_at)),
@@ -1418,6 +1434,13 @@ async function handleImageTargetCreateRequest(
   }
   const groups = usedImageTargetGroups(normalizedGroups, imageTargetObjects);
   const firstModel = imageTargetObjects.find(isImageTargetModelObject);
+  const access = normalizeRequestedImageTargetAccess(body.value, user.email, {
+    access_mode: 'owner_only',
+    allowed_emails: [],
+  });
+  if ('error' in access) {
+    return jsonResponse({ error: access.error }, 400);
+  }
 
   const now = deps.now();
   const label = normalizeModelLabel(body.value.label) ?? 'Image target';
@@ -1440,6 +1463,9 @@ async function handleImageTargetCreateRequest(
     groups,
     owner_email: user.email,
     visibility: 'private',
+    scan_id: deps.randomUUID?.() ?? crypto.randomUUID(),
+    access_mode: access.access_mode,
+    allowed_emails: access.allowed_emails,
     created_at: now.toISOString(),
     updated_at: now.toISOString(),
   };
@@ -1557,6 +1583,33 @@ async function handleImageTargetManagementRequest(
   return jsonResponse({ error: 'Only PATCH and DELETE requests are supported for image targets.' }, 405);
 }
 
+async function handleImageTargetScanRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  scanId: string,
+): Promise<Response> {
+  if (!scanId) {
+    return jsonResponse({ error: 'Image target not found.' }, 404);
+  }
+  const index = await readImageTargetsIndex(env);
+  const target = index.targets.find((candidate) => candidate.scan_id === scanId);
+  if (!target) {
+    return jsonResponse({ error: 'Image target not found.' }, 404);
+  }
+  if (imageTargetAccessMode(target) === 'anyone_with_link') {
+    return jsonResponse(target);
+  }
+  const auth = await readOptionalApprovedUser(request, env, deps);
+  if (!auth) {
+    return jsonResponse({ error: 'Login required.' }, 401);
+  }
+  if (!canScanImageTarget(target, auth.user)) {
+    return jsonResponse({ error: 'You do not have access to this image target.' }, 403);
+  }
+  return jsonResponse(target);
+}
+
 async function updateImageTarget(
   request: Request,
   env: WorkerEnv,
@@ -1590,6 +1643,17 @@ async function updateImageTarget(
   }
   const nextGroups = usedImageTargetGroups(requestedGroups, nextObjects);
   const firstModel = nextObjects.find(isImageTargetModelObject);
+  const access = normalizeRequestedImageTargetAccess(
+    body.value,
+    existingTarget.owner_email ?? user.email,
+    {
+      access_mode: imageTargetAccessMode(existingTarget),
+      allowed_emails: normalizeStoredAllowedEmails(existingTarget.allowed_emails, existingTarget.owner_email),
+    },
+  );
+  if ('error' in access) {
+    return jsonResponse({ error: access.error }, 400);
+  }
   const { model: _existingModel, placement: _existingPlacement, ...existingWithoutAliases } = existingTarget;
   const now = deps.now();
   const nextTarget: ImageTargetEntry = {
@@ -1599,6 +1663,9 @@ async function updateImageTarget(
     objects: nextObjects,
     groups: nextGroups,
     visibility: normalizeModelVisibility(body.value.visibility) ?? existingTarget.visibility ?? 'private',
+    scan_id: existingTarget.scan_id ?? deps.randomUUID?.() ?? crypto.randomUUID(),
+    access_mode: access.access_mode,
+    allowed_emails: access.allowed_emails,
     updated_at: now.toISOString(),
   };
 
@@ -2462,6 +2529,61 @@ function normalizeModelVisibility(value: unknown): ModelVisibility | null {
   return value === 'public' || value === 'private' ? value : null;
 }
 
+function normalizeImageTargetAccessMode(value: unknown): ImageTargetAccessMode | null {
+  return value === 'anyone_with_link'
+    || value === 'any_signed_in'
+    || value === 'owner_only'
+    || value === 'specific_accounts'
+    ? value
+    : null;
+}
+
+function normalizeStoredAllowedEmails(value: unknown, ownerEmail?: string): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const owner = ownerEmail?.trim().toLowerCase();
+  return [...new Set(value.flatMap((candidate) => {
+    if (typeof candidate !== 'string') {
+      return [];
+    }
+    const email = candidate.trim().toLowerCase();
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email !== owner ? [email] : [];
+  }))];
+}
+
+function imageTargetAccessMode(target: Pick<ImageTargetEntry, 'access_mode' | 'visibility'>): ImageTargetAccessMode {
+  return normalizeImageTargetAccessMode(target.access_mode)
+    ?? (target.visibility === 'public' ? 'anyone_with_link' : 'owner_only');
+}
+
+function normalizeRequestedImageTargetAccess(
+  body: ImageTargetRequestBody,
+  ownerEmail: string,
+  fallback: Pick<Required<ImageTargetEntry>, 'access_mode' | 'allowed_emails'>,
+): Pick<Required<ImageTargetEntry>, 'access_mode' | 'allowed_emails'> | { error: string } {
+  const accessMode = body.access_mode === undefined
+    ? fallback.access_mode
+    : normalizeImageTargetAccessMode(body.access_mode);
+  if (!accessMode) {
+    return { error: 'access_mode is invalid.' };
+  }
+  const allowedEmails = normalizeStoredAllowedEmails(
+    body.allowed_emails === undefined ? fallback.allowed_emails : body.allowed_emails,
+    ownerEmail,
+  );
+  if (body.allowed_emails !== undefined && !Array.isArray(body.allowed_emails)) {
+    return { error: 'allowed_emails must be an array of account emails.' };
+  }
+  if (accessMode === 'specific_accounts' && allowedEmails.length === 0) {
+    return { error: 'specific_accounts requires at least one account email other than the owner.' };
+  }
+  return {
+    access_mode: accessMode,
+    allowed_emails: accessMode === 'specific_accounts' ? allowedEmails : [],
+  };
+}
+
 function normalizeImageTargetMimeType(value: unknown): 'image/png' | 'image/jpeg' | 'image/webp' | null {
   return typeof value === 'string' && allowedImageTargetMimeTypes.includes(value as 'image/png' | 'image/jpeg' | 'image/webp')
     ? (value as 'image/png' | 'image/jpeg' | 'image/webp')
@@ -3005,6 +3127,23 @@ function isImageTargetVisibleToUser(target: ImageTargetEntry, user: StoredUser |
   return Boolean(user && target.owner_email === user.email);
 }
 
+function canScanImageTarget(target: ImageTargetEntry, user: StoredUser): boolean {
+  if (user.role === 'admin') {
+    return true;
+  }
+  const ownerEmail = target.owner_email?.trim().toLowerCase();
+  const userEmail = user.email.trim().toLowerCase();
+  if (ownerEmail && ownerEmail === userEmail) {
+    return true;
+  }
+  const accessMode = imageTargetAccessMode(target);
+  if (accessMode === 'any_signed_in') {
+    return true;
+  }
+  return accessMode === 'specific_accounts'
+    && normalizeStoredAllowedEmails(target.allowed_emails, ownerEmail).includes(userEmail);
+}
+
 function canManageImageTarget(target: ImageTargetEntry, user: StoredUser): boolean {
   if (user.role === 'admin') {
     return true;
@@ -3131,6 +3270,23 @@ async function writeImageTargetsIndex(env: WorkerEnv, index: ImageTargetsIndex):
   await writeJsonObject(env, imageTargetsIndexKey, index);
 }
 
+async function ensureImageTargetScanIds(
+  env: WorkerEnv,
+  index: ImageTargetsIndex,
+  user: StoredUser,
+  deps: GenerateModelDeps,
+): Promise<void> {
+  const changedTargets = index.targets.filter((target) => !target.scan_id && canManageImageTarget(target, user));
+  if (changedTargets.length === 0) {
+    return;
+  }
+  for (const target of changedTargets) {
+    target.scan_id = deps.randomUUID?.() ?? crypto.randomUUID();
+  }
+  await Promise.all(changedTargets.map((target) => writeJsonObject(env, imageTargetRecordKey(target.id), target)));
+  await writeImageTargetsIndex(env, index);
+}
+
 async function upsertImageTargetEntry(env: WorkerEnv, entry: ImageTargetEntry): Promise<void> {
   const index = await readImageTargetsIndex(env);
   const existingIndex = index.targets.findIndex((target) => target.id === entry.id);
@@ -3175,6 +3331,8 @@ function normalizeStoredImageTarget(target: ImageTargetEntry): ImageTargetEntry 
     objects,
     groups,
     visibility: target.visibility ?? 'private',
+    access_mode: imageTargetAccessMode(target),
+    allowed_emails: normalizeStoredAllowedEmails(target.allowed_emails, target.owner_email),
   };
 }
 
