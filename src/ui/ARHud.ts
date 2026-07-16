@@ -2,6 +2,8 @@ import type { AppMode } from '../state/AppState';
 import type { ModelOption, ModelVisibility } from '../app/models';
 import type { AuthUser } from '../services/authClient';
 import type { AdminJobEntry } from '../services/generatedModelClient';
+import { HashRouter } from './HashRouter';
+import { parseRouteHash, ROUTES, routeCanOpen, type HudRoute } from './routes';
 
 interface HUDHandlers {
   onPlace(): void;
@@ -54,19 +56,6 @@ interface AnimationOption {
   label: string;
 }
 
-type HudRoute =
-  | 'home'
-  | 'camera'
-  | 'upload'
-  | 'upload-model'
-  | 'ar'
-  | 'full-flow'
-  | 'dynamic'
-  | 'speech'
-  | 'multi-object'
-  | 'models'
-  | 'login'
-  | 'admin';
 type ModelLibraryFilter = 'all' | 'generated' | 'uploaded' | 'favorites' | 'recent';
 type AuthFormMode = 'login' | 'signup';
 type ModelActionIcon =
@@ -92,6 +81,10 @@ const speechStageOrder: SpeechProcessStage[] = [
   'generating_image',
   'generating_3d',
 ];
+
+export interface ARHudOptions {
+  authRestoring?: boolean;
+}
 
 export class ARHud {
   readonly overlay: HTMLElement;
@@ -206,12 +199,19 @@ export class ARHud {
   private readonly favoriteStorageKey = 'web-ar-model-favorites';
   private readonly downloadedStorageKey = 'web-ar-model-downloads';
   private readonly recentStorageKey = 'web-ar-model-recents';
+  private readonly router: HashRouter;
+  private readonly routeRestoring: HTMLElement;
+  private authResolved: boolean;
+  private pendingRoute: HudRoute | null = null;
 
   constructor(
     root: HTMLElement,
     modelOptions: ModelOption[],
     private readonly handlers: HUDHandlers,
+    options: ARHudOptions = {},
   ) {
+    this.authResolved = !options.authRestoring;
+    this.router = new HashRouter(window);
     this.baseModelOptions = [...modelOptions];
     this.favoriteModelIds = new Set(this.readStoredModelIds(this.favoriteStorageKey));
     this.downloadedModelIds = new Set(this.readStoredModelIds(this.downloadedStorageKey));
@@ -731,10 +731,16 @@ export class ARHud {
     this.renderARModelPicker();
     this.renderAuthControls();
 
-    window.addEventListener('hashchange', () => this.applyCurrentRoute());
+    this.routeRestoring = document.createElement('section');
+    this.routeRestoring.className = 'route-restoring hidden';
+    this.routeRestoring.innerHTML = `
+      <div class="loading-ring" aria-hidden="true"></div>
+      <p>Restoring your session...</p>
+    `;
+    shell.appendChild(this.routeRestoring);
 
     this.update('loading', 'Loading model...');
-    this.applyCurrentRoute();
+    this.router.start((route) => this.applyRoute(route));
   }
 
   attachARButton(button: HTMLElement): void {
@@ -749,13 +755,49 @@ export class ARHud {
 
   updateAuthState(user: AuthUser | null): void {
     this.currentUser = user?.status === 'active' ? user : null;
+    this.authResolved = true;
+    this.routeRestoring.classList.add('hidden');
     this.renderAuthControls();
-    if (this.activeRoute && this.routeRequiresAuth(this.activeRoute) && !this.isLoggedIn()) {
-      this.redirectToLogin(this.loginMessageForRoute(this.activeRoute));
+
+    const intendedRoute = this.pendingRoute;
+    if (intendedRoute && routeCanOpen(intendedRoute, this.currentUser)) {
+      this.pendingRoute = null;
+      this.navigateTo(intendedRoute, 'replace');
+      return;
     }
-    if (this.activeRoute === 'admin' && !this.isAdmin()) {
-      this.redirectToLogin('Admin access is required.');
+
+    const currentRoute = parseRouteHash(window.location.hash);
+    if (!routeCanOpen(currentRoute, this.currentUser)) {
+      this.pendingRoute = currentRoute;
+      this.redirectToLogin(
+        ROUTES[currentRoute].requiresAdmin
+          ? 'Admin access is required.'
+          : this.loginMessageForRoute(currentRoute),
+      );
+      return;
     }
+
+    this.applyRoute(currentRoute);
+  }
+
+  navigateHome(mode: 'push' | 'replace' = 'replace'): void {
+    this.pendingRoute = null;
+    this.navigateTo('home', mode);
+  }
+
+  navigateToLogin(message: string): void {
+    if (this.activeRoute && this.activeRoute !== 'login') {
+      this.pendingRoute = this.activeRoute;
+    }
+    this.redirectToLogin(message);
+  }
+
+  completeLogout(): void {
+    this.currentUser = null;
+    this.authResolved = true;
+    this.pendingRoute = null;
+    this.renderAuthControls();
+    this.navigateHome('replace');
   }
 
   showAuthMessage(message: string, isError = false): void {
@@ -1294,36 +1336,14 @@ export class ARHud {
     this.updateCameraStatus(message, false);
   }
 
-  private navigateTo(route: HudRoute): void {
-    const hash = route === 'home' ? '#/' : `#/${route}`;
-    if (window.location.hash !== hash) {
-      window.location.hash = hash;
-    }
-    this.applyRoute(route);
-  }
-
-  private applyCurrentRoute(): void {
-    this.applyRoute(this.routeFromHash(window.location.hash));
-  }
-
-  private routeRequiresAuth(route: HudRoute): boolean {
-    return route === 'camera' || route === 'upload' || route === 'upload-model' || route === 'full-flow' || route === 'dynamic' || route === 'speech';
-  }
-
-  private isLoggedIn(): boolean {
-    return Boolean(this.currentUser);
-  }
-
-  private isAdmin(): boolean {
-    return this.currentUser?.role === 'admin';
+  private navigateTo(route: HudRoute, mode: 'push' | 'replace' = 'push'): void {
+    this.router.navigate(route, mode);
   }
 
   private redirectToLogin(message: string): void {
-    if (window.location.hash !== '#/login') {
-      window.location.hash = '#/login';
-    }
     const previousRoute = this.activeRoute;
     this.activeRoute = 'login';
+    this.router.navigate('login', 'replace');
     this.openAuthPage(message);
     if (previousRoute && previousRoute !== 'home' && previousRoute !== 'login') {
       this.handlers.onReturnHome();
@@ -1349,43 +1369,19 @@ export class ARHud {
     }
   }
 
-  private routeFromHash(hash: string): HudRoute {
-    switch (hash) {
-      case '#/camera':
-        return 'camera';
-      case '#/upload':
-        return 'upload';
-      case '#/upload-model':
-        return 'upload-model';
-      case '#/ar':
-        return 'ar';
-      case '#/full-flow':
-        return 'full-flow';
-      case '#/dynamic':
-        return 'dynamic';
-      case '#/speech':
-        return 'speech';
-      case '#/multi-object':
-        return 'multi-object';
-      case '#/models':
-        return 'models';
-      case '#/login':
-        return 'login';
-      case '#/admin':
-        return 'admin';
-      default:
-        return 'home';
-    }
-  }
-
   private applyRoute(route: HudRoute): void {
-    if (this.routeRequiresAuth(route) && !this.isLoggedIn()) {
-      this.redirectToLogin(this.loginMessageForRoute(route));
+    const meta = ROUTES[route];
+    if (!this.authResolved && meta.requiresAuth) {
+      this.pendingRoute = route;
+      this.showRestoringRoute();
       return;
     }
 
-    if (route === 'admin' && !this.isAdmin()) {
-      this.redirectToLogin('Admin access is required.');
+    if (!routeCanOpen(route, this.currentUser)) {
+      this.pendingRoute = route;
+      this.redirectToLogin(
+        meta.requiresAdmin ? 'Admin access is required.' : this.loginMessageForRoute(route),
+      );
       return;
     }
 
@@ -1452,6 +1448,23 @@ export class ARHud {
     }
 
     this.openHomePage(previousRoute);
+  }
+
+  private showRestoringRoute(): void {
+    this.landing.classList.add('hidden');
+    this.authPanel.classList.add('hidden');
+    this.adminDashboard.classList.add('hidden');
+    this.speechPanel.classList.add('hidden');
+    this.modelManager.classList.add('hidden');
+    this.layoutManager.classList.add('hidden');
+    this.statusPanel.classList.add('hidden');
+    this.hudActions.classList.add('hidden');
+    this.modelRail.classList.add('hidden');
+    this.arModelPicker.classList.add('hidden');
+    this.gestureSurface.classList.add('hidden');
+    this.cameraPanel.classList.add('hidden');
+    this.fullFlowLoading.classList.add('hidden');
+    this.routeRestoring.classList.remove('hidden');
   }
 
   private openHomePage(previousRoute: HudRoute | null): void {

@@ -97,6 +97,7 @@ export class WebARApp {
   constructor(private readonly root: HTMLElement) {}
 
   async start(): Promise<void> {
+    this.authToken = loadAuthToken();
     this.hud = new ARHud(this.root, MODEL_OPTIONS, {
       onPlace: () => this.placeAtLatestHit(),
       onEdit: () => this.setEditing(),
@@ -141,11 +142,14 @@ export class WebARApp {
       onStartMultiObject: () => void this.startMultiObjectSession(),
       onAddLayoutObject: () => this.promptForLayoutObject(),
       onDeleteLayoutObject: () => this.deleteSelectedLayoutObject(),
+    }, {
+      authRestoring: Boolean(this.authToken),
     });
     this.hud.updateModelSource('Cloudflare only');
-    this.authToken = loadAuthToken();
     if (this.authToken) {
-      void this.restoreSession();
+      await this.restoreSession();
+    } else {
+      this.hud.updateAuthState(null);
     }
     void this.refreshGeneratedModels();
     window.setInterval(() => {
@@ -165,7 +169,7 @@ export class WebARApp {
     try {
       const user = await getCurrentUser({ apiUrl, token: this.authToken });
       if (!user) {
-        void this.logout();
+        this.clearInvalidSession();
         return;
       }
       this.currentUser = user;
@@ -174,8 +178,15 @@ export class WebARApp {
       void this.prepareMultiObject();
     } catch (error) {
       console.warn('Could not restore auth session.', error);
-      void this.logout();
+      this.clearInvalidSession();
     }
+  }
+
+  private clearInvalidSession(): void {
+    this.authToken = null;
+    this.currentUser = null;
+    clearAuthToken();
+    this.hud?.updateAuthState(null);
   }
 
   private async login(email: string, password: string): Promise<void> {
@@ -195,7 +206,6 @@ export class WebARApp {
       this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
       void this.refreshGeneratedModels();
       void this.prepareMultiObject();
-      window.location.hash = '#/';
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed.';
       this.hud?.showAuthMessage(message, true);
@@ -219,7 +229,6 @@ export class WebARApp {
       this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
       void this.refreshGeneratedModels();
       void this.prepareMultiObject();
-      window.location.hash = '#/';
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Account creation failed.';
       this.hud?.showAuthMessage(message, true);
@@ -237,9 +246,8 @@ export class WebARApp {
     this.authToken = null;
     this.currentUser = null;
     clearAuthToken();
-    this.hud?.updateAuthState(null);
+    this.hud?.completeLogout();
     void this.refreshGeneratedModels();
-    window.location.hash = '#/';
   }
 
   private async refreshAdminAccounts(): Promise<void> {
@@ -337,8 +345,7 @@ export class WebARApp {
       return this.authToken;
     }
 
-    this.hud?.showAuthMessage(message, true);
-    window.location.hash = '#/login';
+    this.hud?.navigateToLogin(message);
     return null;
   }
 

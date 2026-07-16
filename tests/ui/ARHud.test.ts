@@ -1297,6 +1297,35 @@ describe('ARHud', () => {
     expect(onStartCamera).not.toHaveBeenCalled();
   });
 
+  it('waits for auth restoration before resolving a protected deep link', () => {
+    window.history.replaceState(null, '', '/#/speech');
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers(), { authRestoring: true });
+
+    expect(window.location.hash).toBe('#/speech');
+    expect(root.querySelector('.auth-panel')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.route-restoring')?.classList.contains('hidden')).toBe(false);
+
+    hud.updateAuthState(activeUser);
+
+    expect(window.location.hash).toBe('#/speech');
+    expect(root.querySelector('.route-restoring')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.speech-panel')?.classList.contains('hidden')).toBe(false);
+  });
+
+  it('restores the intended protected route after login', () => {
+    window.history.replaceState(null, '', '/#/speech');
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    expect(window.location.hash).toBe('#/login');
+
+    hud.updateAuthState(activeUser);
+
+    expect(window.location.hash).toBe('#/speech');
+    expect(root.querySelector('.speech-panel')?.classList.contains('hidden')).toBe(false);
+  });
+
   it('opens the AR View page directly from the ar hash route', () => {
     window.history.replaceState(null, '', '/#/ar');
     const root = document.createElement('div');
