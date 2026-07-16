@@ -134,6 +134,32 @@ describe('ARHud', () => {
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(true);
   });
 
+  it('mounts every route inside one shared responsive application shell', () => {
+    window.history.replaceState(null, '', '/#/models');
+    const root = document.createElement('div');
+
+    new ARHud(root, modelOptions, createHandlers());
+
+    expect(root.querySelectorAll('.app-shell')).toHaveLength(1);
+    expect(root.querySelector('.app-header')).not.toBeNull();
+    expect(root.querySelector('.mobile-bottom-nav')).not.toBeNull();
+    expect(root.querySelector('.app-route-title')?.textContent).toBe('Models');
+    expect(root.querySelector('.model-manager')?.parentElement?.classList.contains('app-page-host')).toBe(true);
+    expect(root.querySelector('.xr-overlay')?.parentElement?.classList.contains('app-shell')).toBe(true);
+  });
+
+  it('delegates shared Back navigation to browser history', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+    root.querySelector<HTMLButtonElement>('.route-back')?.click();
+
+    expect(back).toHaveBeenCalledOnce();
+    back.mockRestore();
+  });
+
   it('prompts guests to sign in for protected actions while leaving AR View, Models, and Multi Object public', () => {
     const root = document.createElement('div');
     const onStartCamera = vi.fn();
@@ -1340,7 +1366,7 @@ describe('ARHud', () => {
     expect(root.querySelector('.model-rail')?.classList.contains('hidden')).toBe(true);
   });
 
-  it('returns from a sub page to the home page with the Back button', () => {
+  it('returns from a sub page to the home page with the Back button', async () => {
     const root = document.createElement('div');
     const onReturnHome = vi.fn();
     const hud = new ARHud(root, modelOptions, createHandlers({ onReturnHome }));
@@ -1349,7 +1375,7 @@ describe('ARHud', () => {
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera to 3D')?.click();
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Back')?.click();
 
-    expect(window.location.hash).toBe('#/');
+    await vi.waitFor(() => expect(window.location.hash).toBe('#/'));
     expect(onReturnHome).toHaveBeenCalledTimes(1);
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.status-panel')?.classList.contains('hidden')).toBe(true);

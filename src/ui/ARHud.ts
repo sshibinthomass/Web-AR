@@ -2,6 +2,7 @@ import type { AppMode } from '../state/AppState';
 import type { ModelOption, ModelVisibility } from '../app/models';
 import type { AuthUser } from '../services/authClient';
 import type { AdminJobEntry } from '../services/generatedModelClient';
+import { ApplicationShell } from './ApplicationShell';
 import { HashRouter } from './HashRouter';
 import { parseRouteHash, ROUTES, routeCanOpen, type HudRoute } from './routes';
 
@@ -200,6 +201,7 @@ export class ARHud {
   private readonly downloadedStorageKey = 'web-ar-model-downloads';
   private readonly recentStorageKey = 'web-ar-model-recents';
   private readonly router: HashRouter;
+  private readonly appShell: ApplicationShell;
   private readonly routeRestoring: HTMLElement;
   private authResolved: boolean;
   private pendingRoute: HudRoute | null = null;
@@ -216,9 +218,13 @@ export class ARHud {
     this.favoriteModelIds = new Set(this.readStoredModelIds(this.favoriteStorageKey));
     this.downloadedModelIds = new Set(this.readStoredModelIds(this.downloadedStorageKey));
     this.recentModelIds = this.readStoredModelIds(this.recentStorageKey);
-    const shell = document.createElement('div');
-    shell.className = 'app-shell';
-    root.appendChild(shell);
+    this.appShell = new ApplicationShell(root, {
+      onNavigate: (route) => this.navigateTo(route),
+      onBack: () => this.navigateBack(),
+      onLogout: this.handlers.onLogout,
+    });
+    const shell = this.appShell.pageHost;
+    this.overlay = this.appShell.overlay;
 
     this.landing = document.createElement('section');
     this.landing.className = 'landing';
@@ -298,7 +304,6 @@ export class ARHud {
     this.authPanel.className = 'auth-panel hidden';
     this.authPanel.innerHTML = `
       <div class="auth-panel-inner">
-        <button class="page-back" type="button">Back</button>
         <div class="auth-panel-header">
           <h2>Login</h2>
           <p class="auth-message">Sign in with an approved account, or create one for admin approval.</p>
@@ -323,7 +328,6 @@ export class ARHud {
     this.authPasswordInput = this.authPanel.querySelector<HTMLInputElement>('input[name="authPassword"]')!;
     this.authNameInput = this.authPanel.querySelector<HTMLInputElement>('input[name="authName"]')!;
     this.authNameLabel = this.authNameInput.closest('label') as HTMLLabelElement;
-    this.authPanel.querySelector<HTMLButtonElement>('.page-back')?.addEventListener('click', () => this.navigateTo('home'));
     this.authSignInButton = this.createButton('Sign in', 'primary', () => this.handleLoginClick());
     this.authSignupButton = this.createButton('Create account', '', () => this.handleSignupClick());
     this.authPanel.querySelector<HTMLElement>('.auth-form-actions')?.append(
@@ -337,7 +341,6 @@ export class ARHud {
     this.adminDashboard.className = 'admin-dashboard hidden';
     this.adminDashboard.innerHTML = `
       <div class="admin-dashboard-inner">
-        <button class="page-back" type="button">Back</button>
         <div class="admin-dashboard-header">
           <h2>Admin</h2>
           <p>Approve accounts and watch background generation jobs.</p>
@@ -363,7 +366,6 @@ export class ARHud {
         <p class="admin-dashboard-message">Accounts load from Cloudflare storage.</p>
       </div>
     `;
-    this.adminDashboard.querySelector<HTMLButtonElement>('.page-back')?.addEventListener('click', () => this.navigateTo('home'));
     this.adminDashboard.querySelector<HTMLButtonElement>('.admin-refresh-accounts')?.addEventListener('click', () => {
       this.handlers.onRefreshAdminAccounts();
     });
@@ -384,7 +386,6 @@ export class ARHud {
     this.speechPanel.className = 'speech-panel hidden';
     this.speechPanel.innerHTML = `
       <div class="speech-panel-inner">
-        <button class="page-back" type="button">Back</button>
         <div class="speech-panel-header">
           <h2>Text or Voice to 3D</h2>
           <p class="speech-status">Type a description or push to talk, then generate a 3D-ready image and model.</p>
@@ -430,7 +431,6 @@ export class ARHud {
         <div class="speech-actions"></div>
       </div>
     `;
-    this.speechPanel.querySelector<HTMLButtonElement>('.page-back')?.addEventListener('click', () => this.navigateTo('home'));
     this.speechStatusMessage = this.speechPanel.querySelector<HTMLElement>('.speech-status')!;
     this.speechVisualizer = this.speechPanel.querySelector<HTMLElement>('.speech-visualizer')!;
     this.speechTranscriptMessage = this.speechPanel.querySelector<HTMLElement>('.speech-transcript')!;
@@ -470,7 +470,6 @@ export class ARHud {
     this.modelManager.className = 'model-manager hidden';
     const modelManagerInner = document.createElement('div');
     modelManagerInner.className = 'model-manager-inner';
-    const modelManagerBackButton = this.createButton('Back', 'page-back', () => this.navigateTo('home'));
     const modelManagerHeader = document.createElement('div');
     modelManagerHeader.className = 'model-manager-header';
     const modelManagerTitle = document.createElement('h2');
@@ -487,7 +486,6 @@ export class ARHud {
     this.modelManagerMessage.className = 'model-manager-message';
     this.modelManagerMessage.textContent = 'Generated models are saved in Cloudflare storage.';
     modelManagerInner.append(
-      modelManagerBackButton,
       modelManagerHeader,
       modelManagerControls.root,
       this.modelList,
@@ -552,7 +550,6 @@ export class ARHud {
     this.layoutManager.className = 'layout-manager hidden';
     const layoutManagerInner = document.createElement('div');
     layoutManagerInner.className = 'layout-manager-inner';
-    const layoutManagerBackButton = this.createButton('Back', 'page-back', () => this.navigateTo('home'));
     const layoutManagerHeader = document.createElement('div');
     layoutManagerHeader.className = 'layout-manager-header';
     const layoutManagerTitle = document.createElement('h2');
@@ -564,13 +561,9 @@ export class ARHud {
     this.layoutManagerMessage = document.createElement('p');
     this.layoutManagerMessage.className = 'layout-manager-message';
     this.layoutManagerMessage.textContent = 'No layout is saved or reopened.';
-    layoutManagerInner.append(layoutManagerBackButton, layoutManagerHeader, this.layoutManagerMessage);
+    layoutManagerInner.append(layoutManagerHeader, this.layoutManagerMessage);
     this.layoutManager.appendChild(layoutManagerInner);
     shell.appendChild(this.layoutManager);
-
-    this.overlay = document.createElement('div');
-    this.overlay.className = 'xr-overlay';
-    shell.appendChild(this.overlay);
 
     this.gestureSurface = document.createElement('div');
     this.gestureSurface.className = 'gesture-surface hidden';
@@ -585,7 +578,7 @@ export class ARHud {
     `;
     this.statusMessage = this.statusPanel.querySelector<HTMLElement>('.status-message')!;
     this.sourceMessage = this.statusPanel.querySelector<HTMLElement>('.status-source')!;
-    this.backButton = this.createButton('Back', 'page-back', () => this.navigateTo('home'));
+    this.backButton = this.createButton('Back', 'page-back', () => this.navigateBack());
     this.statusPanel.prepend(this.backButton);
 
     this.fullFlowLoading = document.createElement('section');
@@ -757,6 +750,7 @@ export class ARHud {
     this.currentUser = user?.status === 'active' ? user : null;
     this.authResolved = true;
     this.routeRestoring.classList.add('hidden');
+    this.appShell.setRestoring(false);
     this.renderAuthControls();
 
     const intendedRoute = this.pendingRoute;
@@ -1340,6 +1334,11 @@ export class ARHud {
     this.router.navigate(route, mode);
   }
 
+  private navigateBack(): void {
+    const route = this.activeRoute ?? parseRouteHash(window.location.hash);
+    this.router.back(ROUTES[route].parent);
+  }
+
   private redirectToLogin(message: string): void {
     const previousRoute = this.activeRoute;
     this.activeRoute = 'login';
@@ -1371,12 +1370,14 @@ export class ARHud {
 
   private applyRoute(route: HudRoute): void {
     const meta = ROUTES[route];
+    this.appShell.setRoute(route);
     if (!this.authResolved && meta.requiresAuth) {
       this.pendingRoute = route;
       this.showRestoringRoute();
       return;
     }
 
+    this.appShell.setRestoring(false);
     if (!routeCanOpen(route, this.currentUser)) {
       this.pendingRoute = route;
       this.redirectToLogin(
@@ -1451,6 +1452,7 @@ export class ARHud {
   }
 
   private showRestoringRoute(): void {
+    this.appShell.setRestoring(true);
     this.landing.classList.add('hidden');
     this.authPanel.classList.add('hidden');
     this.adminDashboard.classList.add('hidden');
@@ -2114,6 +2116,7 @@ export class ARHud {
   }
 
   private renderAuthControls(): void {
+    this.appShell.setUser(this.currentUser);
     if (!this.currentUser) {
       this.authIdentity.textContent = 'Guest access';
       this.loginButton.classList.remove('hidden');
