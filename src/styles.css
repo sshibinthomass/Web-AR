@@ -360,7 +360,7 @@ h3 {
   top: 0;
   right: 0;
   left: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-height: calc(56px + env(safe-area-inset-top));
@@ -368,6 +368,10 @@ h3 {
   border-bottom: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-surface) 96%, transparent);
   backdrop-filter: blur(16px);
+}
+
+.mobile-top-bar .route-back {
+  justify-self: start;
 }
 
 .mobile-top-bar button {
@@ -476,6 +480,11 @@ h3 {
   width: 100%;
   justify-content: flex-start;
   text-align: left;
+}
+
+.mobile-account-link {
+  justify-self: end;
+  width: 100%;
 }
 
 .account-menu {

@@ -180,6 +180,25 @@ describe('ApplicationShell', () => {
     expect(menu.hidden).toBe(true);
   });
 
+  it('clears the signed-in notice when the session becomes signed out', () => {
+    vi.useFakeTimers();
+    const host = document.createElement('div');
+    const shell = new ApplicationShell(host, {
+      onNavigate: vi.fn(),
+      onBack: vi.fn(),
+      onLogout: vi.fn(),
+    });
+    shell.setUser(activeUser);
+    shell.showSessionNotice('Welcome back, Maya Stone.');
+
+    shell.setUser(null);
+
+    const notice = host.querySelector<HTMLElement>('.session-notice')!;
+    expect(notice.hidden).toBe(true);
+    expect(notice.textContent).toBe('');
+    vi.useRealTimers();
+  });
+
   it('uses immersive chrome without standard navigation', () => {
     const host = document.createElement('div');
     const onBack = vi.fn();

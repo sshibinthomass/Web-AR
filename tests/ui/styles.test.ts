@@ -94,6 +94,9 @@ describe('application design system', () => {
     expect(styles).toContain('min-height: 44px;');
     expect(styles).toContain('.session-notice {');
     expect(styles).toContain(
+      'grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);',
+    );
+    expect(styles).toContain(
       '  .account-menu {\n' +
       '    top: calc(56px + env(safe-area-inset-top) + 8px);',
     );

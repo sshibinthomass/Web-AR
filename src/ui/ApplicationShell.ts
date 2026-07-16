@@ -233,6 +233,15 @@ export class ApplicationShell {
     this.currentUser = user;
     this.closeAccountMenu();
 
+    if (!user) {
+      if (this.sessionNoticeTimer !== null) {
+        window.clearTimeout(this.sessionNoticeTimer);
+        this.sessionNoticeTimer = null;
+      }
+      this.sessionNotice.textContent = '';
+      this.sessionNotice.hidden = true;
+    }
+
     const displayName = user ? getAccountDisplayName(user) : '';
     for (const trigger of this.accountTriggers) {
       const label = trigger.querySelector<HTMLElement>('.account-trigger-label')!;
