@@ -41,7 +41,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onPreviewLightDirectionChange: vi.fn(),
     onPreviewAnimationSelect: vi.fn(),
     onUpdateModelThumbnail: vi.fn(),
-    onReturnHome: vi.fn(),
+    onRouteExit: vi.fn(),
     onLogin: vi.fn(),
     onSignup: vi.fn(),
     onLogout: vi.fn(),
@@ -158,6 +158,48 @@ describe('ARHud', () => {
 
     expect(back).toHaveBeenCalledOnce();
     back.mockRestore();
+  });
+
+  it('resets upload state when entering camera capture', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="upload"]')?.click();
+    expect(root.querySelector('.camera-status')?.textContent).toContain('Choose an image');
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="camera"]')?.click();
+    expect(root.querySelector('.camera-label')?.textContent).toBe('Camera capture');
+    expect(root.querySelector('.camera-status')?.textContent).toBe('Frame one object, then capture an image.');
+    expect(root.querySelector('.generated-model-status')?.textContent).toBe('No model generated yet.');
+  });
+
+  it('keeps camera-based workflow names distinct', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+
+    for (const [route, title] of [
+      ['camera', 'Camera capture'],
+      ['full-flow', 'Photo to AR'],
+      ['dynamic', 'AI photo to AR'],
+    ] as const) {
+      root.querySelector<HTMLButtonElement>(`[data-nav-route="${route}"]`)?.click();
+      expect(root.querySelector('.camera-label')?.textContent).toBe(title);
+      expect(root.querySelector('.immersive-title')?.textContent).toBe(title);
+    }
+  });
+
+  it('notifies the application when leaving a transient route', () => {
+    const root = document.createElement('div');
+    const onRouteExit = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onRouteExit }));
+    hud.updateAuthState(activeUser);
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="camera"]')?.click();
+    root.querySelector<HTMLButtonElement>('[data-nav-route="upload"]')?.click();
+
+    expect(onRouteExit).toHaveBeenCalledWith('camera', 'upload');
   });
 
   it('prompts guests to sign in for protected actions while leaving AR View, Models, and Multi Object public', () => {
@@ -540,7 +582,7 @@ describe('ARHud', () => {
     expect(onStartCamera).toHaveBeenCalledTimes(1);
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.camera-panel')?.classList.contains('fullscreen')).toBe(true);
-    expect(root.textContent).toContain('dynamic image');
+    expect(root.textContent).toContain('AI enhancement');
   });
 
   it('opens Multi Object for guests directly as a fresh AR placement session without saved layouts', () => {
@@ -612,7 +654,7 @@ describe('ARHud', () => {
     const cameraPanel = root.querySelector('.camera-panel');
     const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept="image/*"]');
     const captureButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Capture');
-    const generateButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate 3D');
+    const generateButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate model');
 
     expect(onStartCamera).not.toHaveBeenCalled();
     expect(window.location.hash).toBe('#/upload');
@@ -623,7 +665,7 @@ describe('ARHud', () => {
     expect(uploadInput?.classList.contains('hidden')).toBe(false);
     expect(captureButton?.classList.contains('hidden')).toBe(true);
     expect((generateButton as HTMLButtonElement).disabled).toBe(true);
-    expect(root.textContent).toContain('Upload an image to create a 3D model.');
+    expect(root.textContent).toContain('Choose an image to create a 3D model.');
   });
 
   it('opens upload model from the first screen with a GLB picker', () => {
@@ -637,7 +679,7 @@ describe('ARHud', () => {
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Upload 3D Model')?.click();
     const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept=".glb,model/gltf-binary"]')!;
     const storeButton = [...root.querySelectorAll('.camera-actions button')].find(
-      (button) => button.textContent === 'Store Model',
+      (button) => button.textContent === 'Upload model',
     ) as HTMLButtonElement;
     const file = new File(['glb bytes'], 'chair.glb', { type: 'model/gltf-binary' });
     Object.defineProperty(uploadInput, 'files', { value: [file], configurable: true });
@@ -1177,7 +1219,7 @@ describe('ARHud', () => {
     expect(targetInput?.classList.contains('hidden')).toBe(false);
     targetInput!.value = ' laptop ';
     const directGenerateButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate and Place',
+      (button) => button.textContent === 'Generate and place',
     );
     expect((directGenerateButton as HTMLButtonElement).disabled).toBe(false);
     directGenerateButton?.click();
@@ -1205,17 +1247,17 @@ describe('ARHud', () => {
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
     targetInput!.value = ' laptop ';
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Extract object')?.click();
 
     expect(onSubmitTarget).toHaveBeenCalledWith('laptop');
 
     hud.showExtractedImageReady('blob:extracted-image');
     const submitButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Submit',
+      (button) => button.textContent === 'Extract object',
     );
     expect(submitButton?.classList.contains('hidden')).toBe(true);
     expect((submitButton as HTMLButtonElement).disabled).toBe(true);
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate and Place')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate and place')?.click();
 
     expect(window.location.hash).toBe('#/ar');
     expect(startArCamera).toHaveBeenCalledTimes(1);
@@ -1247,10 +1289,10 @@ describe('ARHud', () => {
     hud.showCapturedImagePreview('blob:dynamic-capture');
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
     targetInput!.value = ' chair ';
-    const submitButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit');
+    const submitButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Extract object');
     expect(submitButton?.classList.contains('hidden')).toBe(true);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate and Place')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate and place')?.click();
 
     expect(window.location.hash).toBe('#/ar');
     expect(startArCamera).toHaveBeenCalledTimes(1);
@@ -1368,15 +1410,15 @@ describe('ARHud', () => {
 
   it('returns from a sub page to the home page with the Back button', async () => {
     const root = document.createElement('div');
-    const onReturnHome = vi.fn();
-    const hud = new ARHud(root, modelOptions, createHandlers({ onReturnHome }));
+    const onRouteExit = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onRouteExit }));
     hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera to 3D')?.click();
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Back')?.click();
 
     await vi.waitFor(() => expect(window.location.hash).toBe('#/'));
-    expect(onReturnHome).toHaveBeenCalledTimes(1);
+    expect(onRouteExit).toHaveBeenCalledWith('camera', 'home');
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.status-panel')?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.camera-panel')?.classList.contains('hidden')).toBe(true);
@@ -1510,7 +1552,7 @@ describe('ARHud', () => {
 
     expect(root.textContent).toContain('Camera');
     expect([...root.querySelectorAll('button')].map((button) => button.textContent)).toEqual(
-      expect.arrayContaining(['Capture', 'Generate 3D']),
+      expect.arrayContaining(['Capture', 'Generate model']),
     );
   });
 
@@ -1530,7 +1572,7 @@ describe('ARHud', () => {
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
     targetInput!.value = ' laptop ';
     const directGenerateButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate 3D',
+      (button) => button.textContent === 'Generate model',
     );
     expect((directGenerateButton as HTMLButtonElement).disabled).toBe(false);
     directGenerateButton?.click();
@@ -1538,7 +1580,7 @@ describe('ARHud', () => {
     expect(onGenerateModel).toHaveBeenCalledWith('laptop');
     expect(onSubmitTarget).not.toHaveBeenCalled();
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Extract object')?.click();
 
     expect(onStartCamera).toHaveBeenCalledTimes(1);
     expect(onCaptureImage).toHaveBeenCalledTimes(1);
@@ -1546,11 +1588,11 @@ describe('ARHud', () => {
 
     hud.showExtractedImageReady('blob:extracted-image');
     const submitButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Submit',
+      (button) => button.textContent === 'Extract object',
     );
     expect(submitButton?.classList.contains('hidden')).toBe(true);
     expect((submitButton as HTMLButtonElement).disabled).toBe(true);
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate 3D')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate model')?.click();
 
     expect(onGenerateModel).toHaveBeenCalledTimes(2);
   });
@@ -1576,7 +1618,7 @@ describe('ARHud', () => {
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
     targetInput!.value = ' chair ';
     const directGenerateButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate 3D',
+      (button) => button.textContent === 'Generate model',
     );
 
     expect(root.textContent).toContain('Image uploaded. Submit to GPT or generate a 3D model directly.');
@@ -1586,7 +1628,7 @@ describe('ARHud', () => {
     expect(onGenerateModel).toHaveBeenCalledWith('chair');
     expect(onSubmitTarget).not.toHaveBeenCalled();
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Extract object')?.click();
 
     expect(onSubmitTarget).toHaveBeenCalledWith('chair');
   });
@@ -1599,7 +1641,7 @@ describe('ARHud', () => {
     hud.updateGeneratedModelSource('https://assets.example/models/generated/capture.glb');
 
     const generateButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate 3D',
+      (button) => button.textContent === 'Generate model',
     );
     expect(root.textContent).toContain('Image captured. Ready to generate.');
     expect(root.textContent).toContain('Generated model: https://assets.example/models/generated/capture.glb');
@@ -1615,10 +1657,10 @@ describe('ARHud', () => {
     const video = root.querySelector('video.camera-preview');
     const image = root.querySelector('img.camera-preview') as HTMLImageElement | null;
     const submitButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Submit',
+      (button) => button.textContent === 'Extract object',
     );
     const generateButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate 3D',
+      (button) => button.textContent === 'Generate model',
     );
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
 

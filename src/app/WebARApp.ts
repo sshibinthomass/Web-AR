@@ -53,6 +53,7 @@ import {
 } from '../services/authClient';
 import { AppState } from '../state/AppState';
 import { ARHud } from '../ui/ARHud';
+import type { HudRoute } from '../ui/routes';
 import { getGenerateModelApiUrl } from './config';
 import type { ARRuntime, PlacementGestureZone, Point2, SceneContext } from './arRuntime';
 
@@ -124,7 +125,9 @@ export class WebARApp {
       onPreviewLightDirectionChange: (degrees) => this.updateModelPreviewLightDirection(degrees),
       onPreviewAnimationSelect: (animationIndex) => this.selectModelPreviewAnimation(animationIndex),
       onUpdateModelThumbnail: (modelId, file) => void this.updateModelThumbnail(modelId, file),
-      onReturnHome: () => void this.returnHome(),
+      onRouteExit: (previousRoute, nextRoute) => {
+        void this.leaveRoute(previousRoute, nextRoute);
+      },
       onLogin: (email, password) => void this.login(email, password),
       onSignup: (email, password, name) => void this.signup(email, password, name),
       onLogout: () => void this.logout(),
@@ -515,9 +518,8 @@ export class WebARApp {
     try {
       stopCameraPreview(this.cameraStream);
       this.clearCapturedImagePreview();
-      this.hud?.showLiveCameraPreview();
       this.cameraStream = await startCameraPreview(preview);
-      this.hud?.updateCameraStatus('Camera ready. Capture an image to generate a 3D model.', false);
+      this.hud?.updateCameraStatus('Camera ready. Capture one object when the frame is clear.', false);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Camera permission was not granted.';
       this.hud?.updateCameraStatus(`Camera unavailable: ${message}`, false);
@@ -880,7 +882,24 @@ export class WebARApp {
     this.hud?.startARCamera();
   }
 
-  private async returnHome(): Promise<void> {
+  private async leaveRoute(previousRoute: HudRoute, _nextRoute: HudRoute): Promise<void> {
+    const transientRoutes: HudRoute[] = [
+      'camera',
+      'upload',
+      'upload-model',
+      'full-flow',
+      'dynamic',
+      'speech',
+      'ar',
+      'multi-object',
+    ];
+    if (!transientRoutes.includes(previousRoute)) {
+      return;
+    }
+    await this.resetTransientExperience();
+  }
+
+  private async resetTransientExperience(): Promise<void> {
     stopCameraPreview(this.cameraStream);
     this.cameraStream = null;
     this.capturedImage = null;

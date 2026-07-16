@@ -32,7 +32,7 @@ interface HUDHandlers {
   onPreviewLightDirectionChange(degrees: number): void;
   onPreviewAnimationSelect(animationIndex: number): void;
   onUpdateModelThumbnail(modelId: string, file: File): void;
-  onReturnHome(): void;
+  onRouteExit(previousRoute: HudRoute, nextRoute: HudRoute): void;
   onLogin(email: string, password: string): void;
   onSignup(email: string, password: string, name: string): void;
   onLogout(): void;
@@ -203,8 +203,10 @@ export class ARHud {
   private readonly router: HashRouter;
   private readonly appShell: ApplicationShell;
   private readonly routeRestoring: HTMLElement;
+  private readonly routeViews: HTMLElement[] = [];
   private authResolved: boolean;
   private pendingRoute: HudRoute | null = null;
+  private pendingAuthMessage: string | null = null;
 
   constructor(
     root: HTMLElement,
@@ -624,8 +626,8 @@ export class ARHud {
         <span>Object to extract</span>
         <input name="targetObject" type="text" autocomplete="off" placeholder="Optional, e.g. laptop">
       </label>
-      <p class="camera-status">Start the camera, capture an image, then generate a 3D model.</p>
-      <p class="generated-model-status">Generated model: None yet</p>
+      <p class="camera-status">${ROUTES.camera.initialStatus}</p>
+      <p class="generated-model-status">No model generated yet.</p>
     `;
     this.cameraPreviewVideo = cameraPanel.querySelector<HTMLVideoElement>('.camera-preview')!;
     this.cameraPreviewImage = cameraPanel.querySelector<HTMLImageElement>('img.camera-preview')!;
@@ -656,12 +658,12 @@ export class ARHud {
     cameraActions.className = 'camera-actions';
     this.cameraActions = cameraActions;
     this.captureButton = this.createButton('Capture', '', () => this.handleCaptureClick());
-    this.submitButton = this.createButton('Submit', '', () => this.handleSubmitClick());
+    this.submitButton = this.createButton('Extract object', '', () => this.handleSubmitClick());
     this.submitButton.classList.add('hidden');
     this.submitButton.disabled = true;
-    this.generateButton = this.createButton('Generate 3D', 'primary', () => this.handleGenerateClick());
+    this.generateButton = this.createButton('Generate model', 'primary', () => this.handleGenerateClick());
     this.generateButton.disabled = true;
-    this.storeModelButton = this.createButton('Store Model', 'primary', this.handlers.onStoreUploadedModel);
+    this.storeModelButton = this.createButton('Upload model', 'primary', this.handlers.onStoreUploadedModel);
     this.storeModelButton.classList.add('hidden');
     this.storeModelButton.disabled = true;
     cameraActions.append(this.captureButton, this.submitButton, this.generateButton, this.storeModelButton);
@@ -731,6 +733,14 @@ export class ARHud {
       <p>Restoring your session...</p>
     `;
     shell.appendChild(this.routeRestoring);
+    this.routeViews.push(
+      this.landing,
+      this.authPanel,
+      this.adminDashboard,
+      this.speechPanel,
+      this.modelManager,
+      this.layoutManager,
+    );
 
     this.update('loading', 'Loading model...');
     this.router.start((route) => this.applyRoute(route));
@@ -810,17 +820,7 @@ export class ARHud {
   }
 
   showMultiObjectEditor(): void {
-    this.activeRoute = 'multi-object';
-    if (window.location.hash !== '#/multi-object') {
-      window.location.hash = '#/multi-object';
-    }
     this.closeModelPreviewIfOpen();
-    this.landing.classList.add('hidden');
-    this.authPanel.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('layout-active');
     this.statusPanel.classList.remove('camera-active', 'ar-picker-active', 'full-flow-active');
@@ -1028,8 +1028,12 @@ export class ARHud {
     this.speechGenerateButton.disabled = this.speechTranscriptMessage.textContent === 'No speech recorded yet.';
   }
 
-  showLiveCameraPreview(): void {
-    this.cameraLabel.textContent = 'Camera';
+  showLiveCameraPreview(route: 'camera' | 'full-flow' | 'dynamic' = 'camera'): void {
+    const meta = ROUTES[route];
+    this.cameraLabel.textContent = meta.title;
+    this.cameraStatusMessage.textContent = meta.initialStatus;
+    this.cameraStatusMessage.classList.remove('is-ready', 'is-error');
+    this.generatedModelMessage.textContent = 'No model generated yet.';
     this.uploadImageField.classList.add('hidden');
     this.uploadImageInput.value = '';
     this.uploadModelField.classList.add('hidden');
@@ -1054,7 +1058,8 @@ export class ARHud {
   }
 
   showUploadImagePicker(): void {
-    this.cameraLabel.textContent = 'Upload Image';
+    const meta = ROUTES.upload;
+    this.cameraLabel.textContent = meta.title;
     this.cameraPreviewVideo.classList.add('hidden');
     this.cameraPreviewImage.classList.add('hidden');
     this.cameraPreviewImage.removeAttribute('src');
@@ -1076,11 +1081,13 @@ export class ARHud {
     this.generateButton.disabled = true;
     this.storeModelButton.classList.add('hidden');
     this.storeModelButton.disabled = true;
-    this.updateCameraStatus('Upload an image to create a 3D model.', false);
+    this.generatedModelMessage.textContent = 'No model generated yet.';
+    this.updateCameraStatus(meta.initialStatus, false);
   }
 
   showUploadModelPicker(): void {
-    this.cameraLabel.textContent = 'Upload Model';
+    const meta = ROUTES['upload-model'];
+    this.cameraLabel.textContent = meta.title;
     this.cameraPreviewVideo.classList.add('hidden');
     this.cameraPreviewImage.classList.add('hidden');
     this.cameraPreviewImage.removeAttribute('src');
@@ -1101,7 +1108,7 @@ export class ARHud {
     this.storeModelButton.classList.remove('hidden');
     this.storeModelButton.disabled = true;
     this.generatedModelMessage.classList.add('hidden');
-    this.updateUploadModelStatus('Choose a .glb model, then store it for AR View and Models.', false);
+    this.updateUploadModelStatus(meta.initialStatus, false);
   }
 
   showCapturedImagePreview(imageUrl: string): void {
@@ -1302,10 +1309,7 @@ export class ARHud {
   }
 
   showFullFlowReady(message: string, modelOption?: ModelOption): void {
-    if (window.location.hash !== '#/ar') {
-      window.location.hash = '#/ar';
-    }
-    this.activeRoute = 'ar';
+    this.navigateTo('ar', 'replace');
     this.arPlacementStarted = true;
     this.openARPage();
     if (modelOption) {
@@ -1340,13 +1344,12 @@ export class ARHud {
   }
 
   private redirectToLogin(message: string): void {
-    const previousRoute = this.activeRoute;
-    this.activeRoute = 'login';
-    this.router.navigate('login', 'replace');
-    this.openAuthPage(message);
-    if (previousRoute && previousRoute !== 'home' && previousRoute !== 'login') {
-      this.handlers.onReturnHome();
+    this.pendingAuthMessage = message;
+    if (this.activeRoute === 'login') {
+      this.showAuthMessage(message, false);
+      return;
     }
+    this.router.navigate('login', 'replace');
   }
 
   private loginMessageForRoute(route: HudRoute): string {
@@ -1392,6 +1395,7 @@ export class ARHud {
 
     const previousRoute = this.activeRoute;
     this.activeRoute = route;
+    this.prepareRoute(route, previousRoute);
 
     if (route === 'camera') {
       this.openCameraPage();
@@ -1439,7 +1443,10 @@ export class ARHud {
     }
 
     if (route === 'login') {
-      this.openAuthPage();
+      const message = this.pendingAuthMessage
+        ?? 'Sign in with an approved account, or create one for admin approval.';
+      this.pendingAuthMessage = null;
+      this.openAuthPage(message);
       return;
     }
 
@@ -1448,98 +1455,76 @@ export class ARHud {
       return;
     }
 
-    this.openHomePage(previousRoute);
+    this.openHomePage();
   }
 
   private showRestoringRoute(): void {
     this.appShell.setRestoring(true);
-    this.landing.classList.add('hidden');
-    this.authPanel.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.add('hidden');
-    this.statusPanel.classList.add('hidden');
-    this.hudActions.classList.add('hidden');
-    this.modelRail.classList.add('hidden');
-    this.arModelPicker.classList.add('hidden');
-    this.gestureSurface.classList.add('hidden');
-    this.cameraPanel.classList.add('hidden');
-    this.fullFlowLoading.classList.add('hidden');
+    this.hideAllRouteViews();
+    this.resetImmersiveState();
     this.routeRestoring.classList.remove('hidden');
   }
 
-  private openHomePage(previousRoute: HudRoute | null): void {
-    this.closeModelPreviewIfOpen();
-    this.clearFullFlowModelOption();
-    this.arPlacementStarted = false;
-    this.landing.classList.remove('hidden');
-    this.authPanel.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.add('hidden');
+  private hideAllRouteViews(): void {
+    for (const view of this.routeViews) {
+      view.classList.add('hidden');
+    }
+    this.routeRestoring.classList.add('hidden');
     this.statusPanel.classList.add('hidden');
-    this.statusPanel.classList.remove('camera-active');
-    this.statusPanel.classList.remove('ar-picker-active');
-    this.statusPanel.classList.remove('full-flow-active');
-    this.statusPanel.classList.remove('layout-active');
     this.hudActions.classList.add('hidden');
-    this.showLayoutActionButtons(false);
     this.modelRail.classList.add('hidden');
     this.arModelPicker.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.add('hidden');
-    this.cameraPanel.classList.remove('fullscreen');
     this.fullFlowLoading.classList.add('hidden');
+  }
 
-    if (previousRoute !== null && previousRoute !== 'home') {
-      this.handlers.onReturnHome();
+  private resetImmersiveState(): void {
+    this.statusPanel.classList.remove(
+      'camera-active',
+      'ar-picker-active',
+      'full-flow-active',
+      'layout-active',
+      'object-placed',
+    );
+    this.cameraPanel.classList.remove('fullscreen');
+    this.showLayoutActionButtons(false);
+  }
+
+  private prepareRoute(route: HudRoute, previousRoute: HudRoute | null): void {
+    if (previousRoute && previousRoute !== 'home' && previousRoute !== route) {
+      this.handlers.onRouteExit(previousRoute, route);
+    }
+    this.closeModelPreviewIfOpen();
+    this.hideAllRouteViews();
+    this.resetImmersiveState();
+    this.appShell.setRoute(route);
+    this.routeRestoring.classList.add('hidden');
+    this.clearFullFlowModelOption();
+    if (route !== 'ar') {
+      this.arPlacementStarted = false;
     }
   }
 
+  private enterPage(element: HTMLElement): void {
+    element.classList.remove('hidden');
+  }
+
+  private openHomePage(): void {
+    this.enterPage(this.landing);
+  }
+
   private openCameraPage(): void {
-    this.closeModelPreviewIfOpen();
-    this.clearFullFlowModelOption();
-    this.arPlacementStarted = false;
-    this.landing.classList.add('hidden');
-    this.authPanel.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active');
-    this.statusPanel.classList.remove('ar-picker-active');
-    this.statusPanel.classList.remove('full-flow-active');
-    this.statusPanel.classList.remove('layout-active');
-    this.hudActions.classList.add('hidden');
-    this.showLayoutActionButtons(false);
-    this.modelRail.classList.add('hidden');
-    this.arModelPicker.classList.add('hidden');
-    this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
-    this.fullFlowLoading.classList.add('hidden');
-    this.showLiveCameraPreview();
+    this.showLiveCameraPreview('camera');
     this.handlers.onStartCamera();
   }
 
   private openARPage(): void {
-    this.closeModelPreviewIfOpen();
-    this.landing.classList.add('hidden');
-    this.authPanel.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
-    this.statusPanel.classList.remove('camera-active');
-    this.statusPanel.classList.remove('full-flow-active');
-    this.statusPanel.classList.remove('layout-active');
-    this.cameraPanel.classList.add('hidden');
-    this.cameraPanel.classList.remove('fullscreen');
-    this.fullFlowLoading.classList.add('hidden');
     if (this.arPlacementStarted) {
       this.showARPlacementControls();
       return;
@@ -1549,209 +1534,57 @@ export class ARHud {
   }
 
   private openFullFlowPage(): void {
-    this.closeModelPreviewIfOpen();
-    this.clearFullFlowModelOption();
-    this.arPlacementStarted = false;
-    this.landing.classList.add('hidden');
-    this.authPanel.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active', 'full-flow-active');
-    this.statusPanel.classList.remove('ar-picker-active');
-    this.statusPanel.classList.remove('layout-active');
-    this.hudActions.classList.add('hidden');
-    this.showLayoutActionButtons(false);
-    this.modelRail.classList.add('hidden');
-    this.arModelPicker.classList.add('hidden');
-    this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
-    this.fullFlowLoading.classList.add('hidden');
-    this.showLiveCameraPreview();
-    this.updateCameraStatus('Capture an image to build and place a 3D object.', false);
+    this.showLiveCameraPreview('full-flow');
     this.handlers.onStartCamera();
   }
 
   private openDynamicPage(): void {
-    this.closeModelPreviewIfOpen();
-    this.clearFullFlowModelOption();
-    this.arPlacementStarted = false;
-    this.landing.classList.add('hidden');
-    this.authPanel.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active', 'full-flow-active');
-    this.statusPanel.classList.remove('ar-picker-active');
-    this.statusPanel.classList.remove('layout-active');
-    this.hudActions.classList.add('hidden');
-    this.showLayoutActionButtons(false);
-    this.modelRail.classList.add('hidden');
-    this.arModelPicker.classList.add('hidden');
-    this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
-    this.fullFlowLoading.classList.add('hidden');
-    this.showLiveCameraPreview();
-    this.updateCameraStatus('Capture an image to generate a dynamic image and 3D object.', false);
+    this.showLiveCameraPreview('dynamic');
     this.handlers.onStartCamera();
   }
 
   private openSpeechPage(): void {
-    this.closeModelPreviewIfOpen();
-    this.clearFullFlowModelOption();
-    this.arPlacementStarted = false;
-    this.landing.classList.add('hidden');
-    this.authPanel.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.remove('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.add('hidden');
-    this.statusPanel.classList.add('hidden');
-    this.statusPanel.classList.remove('camera-active', 'ar-picker-active', 'full-flow-active', 'layout-active');
-    this.hudActions.classList.add('hidden');
-    this.showLayoutActionButtons(false);
-    this.modelRail.classList.add('hidden');
-    this.arModelPicker.classList.add('hidden');
-    this.gestureSurface.classList.add('hidden');
-    this.cameraPanel.classList.add('hidden');
-    this.cameraPanel.classList.remove('fullscreen');
-    this.fullFlowLoading.classList.add('hidden');
+    this.enterPage(this.speechPanel);
     this.showSpeechReady();
   }
 
   private openUploadPage(): void {
-    this.closeModelPreviewIfOpen();
-    this.clearFullFlowModelOption();
-    this.arPlacementStarted = false;
-    this.landing.classList.add('hidden');
-    this.authPanel.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active');
-    this.statusPanel.classList.remove('ar-picker-active');
-    this.statusPanel.classList.remove('full-flow-active');
-    this.statusPanel.classList.remove('layout-active');
-    this.hudActions.classList.add('hidden');
-    this.showLayoutActionButtons(false);
-    this.modelRail.classList.add('hidden');
-    this.arModelPicker.classList.add('hidden');
-    this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
-    this.fullFlowLoading.classList.add('hidden');
     this.showUploadImagePicker();
   }
 
   private openUploadModelPage(): void {
-    this.closeModelPreviewIfOpen();
-    this.clearFullFlowModelOption();
-    this.arPlacementStarted = false;
-    this.landing.classList.add('hidden');
-    this.authPanel.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('camera-active');
-    this.statusPanel.classList.remove('ar-picker-active');
-    this.statusPanel.classList.remove('full-flow-active');
-    this.statusPanel.classList.remove('layout-active');
-    this.hudActions.classList.add('hidden');
-    this.showLayoutActionButtons(false);
-    this.modelRail.classList.add('hidden');
-    this.arModelPicker.classList.add('hidden');
-    this.gestureSurface.classList.add('hidden');
     this.cameraPanel.classList.remove('hidden');
     this.cameraPanel.classList.add('fullscreen');
-    this.fullFlowLoading.classList.add('hidden');
     this.showUploadModelPicker();
   }
 
   private openModelManagerPage(): void {
-    this.clearFullFlowModelOption();
-    this.arPlacementStarted = false;
-    this.landing.classList.add('hidden');
-    this.authPanel.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.modelManager.classList.remove('hidden');
-    this.layoutManager.classList.add('hidden');
-    this.statusPanel.classList.add('hidden');
-    this.statusPanel.classList.remove('camera-active');
-    this.statusPanel.classList.remove('ar-picker-active');
-    this.statusPanel.classList.remove('full-flow-active');
-    this.statusPanel.classList.remove('layout-active');
-    this.hudActions.classList.add('hidden');
-    this.showLayoutActionButtons(false);
-    this.modelRail.classList.add('hidden');
-    this.arModelPicker.classList.add('hidden');
-    this.gestureSurface.classList.add('hidden');
-    this.cameraPanel.classList.add('hidden');
-    this.cameraPanel.classList.remove('fullscreen');
-    this.fullFlowLoading.classList.add('hidden');
+    this.enterPage(this.modelManager);
     this.renderModelManagerList();
   }
 
   private openAuthPage(message = 'Sign in with an approved account, or create one for admin approval.'): void {
-    this.closeModelPreviewIfOpen();
-    this.clearFullFlowModelOption();
-    this.arPlacementStarted = false;
-    this.landing.classList.add('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.add('hidden');
-    this.adminDashboard.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.authPanel.classList.remove('hidden');
-    this.statusPanel.classList.add('hidden');
-    this.statusPanel.classList.remove('camera-active');
-    this.statusPanel.classList.remove('ar-picker-active');
-    this.statusPanel.classList.remove('full-flow-active');
-    this.statusPanel.classList.remove('layout-active');
-    this.hudActions.classList.add('hidden');
-    this.showLayoutActionButtons(false);
-    this.modelRail.classList.add('hidden');
-    this.arModelPicker.classList.add('hidden');
-    this.gestureSurface.classList.add('hidden');
-    this.cameraPanel.classList.add('hidden');
-    this.cameraPanel.classList.remove('fullscreen');
-    this.fullFlowLoading.classList.add('hidden');
+    this.enterPage(this.authPanel);
     this.setAuthFormMode('login');
     this.showAuthMessage(message, false);
   }
 
   private openAdminDashboardPage(): void {
-    this.closeModelPreviewIfOpen();
-    this.clearFullFlowModelOption();
-    this.arPlacementStarted = false;
-    this.landing.classList.add('hidden');
-    this.modelManager.classList.add('hidden');
-    this.layoutManager.classList.add('hidden');
-    this.authPanel.classList.add('hidden');
-    this.speechPanel.classList.add('hidden');
-    this.adminDashboard.classList.remove('hidden');
-    this.statusPanel.classList.add('hidden');
-    this.statusPanel.classList.remove('camera-active');
-    this.statusPanel.classList.remove('ar-picker-active');
-    this.statusPanel.classList.remove('full-flow-active');
-    this.statusPanel.classList.remove('layout-active');
-    this.hudActions.classList.add('hidden');
-    this.showLayoutActionButtons(false);
-    this.modelRail.classList.add('hidden');
-    this.arModelPicker.classList.add('hidden');
-    this.gestureSurface.classList.add('hidden');
-    this.cameraPanel.classList.add('hidden');
-    this.cameraPanel.classList.remove('fullscreen');
-    this.fullFlowLoading.classList.add('hidden');
+    this.enterPage(this.adminDashboard);
     this.renderAdminAccounts();
     this.renderAdminJobs();
     this.handlers.onRefreshAdminAccounts();
@@ -2739,7 +2572,9 @@ export class ARHud {
   }
 
   private generationButtonLabel(): string {
-    return this.activeRoute === 'full-flow' || this.activeRoute === 'dynamic' ? 'Generate and Place' : 'Generate 3D';
+    return this.activeRoute === 'full-flow' || this.activeRoute === 'dynamic'
+      ? 'Generate and place'
+      : 'Generate model';
   }
 
   private startAttachedARCamera(): void {
