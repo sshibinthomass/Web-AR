@@ -178,8 +178,8 @@ describe('WebARApp route restoration', () => {
 
   it('clears the visible session immediately while remote logout is pending', async () => {
     let resolveRemoteLogout: () => void = () => undefined;
-    authMocks.logout.mockReturnValue(new Promise<void>((resolve) => {
-      resolveRemoteLogout = resolve;
+    authMocks.logout.mockReturnValue(new Promise<undefined>((resolve) => {
+      resolveRemoteLogout = () => resolve(undefined);
     }));
     authMocks.getCurrentUser.mockResolvedValue(activeUser);
     const root = document.createElement('div');
