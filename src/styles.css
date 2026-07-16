@@ -371,6 +371,7 @@ h3 {
 }
 
 .mobile-top-bar .route-back {
+  grid-column: 1;
   justify-self: start;
 }
 
@@ -386,6 +387,7 @@ h3 {
 }
 
 .mobile-route-title {
+  grid-column: 2;
   overflow: hidden;
   font-family: var(--font-display);
   text-align: center;
@@ -483,6 +485,7 @@ h3 {
 }
 
 .mobile-account-link {
+  grid-column: 3;
   justify-self: end;
   width: 100%;
 }

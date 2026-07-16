@@ -97,6 +97,18 @@ describe('application design system', () => {
       'grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);',
     );
     expect(styles).toContain(
+      '.mobile-top-bar .route-back {\n' +
+      '  grid-column: 1;',
+    );
+    expect(styles).toContain(
+      '.mobile-route-title {\n' +
+      '  grid-column: 2;',
+    );
+    expect(styles).toContain(
+      '.mobile-account-link {\n' +
+      '  grid-column: 3;',
+    );
+    expect(styles).toContain(
       '  .account-menu {\n' +
       '    top: calc(56px + env(safe-area-inset-top) + 8px);',
     );
