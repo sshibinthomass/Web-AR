@@ -24,5 +24,19 @@
       "binding": "MODEL_BUCKET",
       "bucket_name": "web-ar-model-assets"
     }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MUTATION_COORDINATOR",
+        "class_name": "MutationCoordinator"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["MutationCoordinator"]
+    }
   ]
 }

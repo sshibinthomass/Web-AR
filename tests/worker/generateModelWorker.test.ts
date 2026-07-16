@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import worker, { handleGenerateModelRequest, handleScheduledPendingJobs, type WorkerEnv } from '../../worker/src/index';
+import worker, {
+  handleGenerateModelRequest,
+  handleScheduledPendingJobs,
+  MutationCoordinator,
+  type DurableObjectNamespace,
+  type WorkerEnv,
+} from '../../worker/src/index';
 
 function createEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
   return {
@@ -17,7 +23,41 @@ function createEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
     OPENAI_API_KEY: 'openai-key',
     PUBLIC_MODEL_ORIGIN: 'https://web-ar-model-assets.pages.dev',
     MODEL_BUCKET: createMemoryBucket().bucket,
+    MUTATION_COORDINATOR: createMemoryMutationCoordinatorNamespace(),
     ...overrides,
+  };
+}
+
+function createMemoryMutationCoordinatorNamespace(): DurableObjectNamespace {
+  const coordinators = new Map<string, MutationCoordinator>();
+  return {
+    idFromName: (name: string) => name,
+    get: (id: unknown) => {
+      const key = String(id);
+      let coordinator = coordinators.get(key);
+      if (!coordinator) {
+        const values = new Map<string, unknown>();
+        let queue = Promise.resolve();
+        coordinator = new MutationCoordinator({
+          storage: {
+            get: async <T>(storageKey: string) => values.get(storageKey) as T | undefined,
+            put: async (storageKey: string, value: unknown) => {
+              values.set(storageKey, value);
+            },
+            delete: async (storageKey: string) => {
+              values.delete(storageKey);
+            },
+          },
+          blockConcurrencyWhile: <T>(operation: () => Promise<T>) => {
+            const result = queue.then(operation);
+            queue = result.then(() => undefined, () => undefined);
+            return result;
+          },
+        });
+        coordinators.set(key, coordinator);
+      }
+      return coordinator;
+    },
   };
 }
 
@@ -173,6 +213,80 @@ async function createApprovedUserToken(
 }
 
 describe('handleGenerateModelRequest', () => {
+  it('fails closed when the auth mutation coordinator binding is missing', async () => {
+    const response = await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'maker@example.com',
+          password: 'maker-password-123',
+          name: 'Maker',
+        }),
+      }),
+      createEnv({ MUTATION_COORDINATOR: undefined }),
+      { fetch: vi.fn(), now: () => new Date('2026-07-16T12:00:00Z') },
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: 'Secure mutation coordination is unavailable.',
+    });
+  });
+
+  it('does not trust an admin role stored on a non-configured account', async () => {
+    const { bucket, objects } = createMemoryBucket();
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-16T12:00:00Z') };
+    await createAdminToken(env, deps);
+    await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'impostor@example.com',
+          password: 'impostor-password-123',
+          name: 'Impostor',
+        }),
+      }),
+      env,
+      deps,
+    );
+    const usersIndex = JSON.parse(objects.get('auth/users/index.json') as string) as {
+      users: Array<{ email: string; role: string; status: string }>;
+    };
+    const impostor = usersIndex.users.find((user) => user.email === 'impostor@example.com');
+    if (!impostor) {
+      throw new Error('Test account was not stored.');
+    }
+    impostor.role = 'admin';
+    impostor.status = 'active';
+    objects.set('auth/users/index.json', JSON.stringify(usersIndex));
+
+    const loginResponse = await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'impostor@example.com',
+          password: 'impostor-password-123',
+        }),
+      }),
+      env,
+      deps,
+    );
+    const loginBody = await loginResponse.json() as { token?: string };
+    const response = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/users'), loginBody.token ?? ''),
+      env,
+      deps,
+    );
+
+    expect(loginResponse.status).toBe(200);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: 'Admin access required.' });
+  });
+
   it('creates the requested admin account as active and returns a reusable session', async () => {
     const { bucket } = createMemoryBucket();
     const env = createEnv({ MODEL_BUCKET: bucket });
@@ -3253,16 +3367,25 @@ describe('handleGenerateModelRequest', () => {
     expect(response.headers.get('Vary')).toBe('Origin');
   });
 
-  it('allows the local 5182 Vite origin by default for local visual checks', async () => {
-    const response = await handleGenerateModelRequest(
-      new Request('https://worker.example/generate-3d/models', {
-        headers: { Origin: 'http://127.0.0.1:5182' },
-      }),
-      createEnv(),
-      { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') },
-    );
+  it('allows local Vite loopback origins by default for visual checks', async () => {
+    const origins = [
+      'http://127.0.0.1:5178',
+      'http://localhost:5178',
+      'http://127.0.0.1:5182',
+      'http://localhost:5182',
+    ];
 
-    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('http://127.0.0.1:5182');
-    expect(response.headers.get('Vary')).toBe('Origin');
+    for (const origin of origins) {
+      const response = await handleGenerateModelRequest(
+        new Request('https://worker.example/generate-3d/models', {
+          headers: { Origin: origin },
+        }),
+        createEnv(),
+        { fetch: vi.fn(), now: () => new Date('2026-07-04T12:00:00Z') },
+      );
+
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBe(origin);
+      expect(response.headers.get('Vary')).toBe('Origin');
+    }
   });
 });

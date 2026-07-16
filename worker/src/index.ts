@@ -17,6 +17,7 @@ export interface WorkerEnv {
   AUTH_SECRET: string;
   ADMIN_EMAIL?: string;
   ALLOWED_ORIGINS?: string;
+  MUTATION_COORDINATOR?: DurableObjectNamespace;
   MODAL_KEY: string;
   MODAL_SECRET: string;
   MODAL_IMAGE_TO_3D_URL: string;
@@ -41,6 +42,89 @@ interface ScheduledEvent {
 
 interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
+}
+
+export interface DurableObjectNamespace {
+  idFromName(name: string): unknown;
+  get(id: unknown): {
+    fetch(request: Request): Promise<Response>;
+  };
+}
+
+export interface DurableObjectState {
+  storage: {
+    get<T>(key: string): Promise<T | undefined>;
+    put(key: string, value: unknown): Promise<void>;
+    delete(key: string): Promise<void>;
+  };
+  blockConcurrencyWhile<T>(operation: () => Promise<T>): Promise<T>;
+}
+
+type MutationLeaseRequest =
+  | { action: 'acquire'; leaseId: string; ttlMs: number }
+  | { action: 'release'; leaseId: string };
+
+export class MutationCoordinator {
+  constructor(private readonly state: DurableObjectState) {}
+
+  async fetch(request: Request): Promise<Response> {
+    if (request.method !== 'POST') {
+      return mutationCoordinatorResponse({ error: 'Only POST requests are supported.' }, 405);
+    }
+
+    let body: MutationLeaseRequest;
+    try {
+      body = await request.json() as MutationLeaseRequest;
+    } catch {
+      return mutationCoordinatorResponse({ error: 'Request body must be valid JSON.' }, 400);
+    }
+    if (!body || (body.action !== 'acquire' && body.action !== 'release') || !validLeaseId(body.leaseId)) {
+      return mutationCoordinatorResponse({ error: 'Valid mutation lease fields are required.' }, 400);
+    }
+
+    return this.state.blockConcurrencyWhile(async () => {
+      const activeLeaseId = await this.state.storage.get<string>('lease_id');
+      const expiresAt = await this.state.storage.get<number>('lease_expires_at') ?? 0;
+      const now = Date.now();
+      const leaseActive = Boolean(activeLeaseId && expiresAt > now);
+
+      if (body.action === 'release') {
+        if (!leaseActive || activeLeaseId !== body.leaseId) {
+          return mutationCoordinatorResponse({ released: false }, 409);
+        }
+        await Promise.all([
+          this.state.storage.delete('lease_id'),
+          this.state.storage.delete('lease_expires_at'),
+        ]);
+        return mutationCoordinatorResponse({ released: true });
+      }
+
+      if (!Number.isFinite(body.ttlMs) || body.ttlMs <= 0) {
+        return mutationCoordinatorResponse({ error: 'ttlMs must be a positive number.' }, 400);
+      }
+      if (leaseActive && activeLeaseId !== body.leaseId) {
+        return mutationCoordinatorResponse({ acquired: false }, 409);
+      }
+
+      const ttlMs = Math.min(30_000, Math.max(1000, Math.trunc(body.ttlMs)));
+      await Promise.all([
+        this.state.storage.put('lease_id', body.leaseId),
+        this.state.storage.put('lease_expires_at', now + ttlMs),
+      ]);
+      return mutationCoordinatorResponse({ acquired: true });
+    });
+  }
+}
+
+function mutationCoordinatorResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function validLeaseId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,120}$/.test(value);
 }
 
 interface GenerateModelDeps {
@@ -371,6 +455,7 @@ const defaultAllowedOrigins = [
   'http://127.0.0.1:5182',
   'http://localhost:5182',
 ];
+const localDevelopmentHostnames = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const passwordHashIterations = 100_000;
 const sessionLifetimeSeconds = 60 * 60 * 24 * 7;
 
@@ -1205,11 +1290,6 @@ async function handleSignupRequest(request: Request, env: WorkerEnv, deps: Gener
     return jsonResponse({ error: 'Password must be at least 8 characters.' }, 400);
   }
 
-  const index = await readUsersIndex(env);
-  if (index.users.some((user) => user.email === email)) {
-    return jsonResponse({ error: 'Account already exists.' }, 409);
-  }
-
   const now = deps.now();
   const isAdmin = email === getAdminEmail(env);
   const salt = randomBase64UrlBytes(16);
@@ -1226,19 +1306,25 @@ async function handleSignupRequest(request: Request, env: WorkerEnv, deps: Gener
     approved_by: isAdmin ? email : undefined,
   };
 
-  await writeUsersIndex(env, { users: [...index.users, user] });
+  return withMutationLease(env, 'auth', async () => {
+    const index = await readUsersIndex(env);
+    if (index.users.some((storedUser) => storedUser.email === email)) {
+      return jsonResponse({ error: 'Account already exists.' }, 409);
+    }
+    await writeUsersIndex(env, { users: [...index.users, user] });
 
-  if (user.status !== 'active') {
-    return jsonResponse({ user: toPublicUser(user) }, 201);
-  }
+    if (user.status !== 'active') {
+      return jsonResponse({ user: toPublicUser(user) }, 201);
+    }
 
-  return jsonResponse(
-    {
-      user: toPublicUser(user),
-      token: await createSessionToken(user, env, now),
-    },
-    201,
-  );
+    return jsonResponse(
+      {
+        user: toPublicUser(user),
+        token: await createSessionToken(user, env, now),
+      },
+      201,
+    );
+  });
 }
 
 async function handleLoginRequest(request: Request, env: WorkerEnv, deps: GenerateModelDeps): Promise<Response> {
@@ -3073,7 +3159,7 @@ async function requireAdminUser(
     return auth;
   }
 
-  if (auth.user.role !== 'admin') {
+  if (auth.user.role !== 'admin' || auth.user.email !== getAdminEmail(env)) {
     return jsonResponse({ error: 'Admin access required.' }, 403);
   }
 
@@ -3337,16 +3423,67 @@ function normalizeStoredImageTarget(target: ImageTargetEntry): ImageTargetEntry 
 }
 
 async function readUsersIndex(env: WorkerEnv): Promise<UsersIndex> {
-  return readJsonObject<UsersIndex>(env, usersIndexKey, { users: [] });
+  const index = await readJsonObject<UsersIndex>(env, usersIndexKey, { users: [] });
+  const adminEmail = getAdminEmail(env);
+  return {
+    users: index.users.map((user) => ({
+      ...user,
+      role: user.email === adminEmail ? 'admin' : 'user',
+    })),
+  };
 }
 
 async function writeUsersIndex(env: WorkerEnv, index: UsersIndex): Promise<void> {
+  const adminEmail = getAdminEmail(env);
   await writeJsonObject(env, usersIndexKey, {
     users: index.users.map((user) => ({
       ...user,
-      role: user.email === getAdminEmail(env) ? 'admin' : user.role,
+      role: user.email === adminEmail ? 'admin' : 'user',
     })),
   });
+}
+
+async function withMutationLease(
+  env: WorkerEnv,
+  scope: 'auth' | 'targets',
+  operation: () => Promise<Response>,
+): Promise<Response> {
+  if (!env.MUTATION_COORDINATOR) {
+    return jsonResponse({ error: 'Secure mutation coordination is unavailable.' }, 503);
+  }
+
+  const leaseId = randomBase64UrlBytes(18);
+  const stub = env.MUTATION_COORDINATOR.get(env.MUTATION_COORDINATOR.idFromName(scope));
+  let acquired = false;
+  try {
+    const acquireResponse = await stub.fetch(new Request('https://mutation-coordinator.internal/lease', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'acquire', leaseId, ttlMs: 30_000 }),
+    }));
+    if (acquireResponse.status === 409) {
+      return jsonResponse({ error: 'Another secure mutation is already in progress.' }, 409);
+    }
+    if (!acquireResponse.ok) {
+      return jsonResponse({ error: 'Secure mutation coordination is unavailable.' }, 503);
+    }
+    acquired = true;
+    return await operation();
+  } catch {
+    return jsonResponse({ error: 'Secure mutation coordination is unavailable.' }, 503);
+  } finally {
+    if (acquired) {
+      try {
+        await stub.fetch(new Request('https://mutation-coordinator.internal/lease', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'release', leaseId }),
+        }));
+      } catch {
+        // The lease expires automatically after a short timeout.
+      }
+    }
+  }
 }
 
 async function readRevokedSessionsIndex(env: WorkerEnv): Promise<RevokedSessionsIndex> {
@@ -3612,7 +3749,19 @@ function allowedCorsOrigin(env: WorkerEnv, requestOrigin: string): string | null
       .map((origin) => origin.trim().replace(/\/+$/, ''))
       .filter(Boolean) ?? defaultAllowedOrigins;
   const normalizedOrigin = requestOrigin.replace(/\/+$/, '');
-  return allowedOrigins.includes(normalizedOrigin) ? normalizedOrigin : null;
+  if (allowedOrigins.includes(normalizedOrigin) || isLocalDevelopmentOrigin(normalizedOrigin)) {
+    return normalizedOrigin;
+  }
+  return null;
+}
+
+function isLocalDevelopmentOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && localDevelopmentHostnames.has(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function appendVaryOrigin(value: string | null): string {
