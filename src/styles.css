@@ -304,12 +304,31 @@ h3 {
   justify-content: flex-end;
 }
 
-.shell-identity {
+.account-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.desktop-account-trigger {
   max-width: 220px;
+}
+
+.account-trigger-label {
   overflow: hidden;
-  color: var(--color-ink-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.account-status-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-teal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-teal) 14%, transparent);
 }
 
 .route-bar {
@@ -457,6 +476,77 @@ h3 {
   width: 100%;
   justify-content: flex-start;
   text-align: left;
+}
+
+.account-menu {
+  position: fixed;
+  top: 64px;
+  right: max(16px, calc((100vw - var(--content-max)) / 2));
+  z-index: 75;
+  display: grid;
+  gap: 6px;
+  width: min(320px, calc(100vw - 24px));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  padding: 10px;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.account-menu-identity {
+  display: grid;
+  gap: 3px;
+  padding: 10px 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.account-menu-name {
+  overflow: hidden;
+  font-family: var(--font-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu-email {
+  overflow-wrap: anywhere;
+  color: var(--color-ink-muted);
+  font-size: 13px;
+}
+
+.account-menu button {
+  width: 100%;
+  min-height: 44px;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.account-menu button:hover {
+  color: var(--color-teal-deep);
+  background: color-mix(in srgb, var(--color-teal) 9%, transparent);
+}
+
+.account-menu-logout {
+  color: var(--color-error);
+}
+
+.session-notice {
+  position: fixed;
+  top: 84px;
+  left: 50%;
+  z-index: 74;
+  width: min(440px, calc(100vw - 24px));
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--color-teal) 28%, var(--color-border));
+  border-radius: var(--radius-control);
+  padding: 12px 16px;
+  color: var(--color-teal-deep);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-panel);
+  font-weight: 700;
+  text-align: center;
 }
 
 .status-panel {
@@ -3117,6 +3207,21 @@ h3 {
     left: 16px;
     width: auto;
   }
+
+  .account-menu {
+    top: calc(56px + env(safe-area-inset-top) + 8px);
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+
+  .mobile-account-link {
+    max-width: min(34vw, 150px);
+  }
+
+  .session-notice {
+    top: calc(56px + env(safe-area-inset-top) + 8px);
+  }
 }
 
 @media (min-width: 768px) and (max-width: 1023px) {
@@ -3138,6 +3243,21 @@ h3 {
   .create-menu {
     right: 24px;
     bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+
+  .account-menu {
+    top: calc(56px + env(safe-area-inset-top) + 8px);
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+
+  .mobile-account-link {
+    max-width: min(34vw, 150px);
+  }
+
+  .session-notice {
+    top: calc(56px + env(safe-area-inset-top) + 8px);
   }
 }
 

@@ -84,4 +84,22 @@ describe('application design system', () => {
       '    grid-template-columns: 1fr;',
     );
   });
+
+  it('keeps the responsive signed-in account menu visible, touchable, and above page content', () => {
+    expect(styles).toContain('.account-menu-trigger {');
+    expect(styles).toContain('.account-status-dot {');
+    expect(styles).toContain('.account-menu {');
+    expect(styles).toContain('z-index: 75;');
+    expect(styles).toContain('.account-menu button {');
+    expect(styles).toContain('min-height: 44px;');
+    expect(styles).toContain('.session-notice {');
+    expect(styles).toContain(
+      '  .account-menu {\n' +
+      '    top: calc(56px + env(safe-area-inset-top) + 8px);',
+    );
+    expect(styles).toContain(
+      '  .mobile-account-link {\n' +
+      '    max-width: min(34vw, 150px);',
+    );
+  });
 });
