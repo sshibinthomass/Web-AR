@@ -1,3 +1,9 @@
+import '@fontsource/sora/600.css';
+import '@fontsource/sora/700.css';
+import '@fontsource/source-sans-3/400.css';
+import '@fontsource/source-sans-3/600.css';
+import '@fontsource/source-sans-3/700.css';
+import '@fontsource/ibm-plex-mono/500.css';
 import './styles.css';
 import { WebARApp } from './app/WebARApp';
 

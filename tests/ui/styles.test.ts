@@ -3,103 +3,118 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const stylesPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../src/styles.css');
-const styles = readFileSync(stylesPath, 'utf8').replace(/\r\n/g, '\n');
+const styles = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../src/styles.css'),
+  'utf8',
+).replace(/\r\n/g, '\n');
 
-function cssRule(selector: string): string {
-  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return styles.match(new RegExp(`${escapedSelector} \\{[\\s\\S]*?\\n\\}`))?.[0] ?? '';
-}
-
-function cssRulesForSelector(selector: string): string[] {
-  return [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-    .filter(([, selectorList]) => selectorList.split(',').some((candidate) => candidate.trim() === selector))
-    .map(([rule]) => rule);
-}
-
-describe('AR overlay styles', () => {
-  it('keeps the model rail close above the bottom AR controls', () => {
-    expect(styles).toContain('bottom: calc(max(18px, env(safe-area-inset-bottom)) + 118px);');
-  });
-
-  it('keeps AR action controls compact with a scrollable rotation slider', () => {
-    const hudActionsRule = cssRule('.hud-actions');
-    const chipRule = cssRule('.hud-actions button.hud-action-chip');
-    const controlRule = cssRule('.rotate-control,\n.animation-control');
-
-    expect(hudActionsRule).toContain('gap: 6px;');
-    expect(chipRule).toContain('min-height: 38px;');
-    expect(chipRule).toContain('padding: 0 10px;');
-    expect(controlRule).toContain('flex: 1 0 100%;');
-    expect(controlRule).toContain('grid-template-columns: auto minmax(0, 1fr);');
-  });
-
-  it('raises the compact model rail when Animation is visible', () => {
-    const animatedRailRule = cssRule('.model-rail.has-animation-control');
-    const itemRule = cssRule('.model-rail-item');
-    const thumbRule = cssRule('.model-rail-thumb');
-    const labelRule = cssRule('.model-rail-label');
-
-    expect(animatedRailRule).toContain(
-      'bottom: calc(max(18px, env(safe-area-inset-bottom)) + 160px);',
-    );
-    expect(itemRule).toContain('flex: 0 0 76px;');
-    expect(itemRule).toContain('grid-template-rows: 48px 2.5em;');
-    expect(itemRule).toContain('min-height: 88px;');
-    expect(thumbRule).toContain('height: 48px;');
-    expect(labelRule).toContain('font-size: 10px;');
-  });
-
-  it('uses one compact light surface for placed-object controls', () => {
-    const chipRule = cssRule('.hud-actions button.hud-action-chip');
-    const controlRule = cssRule('.rotate-control,\n.animation-control');
-    const selectRule = cssRule('.animation-control select');
-
-    expect(chipRule).toContain('min-height: 38px;');
-    expect(chipRule).toContain('padding: 0 10px;');
-    expect(chipRule).toContain('font-size: 12px;');
-    expect(controlRule).toContain('min-height: 38px;');
-    expect(controlRule).toContain('color: #102326;');
-    expect(controlRule).toContain('background: rgba(255, 255, 255, 0.86);');
-    expect(selectRule).toContain('color: #102326;');
-    expect(selectRule).toContain('background: rgba(255, 255, 255, 0.88);');
-  });
-
-  it('keeps blue download-state colors off every model rail card', () => {
-    const railSurfaceRule = cssRule('.ar-model-card,\n.model-manager-row,\n.model-rail-item');
-    const blueStatePalette = /rgba\((?:37, 99, 235|147, 197, 253|191, 219, 254)/;
-
-    expect(railSurfaceRule).toContain('color: #102326;');
-    expect(railSurfaceRule).toContain('background: rgba(255, 255, 255, 0.82);');
-
-    for (const state of ['is-not-downloaded', 'is-downloading', 'is-downloaded']) {
-      const stateRules = cssRulesForSelector(`.model-rail-item.${state}`).join('\n');
-
-      expect(stateRules).not.toMatch(blueStatePalette);
+describe('application design system', () => {
+  it('defines the approved spatial-workbench tokens', () => {
+    for (const declaration of [
+      '--color-canvas: #f4f8f7;',
+      '--color-surface: #ffffff;',
+      '--color-ink: #102f2f;',
+      '--color-teal: #0b8f87;',
+      '--color-amber: #f2a93b;',
+      '--color-error: #d85d4a;',
+      '--content-max: 1280px;',
+      '--control-height: 48px;',
+    ]) {
+      expect(styles).toContain(declaration);
     }
   });
 
-  it('keeps Place, Scale 1x, and Reset on the light HUD button surface', () => {
-    const hudButtonRule = cssRule('.model-manager-actions button,\n.hud-actions button,\n#ARButton');
-    const primaryRule = cssRule('.hud-actions button.primary');
-
-    expect(hudButtonRule).toContain('color: #102326;');
-    expect(hudButtonRule).toContain('background: rgba(255, 255, 255, 0.86);');
-    expect(primaryRule).toContain('color: #102326;');
-    expect(primaryRule).toContain('background: rgba(255, 255, 255, 0.86);');
+  it('makes semantic hidden state and keyboard focus reliable', () => {
+    expect(styles).toContain('[hidden] {\n  display: none !important;\n}');
+    expect(styles).toContain(':focus-visible');
+    expect(styles).toContain('outline: 3px solid var(--color-focus);');
   });
 
-  it('keeps the AR model search controls in the page flow above model cards', () => {
-    const pickerRule = cssRule('.ar-model-picker');
-    const controlsRule = cssRule('.ar-model-picker .model-library-controls');
+  it('defines separate mobile, intermediate, and desktop behavior', () => {
+    expect(styles).toContain('@media (max-width: 767px)');
+    expect(styles).toContain('@media (min-width: 768px) and (max-width: 1023px)');
+    expect(styles).toContain('@media (min-width: 1024px)');
+  });
 
-    expect(pickerRule).toContain(
-      'padding: calc(max(18px, env(safe-area-inset-top)) + 72px) 20px calc(max(18px, env(safe-area-inset-bottom)) + 104px);',
+  it('honors reduced motion and mobile safe areas', () => {
+    expect(styles).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(styles).toContain('env(safe-area-inset-bottom)');
+  });
+
+  it('defines explicit selection and mobile layouts for model collections', () => {
+    expect(styles).toContain(
+      '.ar-model-card[aria-pressed="true"],\n.model-manager-row.is-selected {',
     );
-    expect(controlsRule).not.toContain('position: fixed;');
-    expect(controlsRule).not.toContain('position: sticky;');
-    expect(controlsRule).not.toContain('transform: translateX(-50%);');
-    expect(controlsRule).toContain('width: 100%;');
-    expect(controlsRule).toContain('margin: 0 0 14px;');
+    expect(styles).toContain('.selection-label {');
+    expect(styles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(styles).toContain('grid-template-columns: repeat(3, 44px);');
+  });
+
+  it('uses one modal layer for preview, edit, and confirmation dialogs', () => {
+    expect(styles).toContain(
+      '.model-preview,\n.model-edit-dialog,\n.confirmation-dialog {',
+    );
+    expect(styles).toContain(
+      '.model-preview-panel,\n.model-edit-panel,\n.confirmation-panel {',
+    );
+    expect(styles).toContain('.confirmation-actions {');
+  });
+
+  it('separates immersive inspector, model rail, and actions across viewports', () => {
+    expect(styles).toContain('.immersive-inspector {');
+    expect(styles).toContain('.immersive-actions {');
+    expect(styles).toContain('.immersive-actions .rotate-control,');
+    expect(styles).toContain('bottom: calc(108px + env(safe-area-inset-bottom));');
+  });
+
+  it('keeps mobile account, upload, and admin controls compact and aligned', () => {
+    expect(styles).toContain('.mobile-account-link.is-concealed {');
+    expect(styles).toContain(
+      '  .app-shell[data-route="upload"] .creation-workspace.fullscreen,\n' +
+      '  .app-shell[data-route="upload-model"] .creation-workspace.fullscreen {',
+    );
+    expect(styles).toContain('grid-template-rows: auto auto;');
+    expect(styles).toContain(
+      '.admin-dashboard-section-header .admin-dashboard-actions {',
+    );
+    expect(styles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(styles).toContain(
+      '  .admin-account-row,\n' +
+      '  .admin-job-row {\n' +
+      '    grid-template-columns: 1fr;',
+    );
+  });
+
+  it('keeps the responsive signed-in account menu visible, touchable, and above page content', () => {
+    expect(styles).toContain('.account-menu-trigger {');
+    expect(styles).toContain('.account-status-dot {');
+    expect(styles).toContain('.account-menu {');
+    expect(styles).toContain('z-index: 75;');
+    expect(styles).toContain('.account-menu button {');
+    expect(styles).toContain('min-height: 44px;');
+    expect(styles).toContain('.session-notice {');
+    expect(styles).toContain(
+      'grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);',
+    );
+    expect(styles).toContain(
+      '.mobile-top-bar .route-back {\n' +
+      '  grid-column: 1;',
+    );
+    expect(styles).toContain(
+      '.mobile-route-title {\n' +
+      '  grid-column: 2;',
+    );
+    expect(styles).toContain(
+      '.mobile-account-link {\n' +
+      '  grid-column: 3;',
+    );
+    expect(styles).toContain(
+      '  .account-menu {\n' +
+      '    top: calc(56px + env(safe-area-inset-top) + 8px);',
+    );
+    expect(styles).toContain(
+      '  .mobile-account-link {\n' +
+      '    max-width: min(34vw, 150px);',
+    );
   });
 });

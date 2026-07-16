@@ -41,7 +41,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
     onPreviewLightDirectionChange: vi.fn(),
     onPreviewAnimationSelect: vi.fn(),
     onUpdateModelThumbnail: vi.fn(),
-    onReturnHome: vi.fn(),
+    onRouteExit: vi.fn(),
     onLogin: vi.fn(),
     onSignup: vi.fn(),
     onLogout: vi.fn(),
@@ -65,6 +65,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
 
 const activeUser = {
   email: 'maker@example.com',
+  name: 'Maya Stone',
   role: 'user' as const,
   status: 'active' as const,
 };
@@ -79,6 +80,7 @@ describe('ARHud', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/');
     window.localStorage.clear();
+    document.body.replaceChildren();
   });
 
   it('starts on a branded first screen with public and login-required actions grouped', () => {
@@ -92,16 +94,10 @@ describe('ARHud', () => {
     const cameraPanel = root.querySelector('.camera-panel');
     const hudActions = root.querySelector('.hud-actions');
 
-    expect(root.querySelector('.landing h1')?.textContent).toBe('Anima You 3D');
-    const landingFlow = root.querySelector('.landing-flow');
-    expect(landingFlow).not.toBeNull();
-    expect([...root.querySelectorAll('.landing-flow-step strong')].map((step) => step.textContent)).toEqual([
-      'Camera',
-      '3D Model',
-      'AR',
-    ]);
-    expect(root.textContent).toContain('Available as guest');
-    expect(root.textContent).toContain('Login required');
+    expect(root.querySelector('.landing h1')?.textContent).toBe('Make it real. Place it here.');
+    expect(root.querySelector('.landing-preview')?.classList.contains('calibration-frame')).toBe(true);
+    expect(root.textContent).toContain('Explore in AR');
+    expect(root.textContent).toContain('Create a model');
     expect(root.querySelector('.landing-preview')).not.toBeNull();
     expect(choiceButtons).toEqual([
       'Single-Object AR',
@@ -134,6 +130,138 @@ describe('ARHud', () => {
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(true);
   });
 
+  it('renders a task-first home with one primary create launcher', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+
+    expect(root.querySelector('.landing-preview')?.classList.contains('calibration-frame')).toBe(true);
+    expect(root.querySelector('.home-primary-action')?.textContent).toBe('Create a model');
+    expect(root.querySelector('.landing h1')?.textContent).toBe('Make it real. Place it here.');
+
+    root.querySelector<HTMLButtonElement>('.home-primary-action')?.click();
+    expect(root.querySelector<HTMLElement>('.create-menu')?.hidden).toBe(false);
+  });
+
+  it('removes duplicate home account actions and redirects an authenticated Login route home', () => {
+    window.history.replaceState(null, '', '/#/login');
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    expect(root.querySelector('.home-route-groups .auth-actions')).toBeNull();
+
+    hud.updateAuthState(activeUser);
+
+    expect(window.location.hash).toBe('#/');
+    expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.account-trigger-label')?.textContent).toBe('Hi, Maya Stone');
+  });
+
+  it('shows a global signed-in notice outside the login panel', () => {
+    vi.useFakeTimers();
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    hud.showSessionNotice('Welcome back, Maya Stone.');
+
+    const notice = root.querySelector<HTMLElement>('.session-notice')!;
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toBe('Welcome back, Maya Stone.');
+
+    vi.advanceTimersByTime(4500);
+    expect(notice.hidden).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('fully hides the name field in login mode and reveals it in signup mode', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+    root.querySelector<HTMLButtonElement>('.desktop-account-trigger')?.click();
+
+    const nameLabel = root.querySelector<HTMLInputElement>('input[name="authName"]')?.closest('label');
+    expect(nameLabel?.hidden).toBe(true);
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Create account')?.click();
+    expect(nameLabel?.hidden).toBe(false);
+  });
+
+  it('uses a full-width speech composer and deliberate action hierarchy', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="speech"]')?.click();
+
+    expect(root.querySelector('.speech-workspace')).not.toBeNull();
+    expect(root.querySelector('.speech-text-input')?.getAttribute('aria-describedby')).toBe('speechPromptHint');
+    expect(root.querySelector('.speech-actions button.primary')?.textContent).toBe('Generate model');
+  });
+
+  it('mounts every route inside one shared responsive application shell', () => {
+    window.history.replaceState(null, '', '/#/models');
+    const root = document.createElement('div');
+
+    new ARHud(root, modelOptions, createHandlers());
+
+    expect(root.querySelectorAll('.app-shell')).toHaveLength(1);
+    expect(root.querySelector('.app-header')).not.toBeNull();
+    expect(root.querySelector('.mobile-bottom-nav')).not.toBeNull();
+    expect(root.querySelector('.app-route-title')?.textContent).toBe('Models');
+    expect(root.querySelector('.model-manager')?.parentElement?.classList.contains('app-page-host')).toBe(true);
+    expect(root.querySelector('.xr-overlay')?.parentElement?.classList.contains('app-shell')).toBe(true);
+  });
+
+  it('delegates shared Back navigation to browser history', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+    root.querySelector<HTMLButtonElement>('.route-back')?.click();
+
+    expect(back).toHaveBeenCalledOnce();
+    back.mockRestore();
+  });
+
+  it('resets upload state when entering camera capture', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="upload"]')?.click();
+    expect(root.querySelector('.camera-status')?.textContent).toContain('Choose an image');
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="camera"]')?.click();
+    expect(root.querySelector('.camera-label')?.textContent).toBe('Camera capture');
+    expect(root.querySelector('.camera-status')?.textContent).toBe('Frame one object, then capture an image.');
+    expect(root.querySelector('.generated-model-status')?.textContent).toBe('No model generated yet.');
+  });
+
+  it('keeps camera-based workflow names distinct', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+
+    for (const [route, title] of [
+      ['camera', 'Camera capture'],
+      ['full-flow', 'Photo to AR'],
+      ['dynamic', 'AI photo to AR'],
+    ] as const) {
+      root.querySelector<HTMLButtonElement>(`[data-nav-route="${route}"]`)?.click();
+      expect(root.querySelector('.camera-label')?.textContent).toBe(title);
+      expect(root.querySelector('.immersive-title')?.textContent).toBe(title);
+    }
+  });
+
+  it('notifies the application when leaving a transient route', () => {
+    const root = document.createElement('div');
+    const onRouteExit = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onRouteExit }));
+    hud.updateAuthState(activeUser);
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="camera"]')?.click();
+    root.querySelector<HTMLButtonElement>('[data-nav-route="upload"]')?.click();
+
+    expect(onRouteExit).toHaveBeenCalledWith('camera', 'upload');
+  });
+
   it('prompts guests to sign in for protected actions while leaving AR View, Models, and Multi Object public', () => {
     const root = document.createElement('div');
     const onStartCamera = vi.fn();
@@ -150,7 +278,7 @@ describe('ARHud', () => {
 
     expect(window.location.hash).toBe('#/multi-object');
     expect(onStartMultiObject).toHaveBeenCalledTimes(1);
-    expect(root.querySelector('.layout-manager')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.layout-manager')).toBeNull();
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
 
@@ -191,9 +319,7 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Type a description or push to talk');
 
     const textInput = root.querySelector<HTMLTextAreaElement>('.speech-text-input')!;
-    const generateTextButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate from Text',
-    ) as HTMLButtonElement;
+    const generateTextButton = root.querySelector<HTMLButtonElement>('.speech-actions button.primary')!;
     expect(generateTextButton.disabled).toBe(true);
     textInput.value = 'a red modern chair';
     textInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -201,16 +327,16 @@ describe('ARHud', () => {
     generateTextButton.click();
     expect(onGenerateTextModel).toHaveBeenCalledWith('a red modern chair');
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Record')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Record description')?.click();
     expect(onStartSpeechRecording).toHaveBeenCalledTimes(1);
 
     hud.showSpeechRecording();
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Stop')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Stop recording')?.click();
     expect(onStopSpeechRecording).toHaveBeenCalledTimes(1);
 
     hud.showSpeechDetected('a red modern chair');
     const generateButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate from Voice',
+      (button) => button.textContent === 'Generate from recording',
     ) as HTMLButtonElement;
     expect(generateButton.disabled).toBe(false);
     generateButton.click();
@@ -227,9 +353,9 @@ describe('ARHud', () => {
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Text or Voice to 3D')?.click();
 
     expect(root.textContent).toContain('Input request');
-    expect(root.textContent).toContain('Preparing prompt');
-    expect(root.textContent).toContain('Generating image');
-    expect(root.textContent).toContain('Generating 3D model');
+    expect(root.textContent).toContain('Prepare request');
+    expect(root.textContent).toContain('Generate image');
+    expect(root.textContent).toContain('Generate model');
 
     hud.showSpeechRecording();
     expect(root.querySelector('.speech-visualizer')?.classList.contains('is-listening')).toBe(true);
@@ -238,7 +364,7 @@ describe('ARHud', () => {
     hud.showSpeechCaptured();
     expect(root.textContent).toContain('Audio captured. Speech will appear after detection.');
     const generateVoiceButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate from Voice',
+      (button) => button.textContent === 'Generate from recording',
     ) as HTMLButtonElement;
     expect(generateVoiceButton.disabled).toBe(false);
 
@@ -256,8 +382,8 @@ describe('ARHud', () => {
     });
 
     expect(root.querySelector('[data-speech-stage="generating_3d"]')?.classList.contains('is-active')).toBe(true);
-    expect(root.textContent).toContain('You can close this app now.');
-    expect(root.textContent).toContain('AR View');
+    expect(root.textContent).toContain('You can leave this page.');
+    expect(root.textContent).toContain('appear in Models');
   });
 
   it('submits login and account creation from the auth screen', () => {
@@ -268,12 +394,15 @@ describe('ARHud', () => {
     const nameLabel = (): HTMLLabelElement =>
       root.querySelector<HTMLInputElement>('input[name="authName"]')!.closest('label') as HTMLLabelElement;
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Login')?.click();
+    root.querySelector<HTMLButtonElement>('.desktop-account-trigger')?.click();
+    const authForm = root.querySelector<HTMLFormElement>('form.auth-panel-inner')!;
+    expect(authForm).not.toBeNull();
+    expect(root.querySelector('input[name="authPassword"]')?.closest('form')).toBe(authForm);
     expect(nameLabel().hidden).toBe(true);
 
     root.querySelector<HTMLInputElement>('input[name="authEmail"]')!.value = ' maker@example.com ';
     root.querySelector<HTMLInputElement>('input[name="authPassword"]')!.value = 'maker-password-123';
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Sign in')?.click();
+    authForm.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
 
     expect(onLogin).toHaveBeenCalledWith('maker@example.com', 'maker-password-123');
 
@@ -282,7 +411,7 @@ describe('ARHud', () => {
     expect(nameLabel().hidden).toBe(false);
 
     root.querySelector<HTMLInputElement>('input[name="authName"]')!.value = ' Maker ';
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Create account')?.click();
+    authForm.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
 
     expect(onSignup).toHaveBeenCalledWith('maker@example.com', 'maker-password-123', 'Maker');
   });
@@ -299,7 +428,8 @@ describe('ARHud', () => {
     );
 
     hud.updateAuthState(adminUser);
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Admin')?.click();
+    root.querySelector<HTMLButtonElement>('.desktop-account-trigger')?.click();
+    root.querySelector<HTMLButtonElement>('.account-menu-admin')?.click();
     hud.updateAdminAccounts([
       adminUser,
       { email: 'maker@example.com', name: 'Maker', role: 'user', status: 'pending' },
@@ -365,10 +495,18 @@ describe('ARHud', () => {
     expect(modelPicker?.classList.contains('hidden')).toBe(true);
     expect(arModelPicker?.classList.contains('hidden')).toBe(false);
     expect(modelRail?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.ar-picker-heading h2')?.textContent).toBe('Choose a model');
+    expect(root.querySelector('.ar-picker-heading p')?.textContent).toBe(
+      'Select one model, then continue to AR placement.',
+    );
     expect(modelCards.map((button) => button.dataset.modelId)).toEqual(['built-in-alpha', 'built-in-beta']);
     expect(modelCards.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Select Built-in alpha',
       'Select Built-in beta',
+    ]);
+    expect(modelCards.map((button) => button.querySelector('.selection-label')?.textContent)).toEqual([
+      'Select',
+      'Select',
     ]);
   });
 
@@ -389,9 +527,11 @@ describe('ARHud', () => {
     const placeArButton = root.querySelector<HTMLButtonElement>('.ar-model-place-button')!;
     expect(onModelSelect).toHaveBeenCalledWith('built-in-beta');
     expect(root.querySelector('.ar-model-card.is-selected')?.textContent).toContain('Built-in beta');
+    expect(root.querySelector('.ar-model-card.is-selected .selection-label')?.textContent).toBe('Selected');
     expect(placeArButton.disabled).toBe(true);
 
     hud.updateModelReady(true);
+    expect(placeArButton.textContent).toBe('Place selected model');
     placeArButton.click();
 
     expect(startArCamera).toHaveBeenCalledTimes(1);
@@ -514,7 +654,7 @@ describe('ARHud', () => {
     expect(onStartCamera).toHaveBeenCalledTimes(1);
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.camera-panel')?.classList.contains('fullscreen')).toBe(true);
-    expect(root.textContent).toContain('dynamic image');
+    expect(root.textContent).toContain('AI enhancement');
   });
 
   it('opens Multi Object for guests directly as a fresh AR placement session without saved layouts', () => {
@@ -531,12 +671,53 @@ describe('ARHud', () => {
 
     expect(window.location.hash).toBe('#/multi-object');
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
-    expect(root.querySelector('.layout-manager')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.layout-manager')).toBeNull();
     expect(root.textContent).not.toContain('Save Layout');
     expect(root.querySelector('.layout-row')).toBeNull();
     expect(startArCamera).toHaveBeenCalledTimes(1);
     expect(onStartMultiObject).toHaveBeenCalledTimes(1);
     expect(root.querySelector('.status-panel')?.classList.contains('layout-active')).toBe(true);
+  });
+
+  it('presents multi-object AR with one immersive control system', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="multi-object"]')?.click();
+
+    expect(root.querySelector('.app-shell')?.getAttribute('data-shell')).toBe('immersive');
+    expect(root.querySelector('.immersive-title')?.textContent).toBe('Multi-object AR');
+    expect(root.querySelector('.status-panel')?.classList.contains('immersive-inspector')).toBe(true);
+    expect(root.querySelector('.hud-actions')?.classList.contains('immersive-actions')).toBe(true);
+    expect(root.querySelector('.status-panel > .page-back')).toBeNull();
+    expect(root.querySelector('.layout-manager')).toBeNull();
+  });
+
+  it('switches from the standard AR picker to immersive controls for live placement', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="ar"]')?.click();
+    expect(root.querySelector('.app-shell')?.getAttribute('data-shell')).toBe('standard');
+
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-alpha"]')?.click();
+    hud.updateModelReady(true);
+    root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
+
+    expect(root.querySelector('.app-shell')?.getAttribute('data-shell')).toBe('immersive');
+    expect(root.querySelector('.status-panel')?.classList.contains('immersive-inspector')).toBe(true);
+    expect(root.querySelector('.hud-actions')?.classList.contains('immersive-actions')).toBe(true);
+  });
+
+  it('keeps delete separate and identifies the selected-object action', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+    root.querySelector<HTMLButtonElement>('[data-nav-route="multi-object"]')?.click();
+
+    const deleteButton = [...root.querySelectorAll<HTMLButtonElement>('.hud-actions button')]
+      .find((button) => button.textContent === 'Delete selected');
+    expect(deleteButton?.classList.contains('danger')).toBe(true);
+    expect(deleteButton?.getAttribute('aria-label')).toBe('Delete selected');
   });
 
   it('shows session-only controls for adding multiple objects', () => {
@@ -551,8 +732,8 @@ describe('ARHud', () => {
     hud.updateAuthState(activeUser);
 
     hud.showMultiObjectEditor();
-    [...root.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Add Object')?.click();
-    [...root.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Delete Object')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Add model')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Delete selected')?.click();
 
     expect(root.querySelector('.status-panel')?.classList.contains('layout-active')).toBe(true);
     expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
@@ -562,8 +743,8 @@ describe('ARHud', () => {
       'Place',
       'Scale 1x',
       'Reset',
-      'Add Object',
-      'Delete Object',
+      'Add model',
+      'Delete selected',
     ]);
     expect(actionButtons.every((button) => button.classList.contains('hud-action-chip'))).toBe(true);
     expect(actionButtons.every((button) => button.querySelector('svg') === null)).toBe(true);
@@ -584,9 +765,11 @@ describe('ARHud', () => {
     const landing = root.querySelector('.landing');
     const statusPanel = root.querySelector('.status-panel');
     const cameraPanel = root.querySelector('.camera-panel');
-    const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept="image/*"]');
+    const uploadInput = root.querySelector<HTMLInputElement>('input[name="uploadImage"]');
     const captureButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Capture');
-    const generateButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate 3D');
+    const generateButton = [...root.querySelectorAll<HTMLButtonElement>('.camera-actions button')].find(
+      (button) => button.textContent === 'Generate model',
+    );
 
     expect(onStartCamera).not.toHaveBeenCalled();
     expect(window.location.hash).toBe('#/upload');
@@ -597,7 +780,61 @@ describe('ARHud', () => {
     expect(uploadInput?.classList.contains('hidden')).toBe(false);
     expect(captureButton?.classList.contains('hidden')).toBe(true);
     expect((generateButton as HTMLButtonElement).disabled).toBe(true);
-    expect(root.textContent).toContain('Upload an image to create a 3D model.');
+    expect(root.textContent).toContain('Choose an image to create a 3D model.');
+  });
+
+  it('uses a compact upload drop zone and one full-width primary action', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="upload"]')?.click();
+
+    expect(root.querySelector('.upload-image-field')?.classList.contains('upload-drop-zone')).toBe(true);
+    expect(root.querySelector('.upload-image-field input')?.getAttribute('aria-describedby')).toBe('imageUploadHint');
+    expect(root.querySelector('.camera-actions')?.classList.contains('single-primary')).toBe(true);
+    expect(root.querySelector('.camera-actions button.primary')?.textContent).toBe('Generate model');
+  });
+
+  it('does not replace focused model controls when refresh data is unchanged', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    const generated = {
+      id: 'generated-chair',
+      label: 'Generated chair',
+      url: 'https://assets.example/generated-chair.glb',
+      ownerEmail: activeUser.email,
+      visibility: 'private' as const,
+    };
+    hud.updateAuthState(activeUser);
+    hud.updateGeneratedModels([generated]);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+
+    const previewButton = root.querySelector<HTMLButtonElement>(
+      '[data-model-id="generated-chair"] [data-action="preview"]',
+    )!;
+    previewButton.focus();
+    hud.updateGeneratedModels([{ ...generated }]);
+
+    expect(document.activeElement).toBe(previewButton);
+    expect(root.querySelector('[data-model-id="generated-chair"] [data-action="preview"]')).toBe(previewButton);
+    root.remove();
+  });
+
+  it('shows real Capture, Generate, Place steps for photo-to-ar routes only', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="full-flow"]')?.click();
+    expect([...root.querySelectorAll('.creation-step-list li')].map((item) => item.textContent?.trim())).toEqual([
+      'Capture',
+      'Generate',
+      'Place',
+    ]);
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="camera"]')?.click();
+    expect(root.querySelector('.creation-step-list')?.classList.contains('hidden')).toBe(true);
   });
 
   it('opens upload model from the first screen with a GLB picker', () => {
@@ -611,7 +848,7 @@ describe('ARHud', () => {
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Upload 3D Model')?.click();
     const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept=".glb,model/gltf-binary"]')!;
     const storeButton = [...root.querySelectorAll('.camera-actions button')].find(
-      (button) => button.textContent === 'Store Model',
+      (button) => button.textContent === 'Upload model',
     ) as HTMLButtonElement;
     const file = new File(['glb bytes'], 'chair.glb', { type: 'model/gltf-binary' });
     Object.defineProperty(uploadInput, 'files', { value: [file], configurable: true });
@@ -757,10 +994,13 @@ describe('ARHud', () => {
     clickIcon('visibility');
     clickIcon('edit');
     expect(root.querySelector('.model-edit-dialog')).toBeInstanceOf(HTMLElement);
+    root.querySelector<HTMLButtonElement>('.model-edit-dialog [data-action="cancel-edit"]')?.click();
     clickIcon('delete');
 
     expect(onPreviewModel).not.toHaveBeenCalled();
     expect(onToggleGeneratedModelVisibility).toHaveBeenCalledWith('generated-owned-chair', 'private');
+    expect(onDeleteGeneratedModel).not.toHaveBeenCalled();
+    root.querySelector<HTMLButtonElement>('.confirmation-dialog [data-action="confirm"]')?.click();
     expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-owned-chair');
   });
 
@@ -907,6 +1147,92 @@ describe('ARHud', () => {
     expect(onCloseModelPreview).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps model preview focus inside the labelled dialog and restores the opener on Escape', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    let hud!: ARHud;
+    const onCloseModelPreview = vi.fn(() => hud.hideModelPreview());
+    hud = new ARHud(root, modelOptions, createHandlers({ onCloseModelPreview }));
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-preview-chair',
+        label: 'Preview chair',
+        url: 'https://assets.example/preview-chair.glb',
+        visibility: 'public',
+      },
+    ]);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+
+    const opener = root.querySelector<HTMLButtonElement>(
+      '[data-model-id="generated-preview-chair"] [data-action="preview"]',
+    )!;
+    opener.focus();
+    opener.click();
+    hud.showModelPreviewLoading('Preview chair');
+
+    const preview = root.querySelector<HTMLElement>('.model-preview')!;
+    const closeButton = preview.querySelector<HTMLButtonElement>('.model-preview-close')!;
+    const lightingInput = preview.querySelector<HTMLInputElement>('.model-preview-lighting-input')!;
+    expect(preview.getAttribute('role')).toBe('dialog');
+    expect(preview.getAttribute('aria-modal')).toBe('true');
+    expect(preview.getAttribute('aria-labelledby')).toBe('modelPreviewTitle');
+    expect(preview.querySelector('#modelPreviewTitle')?.textContent).toBe('Preview chair');
+    expect(closeButton.textContent).toBe('Close preview');
+    expect(document.activeElement).toBe(closeButton);
+
+    closeButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(document.activeElement).toBe(lightingInput);
+
+    preview.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(onCloseModelPreview).toHaveBeenCalledOnce();
+    expect(preview.classList.contains('hidden')).toBe(true);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('restores preview focus after download state rerenders the opener', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    let hud!: ARHud;
+    const modelId = 'generated-preview-chair';
+    const onCloseModelPreview = vi.fn(() => hud.hideModelPreview());
+    const onPreviewModel = vi.fn(() => {
+      hud.showModelPreviewLoading('Preview chair');
+      hud.markModelDownloadStarted(modelId);
+    });
+    hud = new ARHud(
+      root,
+      modelOptions,
+      createHandlers({ onCloseModelPreview, onPreviewModel }),
+    );
+    hud.updateGeneratedModels([
+      {
+        id: modelId,
+        label: 'Preview chair',
+        url: 'https://assets.example/preview-chair.glb',
+        visibility: 'public',
+      },
+    ]);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+
+    const opener = root.querySelector<HTMLButtonElement>(
+      `[data-model-id="${modelId}"] [data-action="preview"]`,
+    )!;
+    opener.focus();
+    opener.click();
+    expect(opener.isConnected).toBe(false);
+
+    root
+      .querySelector<HTMLElement>('.model-preview')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    const replacement = root.querySelector<HTMLButtonElement>(
+      `[data-model-id="${modelId}"] [data-action="preview"]`,
+    )!;
+    expect(onCloseModelPreview).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(replacement);
+  });
+
   it('shows model size, local download state, and animates the model download action', () => {
     const root = document.createElement('div');
     const onModelSelect = vi.fn();
@@ -1051,6 +1377,11 @@ describe('ARHud', () => {
     nameInput.value = '  Living room chair  ';
     Object.defineProperty(thumbnailInput, 'files', { value: [file], configurable: true });
 
+    expect(dialog.getAttribute('role')).toBe('dialog');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.getAttribute('aria-labelledby')).toBe('modelEditTitle');
+    expect(dialog.querySelector('#modelEditTitle')?.textContent).toBe('Edit model');
+
     dialog.querySelector<HTMLButtonElement>('button[data-action="save-edit"]')?.click();
 
     expect(dialog.classList.contains('hidden')).toBe(true);
@@ -1113,7 +1444,109 @@ describe('ARHud', () => {
     generatedRow.querySelector<HTMLButtonElement>('button[data-action="delete"]')?.click();
 
     expect(onRenameGeneratedModel).not.toHaveBeenCalled();
+    expect(onDeleteGeneratedModel).not.toHaveBeenCalled();
+    root.querySelector<HTMLButtonElement>('.confirmation-dialog [data-action="confirm"]')?.click();
     expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-fc-123');
+  });
+
+  it('closes the edit dialog on Escape and returns focus to its edit control', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-fc-123',
+        label: 'Chair',
+        url: 'https://assets.example/generated-chair.glb',
+        ownerEmail: activeUser.email,
+        visibility: 'private',
+      },
+    ]);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+
+    const editButton = root.querySelector<HTMLButtonElement>(
+      '[data-model-id="generated-fc-123"] [data-action="edit"]',
+    )!;
+    editButton.focus();
+    editButton.click();
+
+    const dialog = root.querySelector<HTMLElement>('.model-edit-dialog')!;
+    expect(document.activeElement).toBe(dialog.querySelector('input[name="modelLabel"]'));
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(root.querySelector('.model-edit-dialog')).toBeNull();
+    expect(document.activeElement).toBe(editButton);
+  });
+
+  it('confirms destructive model deletion, supports Escape, and restores the delete control', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const onDeleteGeneratedModel = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onDeleteGeneratedModel }));
+    hud.updateAuthState(activeUser);
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-fc-123',
+        label: 'Living room chair',
+        url: 'https://assets.example/generated-chair.glb',
+        ownerEmail: activeUser.email,
+        visibility: 'private',
+      },
+    ]);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+
+    const deleteButton = root.querySelector<HTMLButtonElement>(
+      '[data-model-id="generated-fc-123"] [data-action="delete"]',
+    )!;
+    deleteButton.focus();
+    deleteButton.click();
+
+    let dialog = root.querySelector<HTMLElement>('.confirmation-dialog')!;
+    expect(onDeleteGeneratedModel).not.toHaveBeenCalled();
+    expect(dialog.getAttribute('role')).toBe('dialog');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.getAttribute('aria-labelledby')).toBe('deleteModelTitle');
+    expect(dialog.querySelector('.confirmation-message')?.textContent).toBe(
+      'Living room chair will be removed from your library.',
+    );
+    expect(document.activeElement).toBe(dialog.querySelector('[data-action="cancel"]'));
+
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('.confirmation-dialog')).toBeNull();
+    expect(document.activeElement).toBe(deleteButton);
+    expect(onDeleteGeneratedModel).not.toHaveBeenCalled();
+
+    deleteButton.click();
+    dialog = root.querySelector<HTMLElement>('.confirmation-dialog')!;
+    dialog.querySelector<HTMLButtonElement>('[data-action="confirm"]')?.click();
+
+    expect(root.querySelector('.confirmation-dialog')).toBeNull();
+    expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-fc-123');
+  });
+
+  it('uses the same confirmation dialog before deleting an uploaded model', () => {
+    const root = document.createElement('div');
+    const onDeleteUploadedModel = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onDeleteUploadedModel }));
+    hud.updateAuthState(activeUser);
+    hud.updateUploadedModels([
+      {
+        id: 'uploaded-chair',
+        label: 'Uploaded chair',
+        url: 'blob:uploaded-chair',
+        source: 'uploaded',
+      },
+    ]);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+
+    root.querySelector<HTMLButtonElement>(
+      '[data-model-id="uploaded-chair"] [data-action="delete"]',
+    )?.click();
+    expect(onDeleteUploadedModel).not.toHaveBeenCalled();
+
+    root.querySelector<HTMLButtonElement>('.confirmation-dialog [data-action="confirm"]')?.click();
+    expect(onDeleteUploadedModel).toHaveBeenCalledWith('uploaded-chair');
   });
 
   it('opens the model manager page directly from the models hash route', () => {
@@ -1151,7 +1584,7 @@ describe('ARHud', () => {
     expect(targetInput?.classList.contains('hidden')).toBe(false);
     targetInput!.value = ' laptop ';
     const directGenerateButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate and Place',
+      (button) => button.textContent === 'Generate and place',
     );
     expect((directGenerateButton as HTMLButtonElement).disabled).toBe(false);
     directGenerateButton?.click();
@@ -1179,17 +1612,17 @@ describe('ARHud', () => {
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
     targetInput!.value = ' laptop ';
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Extract object')?.click();
 
     expect(onSubmitTarget).toHaveBeenCalledWith('laptop');
 
     hud.showExtractedImageReady('blob:extracted-image');
     const submitButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Submit',
+      (button) => button.textContent === 'Extract object',
     );
     expect(submitButton?.classList.contains('hidden')).toBe(true);
     expect((submitButton as HTMLButtonElement).disabled).toBe(true);
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate and Place')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate and place')?.click();
 
     expect(window.location.hash).toBe('#/ar');
     expect(startArCamera).toHaveBeenCalledTimes(1);
@@ -1221,10 +1654,10 @@ describe('ARHud', () => {
     hud.showCapturedImagePreview('blob:dynamic-capture');
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
     targetInput!.value = ' chair ';
-    const submitButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit');
+    const submitButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Extract object');
     expect(submitButton?.classList.contains('hidden')).toBe(true);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate and Place')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate and place')?.click();
 
     expect(window.location.hash).toBe('#/ar');
     expect(startArCamera).toHaveBeenCalledTimes(1);
@@ -1297,6 +1730,35 @@ describe('ARHud', () => {
     expect(onStartCamera).not.toHaveBeenCalled();
   });
 
+  it('waits for auth restoration before resolving a protected deep link', () => {
+    window.history.replaceState(null, '', '/#/speech');
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers(), { authRestoring: true });
+
+    expect(window.location.hash).toBe('#/speech');
+    expect(root.querySelector('.auth-panel')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.route-restoring')?.classList.contains('hidden')).toBe(false);
+
+    hud.updateAuthState(activeUser);
+
+    expect(window.location.hash).toBe('#/speech');
+    expect(root.querySelector('.route-restoring')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.speech-panel')?.classList.contains('hidden')).toBe(false);
+  });
+
+  it('restores the intended protected route after login', () => {
+    window.history.replaceState(null, '', '/#/speech');
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    expect(window.location.hash).toBe('#/login');
+
+    hud.updateAuthState(activeUser);
+
+    expect(window.location.hash).toBe('#/speech');
+    expect(root.querySelector('.speech-panel')?.classList.contains('hidden')).toBe(false);
+  });
+
   it('opens the AR View page directly from the ar hash route', () => {
     window.history.replaceState(null, '', '/#/ar');
     const root = document.createElement('div');
@@ -1311,17 +1773,17 @@ describe('ARHud', () => {
     expect(root.querySelector('.model-rail')?.classList.contains('hidden')).toBe(true);
   });
 
-  it('returns from a sub page to the home page with the Back button', () => {
+  it('returns from a sub page to the home page with the Back button', async () => {
     const root = document.createElement('div');
-    const onReturnHome = vi.fn();
-    const hud = new ARHud(root, modelOptions, createHandlers({ onReturnHome }));
+    const onRouteExit = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onRouteExit }));
     hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Camera to 3D')?.click();
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Back')?.click();
 
-    expect(window.location.hash).toBe('#/');
-    expect(onReturnHome).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(window.location.hash).toBe('#/'));
+    expect(onRouteExit).toHaveBeenCalledWith('camera', 'home');
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.status-panel')?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.camera-panel')?.classList.contains('hidden')).toBe(true);
@@ -1342,21 +1804,23 @@ describe('ARHud', () => {
     expect((placeButton as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('collapses AR status to only the Back button after an object is placed', () => {
+  it('keeps the immersive inspector visible after an object is placed', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
     hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-alpha"]')?.click();
+    hud.updateModelReady(true);
+    root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
     hud.update('placed');
 
     const statusPanel = root.querySelector('.status-panel');
-    const backButton = root.querySelector<HTMLButtonElement>('.status-panel > .page-back');
 
-    expect(statusPanel?.classList.contains('object-placed')).toBe(true);
+    expect(statusPanel?.classList.contains('immersive-inspector')).toBe(true);
     expect(statusPanel?.classList.contains('hidden')).toBe(false);
-    expect(backButton).toBeInstanceOf(HTMLButtonElement);
-    expect(backButton?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.status-panel > .page-back')).toBeNull();
+    expect(root.querySelector('.immersive-exit')).toBeInstanceOf(HTMLButtonElement);
   });
 
   it('provides a gesture surface after opening AR placement controls', () => {
@@ -1455,7 +1919,7 @@ describe('ARHud', () => {
 
     expect(root.textContent).toContain('Camera');
     expect([...root.querySelectorAll('button')].map((button) => button.textContent)).toEqual(
-      expect.arrayContaining(['Capture', 'Generate 3D']),
+      expect.arrayContaining(['Capture', 'Generate model']),
     );
   });
 
@@ -1474,8 +1938,8 @@ describe('ARHud', () => {
     hud.showCapturedImagePreview('blob:captured-image');
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
     targetInput!.value = ' laptop ';
-    const directGenerateButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate 3D',
+    const directGenerateButton = [...root.querySelectorAll<HTMLButtonElement>('.camera-actions button')].find(
+      (button) => button.textContent === 'Generate model',
     );
     expect((directGenerateButton as HTMLButtonElement).disabled).toBe(false);
     directGenerateButton?.click();
@@ -1483,7 +1947,7 @@ describe('ARHud', () => {
     expect(onGenerateModel).toHaveBeenCalledWith('laptop');
     expect(onSubmitTarget).not.toHaveBeenCalled();
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Extract object')?.click();
 
     expect(onStartCamera).toHaveBeenCalledTimes(1);
     expect(onCaptureImage).toHaveBeenCalledTimes(1);
@@ -1491,11 +1955,13 @@ describe('ARHud', () => {
 
     hud.showExtractedImageReady('blob:extracted-image');
     const submitButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Submit',
+      (button) => button.textContent === 'Extract object',
     );
     expect(submitButton?.classList.contains('hidden')).toBe(true);
     expect((submitButton as HTMLButtonElement).disabled).toBe(true);
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Generate 3D')?.click();
+    [...root.querySelectorAll<HTMLButtonElement>('.camera-actions button')].find(
+      (button) => button.textContent === 'Generate model',
+    )?.click();
 
     expect(onGenerateModel).toHaveBeenCalledTimes(2);
   });
@@ -1509,7 +1975,7 @@ describe('ARHud', () => {
     hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Image to 3D')?.click();
-    const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept="image/*"]')!;
+    const uploadInput = root.querySelector<HTMLInputElement>('input[name="uploadImage"]')!;
     const file = new File(['fake image bytes'], 'chair.png', { type: 'image/png' });
     Object.defineProperty(uploadInput, 'files', { value: [file], configurable: true });
 
@@ -1520,8 +1986,8 @@ describe('ARHud', () => {
     hud.showUploadedImagePreview('blob:uploaded-image');
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
     targetInput!.value = ' chair ';
-    const directGenerateButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate 3D',
+    const directGenerateButton = [...root.querySelectorAll<HTMLButtonElement>('.camera-actions button')].find(
+      (button) => button.textContent === 'Generate model',
     );
 
     expect(root.textContent).toContain('Image uploaded. Submit to GPT or generate a 3D model directly.');
@@ -1531,7 +1997,7 @@ describe('ARHud', () => {
     expect(onGenerateModel).toHaveBeenCalledWith('chair');
     expect(onSubmitTarget).not.toHaveBeenCalled();
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Submit')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Extract object')?.click();
 
     expect(onSubmitTarget).toHaveBeenCalledWith('chair');
   });
@@ -1543,8 +2009,8 @@ describe('ARHud', () => {
     hud.updateCameraStatus('Image captured. Ready to generate.', true);
     hud.updateGeneratedModelSource('https://assets.example/models/generated/capture.glb');
 
-    const generateButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate 3D',
+    const generateButton = [...root.querySelectorAll<HTMLButtonElement>('.camera-actions button')].find(
+      (button) => button.textContent === 'Generate model',
     );
     expect(root.textContent).toContain('Image captured. Ready to generate.');
     expect(root.textContent).toContain('Generated model: https://assets.example/models/generated/capture.glb');
@@ -1560,10 +2026,10 @@ describe('ARHud', () => {
     const video = root.querySelector('video.camera-preview');
     const image = root.querySelector('img.camera-preview') as HTMLImageElement | null;
     const submitButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Submit',
+      (button) => button.textContent === 'Extract object',
     );
-    const generateButton = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Generate 3D',
+    const generateButton = [...root.querySelectorAll<HTMLButtonElement>('.camera-actions button')].find(
+      (button) => button.textContent === 'Generate model',
     );
     const targetInput = root.querySelector<HTMLInputElement>('input[name="targetObject"]');
 

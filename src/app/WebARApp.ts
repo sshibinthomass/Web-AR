@@ -52,7 +52,9 @@ import {
   type AuthUser,
 } from '../services/authClient';
 import { AppState } from '../state/AppState';
+import { getAccountDisplayName } from '../ui/accountIdentity';
 import { ARHud } from '../ui/ARHud';
+import type { HudRoute } from '../ui/routes';
 import { getGenerateModelApiUrl } from './config';
 import type { ARRuntime, PlacementGestureZone, Point2, SceneContext } from './arRuntime';
 
@@ -97,6 +99,7 @@ export class WebARApp {
   constructor(private readonly root: HTMLElement) {}
 
   async start(): Promise<void> {
+    this.authToken = loadAuthToken();
     this.hud = new ARHud(this.root, MODEL_OPTIONS, {
       onPlace: () => this.placeAtLatestHit(),
       onEdit: () => this.setEditing(),
@@ -123,7 +126,9 @@ export class WebARApp {
       onPreviewLightDirectionChange: (degrees) => this.updateModelPreviewLightDirection(degrees),
       onPreviewAnimationSelect: (animationIndex) => this.selectModelPreviewAnimation(animationIndex),
       onUpdateModelThumbnail: (modelId, file) => void this.updateModelThumbnail(modelId, file),
-      onReturnHome: () => void this.returnHome(),
+      onRouteExit: (previousRoute, nextRoute) => {
+        void this.leaveRoute(previousRoute, nextRoute);
+      },
       onLogin: (email, password) => void this.login(email, password),
       onSignup: (email, password, name) => void this.signup(email, password, name),
       onLogout: () => void this.logout(),
@@ -141,11 +146,14 @@ export class WebARApp {
       onStartMultiObject: () => void this.startMultiObjectSession(),
       onAddLayoutObject: () => this.promptForLayoutObject(),
       onDeleteLayoutObject: () => this.deleteSelectedLayoutObject(),
+    }, {
+      authRestoring: Boolean(this.authToken),
     });
     this.hud.updateModelSource('Cloudflare only');
-    this.authToken = loadAuthToken();
     if (this.authToken) {
-      void this.restoreSession();
+      await this.restoreSession();
+    } else {
+      this.hud.updateAuthState(null);
     }
     void this.refreshGeneratedModels();
     window.setInterval(() => {
@@ -165,7 +173,7 @@ export class WebARApp {
     try {
       const user = await getCurrentUser({ apiUrl, token: this.authToken });
       if (!user) {
-        void this.logout();
+        this.clearInvalidSession();
         return;
       }
       this.currentUser = user;
@@ -174,8 +182,15 @@ export class WebARApp {
       void this.prepareMultiObject();
     } catch (error) {
       console.warn('Could not restore auth session.', error);
-      void this.logout();
+      this.clearInvalidSession();
     }
+  }
+
+  private clearInvalidSession(): void {
+    this.authToken = null;
+    this.currentUser = null;
+    clearAuthToken();
+    this.hud?.updateAuthState(null);
   }
 
   private async login(email: string, password: string): Promise<void> {
@@ -192,10 +207,11 @@ export class WebARApp {
       this.currentUser = session.user;
       saveAuthToken(session.token);
       this.hud?.updateAuthState(session.user);
-      this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
+      this.hud?.showSessionNotice(
+        `Welcome back, ${getAccountDisplayName(session.user)}.`,
+      );
       void this.refreshGeneratedModels();
       void this.prepareMultiObject();
-      window.location.hash = '#/';
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed.';
       this.hud?.showAuthMessage(message, true);
@@ -216,10 +232,11 @@ export class WebARApp {
       this.currentUser = session.user;
       saveAuthToken(session.token);
       this.hud?.updateAuthState(session.user);
-      this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
+      this.hud?.showSessionNotice(
+        `Welcome, ${getAccountDisplayName(session.user)}.`,
+      );
       void this.refreshGeneratedModels();
       void this.prepareMultiObject();
-      window.location.hash = '#/';
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Account creation failed.';
       this.hud?.showAuthMessage(message, true);
@@ -229,17 +246,17 @@ export class WebARApp {
   private async logout(): Promise<void> {
     const token = this.authToken;
     const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    this.authToken = null;
+    this.currentUser = null;
+    clearAuthToken();
+    this.hud?.completeLogout();
+    void this.refreshGeneratedModels();
+
     if (token) {
       await logoutRequest({ apiUrl, token }).catch((error) => {
         console.warn('Could not revoke auth session.', error);
       });
     }
-    this.authToken = null;
-    this.currentUser = null;
-    clearAuthToken();
-    this.hud?.updateAuthState(null);
-    void this.refreshGeneratedModels();
-    window.location.hash = '#/';
   }
 
   private async refreshAdminAccounts(): Promise<void> {
@@ -337,8 +354,7 @@ export class WebARApp {
       return this.authToken;
     }
 
-    this.hud?.showAuthMessage(message, true);
-    window.location.hash = '#/login';
+    this.hud?.navigateToLogin(message);
     return null;
   }
 
@@ -508,9 +524,8 @@ export class WebARApp {
     try {
       stopCameraPreview(this.cameraStream);
       this.clearCapturedImagePreview();
-      this.hud?.showLiveCameraPreview();
       this.cameraStream = await startCameraPreview(preview);
-      this.hud?.updateCameraStatus('Camera ready. Capture an image to generate a 3D model.', false);
+      this.hud?.updateCameraStatus('Camera ready. Capture one object when the frame is clear.', false);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Camera permission was not granted.';
       this.hud?.updateCameraStatus(`Camera unavailable: ${message}`, false);
@@ -873,7 +888,24 @@ export class WebARApp {
     this.hud?.startARCamera();
   }
 
-  private async returnHome(): Promise<void> {
+  private async leaveRoute(previousRoute: HudRoute, _nextRoute: HudRoute): Promise<void> {
+    const transientRoutes: HudRoute[] = [
+      'camera',
+      'upload',
+      'upload-model',
+      'full-flow',
+      'dynamic',
+      'speech',
+      'ar',
+      'multi-object',
+    ];
+    if (!transientRoutes.includes(previousRoute)) {
+      return;
+    }
+    await this.resetTransientExperience();
+  }
+
+  private async resetTransientExperience(): Promise<void> {
     stopCameraPreview(this.cameraStream);
     this.cameraStream = null;
     this.capturedImage = null;

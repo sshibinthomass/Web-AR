@@ -8,6 +8,22 @@ vi.mock('../../src/scene/loadModel', () => ({
 
 import { loadGLBModel } from '../../src/scene/loadModel';
 
+describe('WebARApp route cleanup', () => {
+  it('resets transient experience state only when leaving a transient route', async () => {
+    const app = new WebARApp(document.createElement('div')) as unknown as {
+      resetTransientExperience: ReturnType<typeof vi.fn>;
+      leaveRoute(previousRoute: string, nextRoute: string): Promise<void>;
+    };
+    app.resetTransientExperience = vi.fn().mockResolvedValue(undefined);
+
+    await app.leaveRoute('models', 'home');
+    expect(app.resetTransientExperience).not.toHaveBeenCalled();
+
+    await app.leaveRoute('camera', 'upload');
+    expect(app.resetTransientExperience).toHaveBeenCalledOnce();
+  });
+});
+
 describe('WebARApp layout reset', () => {
   it('resets the selected layout object when no fresh hit-test pose exists', () => {
     const app = new WebARApp(document.createElement('div')) as unknown as {
