@@ -246,16 +246,17 @@ export class WebARApp {
   private async logout(): Promise<void> {
     const token = this.authToken;
     const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
-    if (token) {
-      await logoutRequest({ apiUrl, token }).catch((error) => {
-        console.warn('Could not revoke auth session.', error);
-      });
-    }
     this.authToken = null;
     this.currentUser = null;
     clearAuthToken();
     this.hud?.completeLogout();
     void this.refreshGeneratedModels();
+
+    if (token) {
+      await logoutRequest({ apiUrl, token }).catch((error) => {
+        console.warn('Could not revoke auth session.', error);
+      });
+    }
   }
 
   private async refreshAdminAccounts(): Promise<void> {

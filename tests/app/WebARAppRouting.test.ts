@@ -176,6 +176,37 @@ describe('WebARApp route restoration', () => {
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(false);
   });
 
+  it('clears the visible session immediately while remote logout is pending', async () => {
+    let resolveRemoteLogout: () => void = () => undefined;
+    authMocks.logout.mockReturnValue(new Promise<void>((resolve) => {
+      resolveRemoteLogout = resolve;
+    }));
+    authMocks.getCurrentUser.mockResolvedValue(activeUser);
+    const root = document.createElement('div');
+    const app = new WebARApp(root) as unknown as {
+      logout(): Promise<void>;
+      prepareMultiObject: () => Promise<void>;
+      start(): Promise<void>;
+    };
+    app.prepareMultiObject = vi.fn(async () => undefined);
+
+    await app.start();
+    expect(root.querySelector('.account-trigger-label')?.textContent).toBe('Hi, Maya Stone');
+
+    const logoutPromise = app.logout();
+    const labelWhileRemoteLogoutIsPending =
+      root.querySelector('.account-trigger-label')?.textContent;
+    const tokenWhileRemoteLogoutIsPending =
+      window.localStorage.getItem('web-ar-auth-token');
+    const routeWhileRemoteLogoutIsPending = window.location.hash;
+    resolveRemoteLogout();
+    await logoutPromise;
+
+    expect(labelWhileRemoteLogoutIsPending).toBe('Account');
+    expect(tokenWhileRemoteLogoutIsPending).toBeNull();
+    expect(routeWhileRemoteLogoutIsPending).toBe('#/');
+  });
+
   it('uses a replace-style HUD redirect when an action requires authentication', () => {
     const app = new WebARApp(document.createElement('div')) as unknown as {
       authToken: string | null;
