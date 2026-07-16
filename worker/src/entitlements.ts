@@ -79,17 +79,17 @@ const planDefaults: Record<PlanId, Omit<EffectiveEntitlements, 'plan'>> = {
   starter: {
     features: starterFeatures,
     maxTargets: 3,
-    maxObjectsPerTarget: 3,
+    maxObjectsPerTarget: 1,
   },
   creator: {
     features: advancedFeatures,
     maxTargets: 25,
-    maxObjectsPerTarget: 10,
+    maxObjectsPerTarget: 3,
   },
   studio: {
     features: advancedFeatures,
     maxTargets: 100,
-    maxObjectsPerTarget: 30,
+    maxObjectsPerTarget: 10,
   },
 };
 

@@ -29,7 +29,7 @@ describe('Mark-AR entitlements', () => {
         floor_placement: false,
       },
       maxTargets: 3,
-      maxObjectsPerTarget: 3,
+      maxObjectsPerTarget: 1,
     });
   });
 
@@ -37,7 +37,7 @@ describe('Mark-AR entitlements', () => {
     expect(resolveEffectiveEntitlements({ role: 'user', plan: 'creator' })).toMatchObject({
       plan: 'creator',
       maxTargets: 25,
-      maxObjectsPerTarget: 10,
+      maxObjectsPerTarget: 3,
       features: {
         groups: true,
         animations: true,
@@ -49,7 +49,7 @@ describe('Mark-AR entitlements', () => {
     expect(resolveEffectiveEntitlements({ role: 'user', plan: 'studio' })).toMatchObject({
       plan: 'studio',
       maxTargets: 100,
-      maxObjectsPerTarget: 30,
+      maxObjectsPerTarget: 10,
     });
   });
 

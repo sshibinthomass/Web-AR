@@ -383,7 +383,7 @@ describe('handleGenerateModelRequest', () => {
         effective_entitlements: expect.objectContaining({
           plan: 'starter',
           max_targets: 3,
-          max_objects_per_target: 3,
+          max_objects_per_target: 1,
           features: expect.objectContaining({
             scan: true,
             groups: false,
@@ -2762,7 +2762,7 @@ describe('handleGenerateModelRequest', () => {
     );
 
     const overObjectLimit = await createTarget({
-      objects: ['one', 'two', 'three', 'four'].map((id) => modelObject(id)),
+      objects: ['one', 'two'].map((id) => modelObject(id)),
     });
     const grouped = await createTarget({
       groups: [{
@@ -2820,7 +2820,7 @@ describe('handleGenerateModelRequest', () => {
     expect(overObjectLimit.status).toBe(403);
     await expect(overObjectLimit.json()).resolves.toMatchObject({
       code: 'object_quota_exceeded',
-      max_objects_per_target: 3,
+      max_objects_per_target: 1,
     });
     expect(grouped.status).toBe(403);
     await expect(grouped.json()).resolves.toMatchObject({ code: 'feature_disabled', feature: 'groups' });
@@ -2884,24 +2884,24 @@ describe('handleGenerateModelRequest', () => {
     );
 
     const blockedRename = await update({ label: 'Still too large' });
-    const cleanup = await update({ objects: existingObjects.slice(0, 3) });
-    const blockedIncrease = await update({ objects: existingObjects });
+    const cleanup = await update({ objects: existingObjects.slice(0, 1) });
+    const blockedIncrease = await update({ objects: existingObjects.slice(0, 2) });
 
     expect(blockedRename.status).toBe(403);
     await expect(blockedRename.json()).resolves.toMatchObject({
       code: 'object_quota_exceeded',
       current_objects: 4,
       requested_objects: 4,
-      max_objects_per_target: 3,
+      max_objects_per_target: 1,
     });
     expect(cleanup.status).toBe(200);
-    expect(((await cleanup.json()) as { objects: unknown[] }).objects).toHaveLength(3);
+    expect(((await cleanup.json()) as { objects: unknown[] }).objects).toHaveLength(1);
     expect(blockedIncrease.status).toBe(403);
     await expect(blockedIncrease.json()).resolves.toMatchObject({
       code: 'object_quota_exceeded',
-      current_objects: 3,
-      requested_objects: 4,
-      max_objects_per_target: 3,
+      current_objects: 1,
+      requested_objects: 2,
+      max_objects_per_target: 1,
     });
   });
 
