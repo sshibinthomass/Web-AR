@@ -233,52 +233,40 @@ export class ARHud {
     this.landing.innerHTML = `
       <div class="landing-inner">
         <div class="landing-copy">
-          <p class="landing-kicker">AR model studio</p>
-          <h1>Anima You 3D</h1>
-          <p>Create 3D models from real objects, manage your saved library, and place them in AR.</p>
-          <div class="landing-flow" aria-label="Camera to 3D Model to AR">
-            <div class="landing-flow-step">
-              <span>01</span>
-              <strong>Camera</strong>
-              <small>Capture a real object</small>
-            </div>
-            <div class="landing-flow-step">
-              <span>02</span>
-              <strong>3D Model</strong>
-              <small>Generate or upload GLB</small>
-            </div>
-            <div class="landing-flow-step">
-              <span>03</span>
-              <strong>AR</strong>
-              <small>Place it in your room</small>
-            </div>
-          </div>
+          <p class="landing-kicker">Spatial creation workspace</p>
+          <h1>Make it real. Place it here.</h1>
+          <p>Turn a photo, description, or existing model into something you can view in your own space.</p>
+          <button class="home-primary-action primary" type="button">Create a model</button>
         </div>
-        <div class="landing-preview" aria-hidden="true">
+        <div class="landing-preview calibration-frame" aria-hidden="true">
           <div class="preview-stage">
             <span class="preview-floor"></span>
             <span class="preview-anchor"></span>
             <span class="preview-object"></span>
           </div>
-          <p><strong>Guest preview</strong><span>Open saved models and place them in AR.</span></p>
+          <p><strong>Spatial preview</strong><span>Choose a model and place it at room scale.</span></p>
         </div>
+        <div class="home-route-groups"></div>
       </div>
     `;
+    this.landing.querySelector<HTMLButtonElement>('.home-primary-action')?.addEventListener('click', () => {
+      this.appShell.openCreateMenu();
+    });
     const modePicker = document.createElement('div');
     modePicker.className = 'mode-picker';
     modePicker.append(
       this.createModeGroup(
-        'Available as guest',
-        'View saved 3D models or place one or more objects in AR without signing in.',
+        'Explore in AR',
+        'Browse saved models or begin a spatial placement session.',
         [
-          this.createModeAction(this.createButton('Single-Object AR', 'primary', () => this.navigateTo('ar')), 'AR'),
+          this.createModeAction(this.createButton('Single-Object AR', '', () => this.navigateTo('ar')), 'AR'),
           this.createModeAction(this.createButton('Model Library', '', () => this.navigateTo('models')), '3D'),
           this.createModeAction(this.createButton('Multi-Object AR', '', () => this.navigateTo('multi-object')), '3D'),
         ],
       ),
       this.createModeGroup(
-        'Login required',
-        'Create, upload, and manage models with an approved account.',
+        'Create a model',
+        'Use a photo, description, voice recording, or existing GLB.',
         [
           this.createModeAction(this.createButton('Camera to 3D', '', () => this.navigateTo('camera')), 'CAM'),
           this.createModeAction(this.createButton('Image to 3D', '', () => this.navigateTo('upload')), 'IMG'),
@@ -299,26 +287,26 @@ export class ARHud {
     this.adminButton.classList.add('hidden');
     this.logoutButton.classList.add('hidden');
     this.authActions.append(this.authIdentity, this.loginButton, this.adminButton, this.logoutButton);
-    this.landing.querySelector('.landing-inner')?.append(modePicker, this.authActions);
+    this.landing.querySelector('.home-route-groups')?.append(modePicker, this.authActions);
     shell.appendChild(this.landing);
 
     this.authPanel = document.createElement('section');
     this.authPanel.className = 'auth-panel hidden';
     this.authPanel.innerHTML = `
-      <div class="auth-panel-inner">
+      <div class="auth-panel-inner surface">
         <div class="auth-panel-header">
           <h2>Login</h2>
           <p class="auth-message">Sign in with an approved account, or create one for admin approval.</p>
         </div>
-        <label>
+        <label class="field">
           <span>Email</span>
           <input name="authEmail" type="email" autocomplete="email">
         </label>
-        <label>
+        <label class="field">
           <span>Password</span>
           <input name="authPassword" type="password" autocomplete="current-password">
         </label>
-        <label hidden>
+        <label class="field" hidden>
           <span>Name</span>
           <input name="authName" type="text" autocomplete="name">
         </label>
@@ -347,25 +335,27 @@ export class ARHud {
           <h2>Admin</h2>
           <p>Approve accounts and watch background generation jobs.</p>
         </div>
-        <section class="admin-dashboard-section">
-          <div class="admin-dashboard-section-header">
-            <h3>Accounts</h3>
-            <button class="admin-refresh-accounts" type="button">Refresh</button>
-          </div>
-          <div class="admin-account-list"></div>
-        </section>
-        <section class="admin-dashboard-section">
-          <div class="admin-dashboard-section-header">
-            <h3>Jobs</h3>
-            <div class="admin-dashboard-actions">
-              <button class="admin-refresh-jobs" type="button">Refresh</button>
-              <button class="admin-cleanup-jobs" type="button">Cleanup</button>
+        <div class="admin-workspace">
+          <section class="admin-dashboard-section surface" aria-labelledby="adminAccountsTitle">
+            <div class="admin-dashboard-section-header">
+              <h3 id="adminAccountsTitle">Accounts</h3>
+              <button class="admin-refresh-accounts" type="button">Refresh accounts</button>
             </div>
-          </div>
-          <div class="admin-job-list"></div>
-          <p class="admin-job-message">Jobs load from Cloudflare storage.</p>
-        </section>
-        <p class="admin-dashboard-message">Accounts load from Cloudflare storage.</p>
+            <div class="admin-account-list"></div>
+            <p class="admin-dashboard-message" aria-live="polite">Accounts load from Cloudflare storage.</p>
+          </section>
+          <section class="admin-dashboard-section surface" aria-labelledby="adminJobsTitle">
+            <div class="admin-dashboard-section-header">
+              <h3 id="adminJobsTitle">Generation jobs</h3>
+              <div class="admin-dashboard-actions">
+                <button class="admin-refresh-jobs" type="button">Refresh jobs</button>
+                <button class="admin-cleanup-jobs danger" type="button">Clean failed previews</button>
+              </div>
+            </div>
+            <div class="admin-job-list"></div>
+            <p class="admin-job-message" aria-live="polite">Jobs load from Cloudflare storage.</p>
+          </section>
+        </div>
       </div>
     `;
     this.adminDashboard.querySelector<HTMLButtonElement>('.admin-refresh-accounts')?.addEventListener('click', () => {
@@ -392,45 +382,38 @@ export class ARHud {
           <h2>Text or Voice to 3D</h2>
           <p class="speech-status">Type a description or push to talk, then generate a 3D-ready image and model.</p>
         </div>
-        <label class="speech-text-field">
-          <span>Describe the object</span>
-          <textarea class="speech-text-input" rows="4" placeholder="A compact walnut desk with rounded corners" spellcheck="true"></textarea>
-        </label>
-        <div class="speech-visualizer" aria-hidden="true">
-          <span></span>
-          <span></span>
-          <span></span>
-          <span></span>
-          <span></span>
+        <div class="speech-workspace">
+          <section class="speech-composer surface calibration-frame">
+            <label class="speech-text-field">
+              <span>Describe one object</span>
+              <textarea
+                class="speech-text-input"
+                rows="6"
+                aria-describedby="speechPromptHint"
+                placeholder="A compact walnut desk with rounded corners"
+                spellcheck="true"
+              ></textarea>
+            </label>
+            <p id="speechPromptHint" class="field-hint">Name the object, material, color, and defining shape.</p>
+            <div class="speech-actions"></div>
+          </section>
+          <aside class="speech-progress surface">
+            <div class="speech-visualizer" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <div class="speech-transcript-card">
+              <span>Request</span>
+              <p class="speech-transcript" aria-live="polite">No request entered yet.</p>
+            </div>
+            <ol class="speech-stage-list" aria-label="Text or voice to 3D progress">
+              <li data-speech-stage="speech_input"><span class="speech-stage-marker"></span><strong>Input request</strong><small>Type or record the object</small></li>
+              <li data-speech-stage="detecting_speech"><span class="speech-stage-marker"></span><strong>Prepare request</strong><small>Shape the description for 3D</small></li>
+              <li data-speech-stage="generating_image"><span class="speech-stage-marker"></span><strong>Generate image</strong><small>Create a clean reconstruction source</small></li>
+              <li data-speech-stage="generating_3d"><span class="speech-stage-marker"></span><strong>Generate model</strong><small>Build the 3D object</small></li>
+            </ol>
+            <p class="speech-background-note hidden">You can leave this page. The model will continue generating and appear in Models when it is ready.</p>
+          </aside>
         </div>
-        <div class="speech-transcript-card">
-          <span>Request</span>
-          <p class="speech-transcript" aria-live="polite">No request entered yet.</p>
-        </div>
-        <ol class="speech-stage-list" aria-label="Text or Voice to 3D progress">
-          <li data-speech-stage="speech_input">
-            <span class="speech-stage-marker"></span>
-            <strong>Input request</strong>
-            <small>Type or record the object</small>
-          </li>
-          <li data-speech-stage="detecting_speech">
-            <span class="speech-stage-marker"></span>
-            <strong>Preparing prompt</strong>
-            <small>Shape the request for 3D</small>
-          </li>
-          <li data-speech-stage="generating_image">
-            <span class="speech-stage-marker"></span>
-            <strong>Generating image</strong>
-            <small>Create a clean image for 3D</small>
-          </li>
-          <li data-speech-stage="generating_3d">
-            <span class="speech-stage-marker"></span>
-            <strong>Generating 3D model</strong>
-            <small>Run TRELLIS in Cloudflare/Modal</small>
-          </li>
-        </ol>
-        <p class="speech-background-note hidden">You can close this app now. The model will keep generating in Cloudflare and appear later in AR View and Models.</p>
-        <div class="speech-actions"></div>
       </div>
     `;
     this.speechStatusMessage = this.speechPanel.querySelector<HTMLElement>('.speech-status')!;
@@ -444,12 +427,12 @@ export class ARHud {
         this.speechStageItems.set(stage, item);
       }
     });
-    this.speechTextGenerateButton = this.createButton('Generate from Text', 'primary', () => {
+    this.speechTextGenerateButton = this.createButton('Generate model', 'primary', () => {
       this.handlers.onGenerateTextModel(this.speechTextInput.value.trim().replace(/\s+/g, ' '));
     });
-    this.speechRecordButton = this.createButton('Record', '', () => this.handlers.onStartSpeechRecording());
-    this.speechStopButton = this.createButton('Stop', '', () => this.handlers.onStopSpeechRecording());
-    this.speechGenerateButton = this.createButton('Generate from Voice', '', () => this.handlers.onGenerateSpeechModel());
+    this.speechRecordButton = this.createButton('Record description', '', () => this.handlers.onStartSpeechRecording());
+    this.speechStopButton = this.createButton('Stop recording', '', () => this.handlers.onStopSpeechRecording());
+    this.speechGenerateButton = this.createButton('Generate from recording', '', () => this.handlers.onGenerateSpeechModel());
     this.speechTextGenerateButton.disabled = true;
     this.speechStopButton.disabled = true;
     this.speechGenerateButton.disabled = true;
