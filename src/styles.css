@@ -3934,3 +3934,113 @@ h3 {
     text-align: left;
   }
 }
+
+/* Accessible modal layer */
+.model-preview,
+.model-edit-dialog,
+.confirmation-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(16, 47, 47, 0.56);
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+}
+
+.model-preview-panel,
+.model-edit-panel,
+.confirmation-panel {
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  box-shadow: 0 28px 90px rgba(16, 47, 47, 0.28);
+}
+
+.model-preview-panel {
+  width: min(920px, 100%);
+  overflow: hidden;
+}
+
+.model-edit-panel {
+  width: min(480px, 100%);
+  padding: 24px;
+}
+
+.confirmation-panel {
+  display: grid;
+  gap: 16px;
+  width: min(440px, 100%);
+  padding: 24px;
+}
+
+.confirmation-panel h3,
+.confirmation-message {
+  margin: 0;
+}
+
+.confirmation-panel h3 {
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.confirmation-message {
+  color: var(--color-ink-muted);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.confirmation-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.confirmation-actions button {
+  min-height: var(--control-height);
+}
+
+.confirmation-actions button.danger {
+  border-color: color-mix(in srgb, var(--color-error) 48%, var(--color-border));
+  color: #ffffff;
+  background: var(--color-error);
+}
+
+@media (max-width: 767px) {
+  .model-preview,
+  .model-edit-dialog,
+  .confirmation-dialog {
+    padding: 14px;
+  }
+
+  .model-preview-panel {
+    width: 100%;
+    height: calc(100dvh - 28px);
+    min-height: 0;
+  }
+
+  .model-preview-bar {
+    flex-wrap: wrap;
+  }
+
+  .model-preview-controls {
+    order: 3;
+    flex-basis: 100%;
+    grid-template-columns: 1fr;
+    min-width: 0;
+  }
+
+  .model-preview-control {
+    grid-template-columns: auto minmax(0, 1fr) 44px;
+  }
+
+  .model-edit-panel,
+  .confirmation-panel {
+    padding: 20px;
+  }
+}

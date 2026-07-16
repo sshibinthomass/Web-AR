@@ -79,6 +79,7 @@ describe('ARHud', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/');
     window.localStorage.clear();
+    document.body.replaceChildren();
   });
 
   it('starts on a branded first screen with public and login-required actions grouped', () => {
@@ -917,10 +918,13 @@ describe('ARHud', () => {
     clickIcon('visibility');
     clickIcon('edit');
     expect(root.querySelector('.model-edit-dialog')).toBeInstanceOf(HTMLElement);
+    root.querySelector<HTMLButtonElement>('.model-edit-dialog [data-action="cancel-edit"]')?.click();
     clickIcon('delete');
 
     expect(onPreviewModel).not.toHaveBeenCalled();
     expect(onToggleGeneratedModelVisibility).toHaveBeenCalledWith('generated-owned-chair', 'private');
+    expect(onDeleteGeneratedModel).not.toHaveBeenCalled();
+    root.querySelector<HTMLButtonElement>('.confirmation-dialog [data-action="confirm"]')?.click();
     expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-owned-chair');
   });
 
@@ -1067,6 +1071,49 @@ describe('ARHud', () => {
     expect(onCloseModelPreview).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps model preview focus inside the labelled dialog and restores the opener on Escape', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    let hud!: ARHud;
+    const onCloseModelPreview = vi.fn(() => hud.hideModelPreview());
+    hud = new ARHud(root, modelOptions, createHandlers({ onCloseModelPreview }));
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-preview-chair',
+        label: 'Preview chair',
+        url: 'https://assets.example/preview-chair.glb',
+        visibility: 'public',
+      },
+    ]);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+
+    const opener = root.querySelector<HTMLButtonElement>(
+      '[data-model-id="generated-preview-chair"] [data-action="preview"]',
+    )!;
+    opener.focus();
+    opener.click();
+    hud.showModelPreviewLoading('Preview chair');
+
+    const preview = root.querySelector<HTMLElement>('.model-preview')!;
+    const closeButton = preview.querySelector<HTMLButtonElement>('.model-preview-close')!;
+    const lightingInput = preview.querySelector<HTMLInputElement>('.model-preview-lighting-input')!;
+    expect(preview.getAttribute('role')).toBe('dialog');
+    expect(preview.getAttribute('aria-modal')).toBe('true');
+    expect(preview.getAttribute('aria-labelledby')).toBe('modelPreviewTitle');
+    expect(preview.querySelector('#modelPreviewTitle')?.textContent).toBe('Preview chair');
+    expect(closeButton.textContent).toBe('Close preview');
+    expect(document.activeElement).toBe(closeButton);
+
+    closeButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(document.activeElement).toBe(lightingInput);
+
+    preview.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(onCloseModelPreview).toHaveBeenCalledOnce();
+    expect(preview.classList.contains('hidden')).toBe(true);
+    expect(document.activeElement).toBe(opener);
+  });
+
   it('shows model size, local download state, and animates the model download action', () => {
     const root = document.createElement('div');
     const onModelSelect = vi.fn();
@@ -1211,6 +1258,11 @@ describe('ARHud', () => {
     nameInput.value = '  Living room chair  ';
     Object.defineProperty(thumbnailInput, 'files', { value: [file], configurable: true });
 
+    expect(dialog.getAttribute('role')).toBe('dialog');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.getAttribute('aria-labelledby')).toBe('modelEditTitle');
+    expect(dialog.querySelector('#modelEditTitle')?.textContent).toBe('Edit model');
+
     dialog.querySelector<HTMLButtonElement>('button[data-action="save-edit"]')?.click();
 
     expect(dialog.classList.contains('hidden')).toBe(true);
@@ -1273,7 +1325,109 @@ describe('ARHud', () => {
     generatedRow.querySelector<HTMLButtonElement>('button[data-action="delete"]')?.click();
 
     expect(onRenameGeneratedModel).not.toHaveBeenCalled();
+    expect(onDeleteGeneratedModel).not.toHaveBeenCalled();
+    root.querySelector<HTMLButtonElement>('.confirmation-dialog [data-action="confirm"]')?.click();
     expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-fc-123');
+  });
+
+  it('closes the edit dialog on Escape and returns focus to its edit control', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-fc-123',
+        label: 'Chair',
+        url: 'https://assets.example/generated-chair.glb',
+        ownerEmail: activeUser.email,
+        visibility: 'private',
+      },
+    ]);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+
+    const editButton = root.querySelector<HTMLButtonElement>(
+      '[data-model-id="generated-fc-123"] [data-action="edit"]',
+    )!;
+    editButton.focus();
+    editButton.click();
+
+    const dialog = root.querySelector<HTMLElement>('.model-edit-dialog')!;
+    expect(document.activeElement).toBe(dialog.querySelector('input[name="modelLabel"]'));
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(root.querySelector('.model-edit-dialog')).toBeNull();
+    expect(document.activeElement).toBe(editButton);
+  });
+
+  it('confirms destructive model deletion, supports Escape, and restores the delete control', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const onDeleteGeneratedModel = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onDeleteGeneratedModel }));
+    hud.updateAuthState(activeUser);
+    hud.updateGeneratedModels([
+      {
+        id: 'generated-fc-123',
+        label: 'Living room chair',
+        url: 'https://assets.example/generated-chair.glb',
+        ownerEmail: activeUser.email,
+        visibility: 'private',
+      },
+    ]);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+
+    const deleteButton = root.querySelector<HTMLButtonElement>(
+      '[data-model-id="generated-fc-123"] [data-action="delete"]',
+    )!;
+    deleteButton.focus();
+    deleteButton.click();
+
+    let dialog = root.querySelector<HTMLElement>('.confirmation-dialog')!;
+    expect(onDeleteGeneratedModel).not.toHaveBeenCalled();
+    expect(dialog.getAttribute('role')).toBe('dialog');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.getAttribute('aria-labelledby')).toBe('deleteModelTitle');
+    expect(dialog.querySelector('.confirmation-message')?.textContent).toBe(
+      'Living room chair will be removed from your library.',
+    );
+    expect(document.activeElement).toBe(dialog.querySelector('[data-action="cancel"]'));
+
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('.confirmation-dialog')).toBeNull();
+    expect(document.activeElement).toBe(deleteButton);
+    expect(onDeleteGeneratedModel).not.toHaveBeenCalled();
+
+    deleteButton.click();
+    dialog = root.querySelector<HTMLElement>('.confirmation-dialog')!;
+    dialog.querySelector<HTMLButtonElement>('[data-action="confirm"]')?.click();
+
+    expect(root.querySelector('.confirmation-dialog')).toBeNull();
+    expect(onDeleteGeneratedModel).toHaveBeenCalledWith('generated-fc-123');
+  });
+
+  it('uses the same confirmation dialog before deleting an uploaded model', () => {
+    const root = document.createElement('div');
+    const onDeleteUploadedModel = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onDeleteUploadedModel }));
+    hud.updateAuthState(activeUser);
+    hud.updateUploadedModels([
+      {
+        id: 'uploaded-chair',
+        label: 'Uploaded chair',
+        url: 'blob:uploaded-chair',
+        source: 'uploaded',
+      },
+    ]);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+
+    root.querySelector<HTMLButtonElement>(
+      '[data-model-id="uploaded-chair"] [data-action="delete"]',
+    )?.click();
+    expect(onDeleteUploadedModel).not.toHaveBeenCalled();
+
+    root.querySelector<HTMLButtonElement>('.confirmation-dialog [data-action="confirm"]')?.click();
+    expect(onDeleteUploadedModel).toHaveBeenCalledWith('uploaded-chair');
   });
 
   it('opens the model manager page directly from the models hash route', () => {

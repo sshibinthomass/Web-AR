@@ -49,4 +49,14 @@ describe('application design system', () => {
     expect(styles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
     expect(styles).toContain('grid-template-columns: repeat(3, 44px);');
   });
+
+  it('uses one modal layer for preview, edit, and confirmation dialogs', () => {
+    expect(styles).toContain(
+      '.model-preview,\n.model-edit-dialog,\n.confirmation-dialog {',
+    );
+    expect(styles).toContain(
+      '.model-preview-panel,\n.model-edit-panel,\n.confirmation-panel {',
+    );
+    expect(styles).toContain('.confirmation-actions {');
+  });
 });

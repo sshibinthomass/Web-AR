@@ -3,6 +3,7 @@ import type { ModelOption, ModelVisibility } from '../app/models';
 import type { AuthUser } from '../services/authClient';
 import type { AdminJobEntry } from '../services/generatedModelClient';
 import { ApplicationShell } from './ApplicationShell';
+import { openDialog } from './dialog';
 import { HashRouter } from './HashRouter';
 import { modelCollectionsEqual } from './modelCollections';
 import { parseRouteHash, ROUTES, routeCanOpen, type HudRoute } from './routes';
@@ -198,6 +199,8 @@ export class ARHud {
   private adminAccounts: AuthUser[] = [];
   private adminJobs: AdminJobEntry[] = [];
   private modelEditDialog: HTMLElement | null = null;
+  private closeModelEditDialogFocus: (() => void) | null = null;
+  private closeModelPreviewDialog: (() => void) | null = null;
   private readonly favoriteStorageKey = 'web-ar-model-favorites';
   private readonly downloadedStorageKey = 'web-ar-model-downloads';
   private readonly recentStorageKey = 'web-ar-model-recents';
@@ -480,14 +483,15 @@ export class ARHud {
     this.modelManager.appendChild(modelManagerInner);
     this.modelPreview = document.createElement('section');
     this.modelPreview.className = 'model-preview hidden';
+    this.modelPreview.setAttribute('aria-labelledby', 'modelPreviewTitle');
     this.modelPreview.innerHTML = `
       <div class="model-preview-panel">
         <div class="model-preview-bar">
           <div class="model-preview-heading">
             <span class="model-preview-kicker">3D preview</span>
-            <h3 class="model-preview-title"></h3>
+            <h3 id="modelPreviewTitle" class="model-preview-title"></h3>
           </div>
-          <div class="model-preview-controls" aria-label="Preview lighting controls">
+          <div class="model-preview-controls" aria-label="Preview controls">
             <label class="model-preview-control model-preview-animation hidden">
               <span>Animation</span>
               <select class="model-preview-animation-select" name="modelPreviewAnimation" aria-label="Preview animation"></select>
@@ -503,10 +507,10 @@ export class ARHud {
               <output class="model-preview-direction-value">45 deg</output>
             </label>
           </div>
-          <button class="model-preview-close" type="button">Close</button>
+          <button class="model-preview-close" type="button">Close preview</button>
         </div>
         <div class="model-preview-viewport"></div>
-        <p class="model-preview-status">Loading preview...</p>
+        <p class="model-preview-status" aria-live="polite">Loading preview...</p>
       </div>
     `;
     this.modelPreviewViewport = this.modelPreview.querySelector<HTMLElement>('.model-preview-viewport')!;
@@ -1256,6 +1260,7 @@ export class ARHud {
     this.updateModelPreviewLightingLabel();
     this.updateModelPreviewDirectionLabel();
     this.modelPreview.classList.remove('hidden');
+    this.openModelPreviewDialog();
   }
 
   showModelPreviewReady(): void {
@@ -1284,6 +1289,7 @@ export class ARHud {
   showModelPreviewError(message: string): void {
     this.modelPreviewStatus.textContent = message;
     this.modelPreview.classList.remove('hidden');
+    this.openModelPreviewDialog();
   }
 
   getModelPreviewLightingIntensity(): number {
@@ -1295,6 +1301,8 @@ export class ARHud {
   }
 
   hideModelPreview(): void {
+    this.closeModelPreviewDialog?.();
+    this.closeModelPreviewDialog = null;
     this.modelPreview.classList.add('hidden');
     this.modelPreviewTitle.textContent = '';
     this.modelPreviewStatus.textContent = 'Loading preview...';
@@ -1953,11 +1961,7 @@ export class ARHud {
       }
       if (canManageModel && (isGenerated || isUploaded)) {
         const deleteButton = this.createModelActionButton(`Delete ${model.label}`, 'delete', 'delete', 'danger', () => {
-          if (isUploaded && model.id.startsWith('uploaded-')) {
-            this.handlers.onDeleteUploadedModel(model.id);
-            return;
-          }
-          this.handlers.onDeleteGeneratedModel(model.id);
+          this.openModelDeleteConfirmation(model);
         });
         actions.append(deleteButton);
       }
@@ -2495,14 +2499,13 @@ export class ARHud {
 
     const dialog = document.createElement('div');
     dialog.className = 'model-edit-dialog';
-    dialog.setAttribute('role', 'dialog');
-    dialog.setAttribute('aria-modal', 'true');
-    dialog.setAttribute('aria-label', `Edit ${model.label}`);
+    dialog.setAttribute('aria-labelledby', 'modelEditTitle');
 
     const panel = document.createElement('div');
     panel.className = 'model-edit-panel';
 
     const title = document.createElement('h3');
+    title.id = 'modelEditTitle';
     title.textContent = 'Edit model';
 
     const nameLabel = document.createElement('label');
@@ -2560,27 +2563,73 @@ export class ARHud {
 
     panel.append(title, nameLabel, thumbnailLabel, status, actions);
     dialog.appendChild(panel);
-    dialog.addEventListener('click', (event) => {
-      if (event.target === dialog) {
-        this.closeModelEditDialog();
-      }
-    });
-    dialog.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        this.closeModelEditDialog();
-      }
-    });
 
     this.modelManager.appendChild(dialog);
     this.modelEditDialog = dialog;
-    nameInput.focus();
+    this.closeModelEditDialogFocus = openDialog(dialog, {
+      initialFocus: nameInput,
+      onClose: () => this.closeModelEditDialog(),
+    });
   }
 
   private closeModelEditDialog(): void {
+    this.closeModelEditDialogFocus?.();
+    this.closeModelEditDialogFocus = null;
     this.modelEditDialog?.classList.add('hidden');
     this.modelEditDialog?.remove();
     this.modelEditDialog = null;
+  }
+
+  private openModelDeleteConfirmation(model: ModelOption): void {
+    const dialog = document.createElement('div');
+    dialog.className = 'confirmation-dialog';
+    dialog.setAttribute('aria-labelledby', 'deleteModelTitle');
+    dialog.innerHTML = `
+      <div class="confirmation-panel">
+        <h3 id="deleteModelTitle">Delete model?</h3>
+        <p class="confirmation-message"></p>
+        <div class="confirmation-actions">
+          <button type="button" data-action="cancel">Cancel</button>
+          <button class="danger" type="button" data-action="confirm">Delete model</button>
+        </div>
+      </div>
+    `;
+    dialog.querySelector<HTMLElement>('.confirmation-message')!.textContent =
+      `${model.label} will be removed from your library.`;
+    this.modelManager.appendChild(dialog);
+
+    const cancel = dialog.querySelector<HTMLButtonElement>('[data-action="cancel"]')!;
+    const confirm = dialog.querySelector<HTMLButtonElement>('[data-action="confirm"]')!;
+    let releaseFocus: () => void = () => undefined;
+    let isClosed = false;
+    const close = (): void => {
+      if (isClosed) {
+        return;
+      }
+      isClosed = true;
+      releaseFocus();
+      dialog.remove();
+    };
+    cancel.addEventListener('click', close);
+    confirm.addEventListener('click', () => {
+      close();
+      if (model.id.startsWith('uploaded-')) {
+        this.handlers.onDeleteUploadedModel(model.id);
+      } else {
+        this.handlers.onDeleteGeneratedModel(model.id);
+      }
+    });
+    releaseFocus = openDialog(dialog, {
+      initialFocus: cancel,
+      onClose: close,
+    });
+  }
+
+  private openModelPreviewDialog(): void {
+    this.closeModelPreviewDialog ??= openDialog(this.modelPreview, {
+      initialFocus: this.modelPreview.querySelector<HTMLButtonElement>('.model-preview-close') ?? undefined,
+      onClose: () => this.handlers.onCloseModelPreview(),
+    });
   }
 
   private closeModelPreviewIfOpen(): void {
