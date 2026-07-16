@@ -364,11 +364,14 @@ describe('ARHud', () => {
       root.querySelector<HTMLInputElement>('input[name="authName"]')!.closest('label') as HTMLLabelElement;
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Login')?.click();
+    const authForm = root.querySelector<HTMLFormElement>('form.auth-panel-inner')!;
+    expect(authForm).not.toBeNull();
+    expect(root.querySelector('input[name="authPassword"]')?.closest('form')).toBe(authForm);
     expect(nameLabel().hidden).toBe(true);
 
     root.querySelector<HTMLInputElement>('input[name="authEmail"]')!.value = ' maker@example.com ';
     root.querySelector<HTMLInputElement>('input[name="authPassword"]')!.value = 'maker-password-123';
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Sign in')?.click();
+    authForm.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
 
     expect(onLogin).toHaveBeenCalledWith('maker@example.com', 'maker-password-123');
 
@@ -377,7 +380,7 @@ describe('ARHud', () => {
     expect(nameLabel().hidden).toBe(false);
 
     root.querySelector<HTMLInputElement>('input[name="authName"]')!.value = ' Maker ';
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Create account')?.click();
+    authForm.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
 
     expect(onSignup).toHaveBeenCalledWith('maker@example.com', 'maker-password-123', 'Maker');
   });
@@ -1153,6 +1156,49 @@ describe('ARHud', () => {
     expect(onCloseModelPreview).toHaveBeenCalledOnce();
     expect(preview.classList.contains('hidden')).toBe(true);
     expect(document.activeElement).toBe(opener);
+  });
+
+  it('restores preview focus after download state rerenders the opener', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    let hud!: ARHud;
+    const modelId = 'generated-preview-chair';
+    const onCloseModelPreview = vi.fn(() => hud.hideModelPreview());
+    const onPreviewModel = vi.fn(() => {
+      hud.showModelPreviewLoading('Preview chair');
+      hud.markModelDownloadStarted(modelId);
+    });
+    hud = new ARHud(
+      root,
+      modelOptions,
+      createHandlers({ onCloseModelPreview, onPreviewModel }),
+    );
+    hud.updateGeneratedModels([
+      {
+        id: modelId,
+        label: 'Preview chair',
+        url: 'https://assets.example/preview-chair.glb',
+        visibility: 'public',
+      },
+    ]);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+
+    const opener = root.querySelector<HTMLButtonElement>(
+      `[data-model-id="${modelId}"] [data-action="preview"]`,
+    )!;
+    opener.focus();
+    opener.click();
+    expect(opener.isConnected).toBe(false);
+
+    root
+      .querySelector<HTMLElement>('.model-preview')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    const replacement = root.querySelector<HTMLButtonElement>(
+      `[data-model-id="${modelId}"] [data-action="preview"]`,
+    )!;
+    expect(onCloseModelPreview).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(replacement);
   });
 
   it('shows model size, local download state, and animates the model download action', () => {

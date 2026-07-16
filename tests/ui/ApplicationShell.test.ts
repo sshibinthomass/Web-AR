@@ -48,6 +48,29 @@ describe('ApplicationShell', () => {
     expect(menu.hidden).toBe(true);
   });
 
+  it('returns Create menu focus to the trigger that opened it', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    new ApplicationShell(host, {
+      onNavigate: vi.fn(),
+      onBack: vi.fn(),
+      onLogout: vi.fn(),
+    });
+    const mobileTrigger = host.querySelector<HTMLButtonElement>('.mobile-create-trigger')!;
+    const menu = host.querySelector<HTMLElement>('.create-menu')!;
+
+    mobileTrigger.click();
+    expect(menu.hidden).toBe(false);
+
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    const activeElement = document.activeElement;
+    host.remove();
+    expect(menu.hidden).toBe(true);
+    expect(activeElement).toBe(mobileTrigger);
+    expect(mobileTrigger.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('uses immersive chrome without standard navigation', () => {
     const host = document.createElement('div');
     const onBack = vi.fn();
@@ -102,5 +125,33 @@ describe('ApplicationShell', () => {
     shell.setUser(adminUser);
     expect(adminLink.hidden).toBe(false);
     expect(host.querySelector('.shell-identity')?.textContent).toBe(adminUser.email);
+  });
+
+  it('avoids duplicate account destinations and marks only the exact admin route current', () => {
+    const host = document.createElement('div');
+    const shell = new ApplicationShell(host, {
+      onNavigate: vi.fn(),
+      onBack: vi.fn(),
+      onLogout: vi.fn(),
+    });
+    const mobileAccountLink = host.querySelector<HTMLButtonElement>('.mobile-account-link')!;
+    const desktopAccountLink = host.querySelector<HTMLButtonElement>(
+      '.shell-account [data-nav-route="login"]',
+    )!;
+    const adminLink = host.querySelector<HTMLButtonElement>('.shell-admin')!;
+
+    shell.setRoute('login');
+
+    expect(mobileAccountLink.classList.contains('is-concealed')).toBe(true);
+    expect(mobileAccountLink.getAttribute('aria-hidden')).toBe('true');
+    expect(mobileAccountLink.tabIndex).toBe(-1);
+
+    shell.setRoute('admin');
+
+    expect(mobileAccountLink.classList.contains('is-concealed')).toBe(false);
+    expect(mobileAccountLink.hasAttribute('aria-hidden')).toBe(false);
+    expect(mobileAccountLink.tabIndex).toBe(0);
+    expect(desktopAccountLink.hasAttribute('aria-current')).toBe(false);
+    expect(adminLink.getAttribute('aria-current')).toBe('page');
   });
 });

@@ -357,6 +357,11 @@ h3 {
   background: transparent;
 }
 
+.mobile-account-link.is-concealed {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .mobile-route-title {
   overflow: hidden;
   font-family: var(--font-display);
@@ -3457,6 +3462,48 @@ h3 {
   }
 }
 
+@media (max-width: 767px) {
+  .admin-dashboard-section-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .admin-dashboard-section-header .admin-dashboard-actions {
+    flex: 1 0 100%;
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .admin-dashboard-section-header .admin-dashboard-actions button {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 10px;
+    line-height: 1.2;
+    white-space: normal;
+  }
+
+  .admin-account-row,
+  .admin-job-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-account-actions,
+  .admin-job-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch;
+  }
+
+  .admin-account-actions button,
+  .admin-job-actions button,
+  .admin-job-actions a {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
 /* Camera, upload, and photo-to-AR workspaces */
 .creation-workspace.fullscreen {
   position: fixed;
@@ -3644,6 +3691,23 @@ h3 {
 
   .upload-drop-zone {
     min-height: 220px;
+  }
+
+  .app-shell[data-route="upload"] .creation-workspace.fullscreen,
+  .app-shell[data-route="upload-model"] .creation-workspace.fullscreen {
+    grid-template-rows: auto auto;
+    align-content: start;
+  }
+
+  .app-shell[data-route="upload"] .creation-stage,
+  .app-shell[data-route="upload-model"] .creation-stage {
+    min-height: 0;
+  }
+
+  .app-shell[data-route="upload"] .upload-drop-zone,
+  .app-shell[data-route="upload-model"] .upload-drop-zone {
+    height: auto;
+    min-height: clamp(260px, 34dvh, 340px);
   }
 
   .camera-actions .primary {

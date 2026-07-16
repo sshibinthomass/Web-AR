@@ -52,4 +52,22 @@ describe('openDialog', () => {
     expect(onClose).toHaveBeenCalledOnce();
     close();
   });
+
+  it('restores focus to a replacement opener when the original control rerenders', () => {
+    const opener = document.createElement('button');
+    const replacement = document.createElement('button');
+    const dialog = document.createElement('div');
+    dialog.appendChild(document.createElement('button'));
+    document.body.append(opener, dialog);
+    opener.focus();
+
+    const close = openDialog(dialog, {
+      onClose: vi.fn(),
+      resolveReturnFocus: () => replacement,
+    });
+    opener.replaceWith(replacement);
+    close();
+
+    expect(document.activeElement).toBe(replacement);
+  });
 });

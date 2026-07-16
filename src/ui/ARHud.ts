@@ -294,7 +294,7 @@ export class ARHud {
     this.authPanel = document.createElement('section');
     this.authPanel.className = 'auth-panel hidden';
     this.authPanel.innerHTML = `
-      <div class="auth-panel-inner surface">
+      <form class="auth-panel-inner surface">
         <div class="auth-panel-header">
           <h2>Login</h2>
           <p class="auth-message">Sign in with an approved account, or create one for admin approval.</p>
@@ -312,7 +312,7 @@ export class ARHud {
           <input name="authName" type="text" autocomplete="name">
         </label>
         <div class="auth-form-actions"></div>
-      </div>
+      </form>
     `;
     this.authMessage = this.authPanel.querySelector<HTMLElement>('.auth-message')!;
     this.authEmailInput = this.authPanel.querySelector<HTMLInputElement>('input[name="authEmail"]')!;
@@ -325,6 +325,14 @@ export class ARHud {
       this.authSignInButton,
       this.authSignupButton,
     );
+    this.authPanel.querySelector<HTMLFormElement>('form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (this.authFormMode === 'signup') {
+        this.handleSignupClick();
+      } else {
+        this.handleLoginClick();
+      }
+    });
     this.setAuthFormMode('login');
     shell.appendChild(this.authPanel);
 
@@ -1633,6 +1641,8 @@ export class ARHud {
     this.authPasswordInput.autocomplete = isSignup ? 'new-password' : 'current-password';
     this.authSignInButton.classList.toggle('primary', !isSignup);
     this.authSignupButton.classList.toggle('primary', isSignup);
+    this.authSignInButton.type = isSignup ? 'button' : 'submit';
+    this.authSignupButton.type = isSignup ? 'submit' : 'button';
 
     if (!isSignup) {
       this.authNameInput.value = '';
@@ -2608,9 +2618,35 @@ export class ARHud {
   }
 
   private openModelPreviewDialog(): void {
-    this.closeModelPreviewDialog ??= openDialog(this.modelPreview, {
+    if (this.closeModelPreviewDialog) {
+      return;
+    }
+
+    const activeElement = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const returnRow = activeElement?.closest<HTMLElement>('[data-model-id]') ?? null;
+    const returnModelId = returnRow?.dataset.modelId ?? null;
+    const returnAction = activeElement?.closest<HTMLElement>('[data-action]')?.dataset.action ?? null;
+
+    this.closeModelPreviewDialog = openDialog(this.modelPreview, {
       initialFocus: this.modelPreview.querySelector<HTMLButtonElement>('.model-preview-close') ?? undefined,
       onClose: () => this.handlers.onCloseModelPreview(),
+      resolveReturnFocus: () => {
+        if (!returnModelId) {
+          return null;
+        }
+
+        const replacementRow = [...this.modelList.querySelectorAll<HTMLElement>('[data-model-id]')]
+          .find((row) => row.dataset.modelId === returnModelId);
+        if (!replacementRow || !returnAction) {
+          return replacementRow ?? null;
+        }
+
+        return [...replacementRow.querySelectorAll<HTMLElement>('[data-action]')]
+          .find((control) => control.dataset.action === returnAction)
+          ?? replacementRow;
+      },
     });
   }
 

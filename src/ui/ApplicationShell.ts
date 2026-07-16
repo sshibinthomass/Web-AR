@@ -29,8 +29,10 @@ export class ApplicationShell {
   private readonly mobileCreateTrigger: HTMLButtonElement;
   private readonly createMenu: HTMLElement;
   private readonly identity: HTMLElement;
+  private readonly mobileAccountLink: HTMLButtonElement;
   private readonly adminLink: HTMLButtonElement;
   private readonly logoutButton: HTMLButtonElement;
+  private createMenuOpener: HTMLButtonElement | null = null;
   private activeRoute: HudRoute = 'home';
 
   constructor(host: HTMLElement, private readonly handlers: ApplicationShellHandlers) {
@@ -75,7 +77,12 @@ export class ApplicationShell {
       <div class="mobile-top-bar">
         <button class="route-back" type="button">Back</button>
         <strong class="mobile-route-title"></strong>
-        <button type="button" data-nav-route="login" data-nav-section="account">Account</button>
+        <button
+          class="mobile-account-link"
+          type="button"
+          data-nav-route="login"
+          data-nav-section="account"
+        >Account</button>
       </div>
       <div class="immersive-bar">
         <button class="immersive-exit" type="button">Exit</button>
@@ -111,6 +118,7 @@ export class ApplicationShell {
     this.mobileCreateTrigger = this.root.querySelector<HTMLButtonElement>('.mobile-create-trigger')!;
     this.createMenu = this.root.querySelector<HTMLElement>('.create-menu')!;
     this.identity = this.root.querySelector<HTMLElement>('.shell-identity')!;
+    this.mobileAccountLink = this.root.querySelector<HTMLButtonElement>('.mobile-account-link')!;
     this.adminLink = this.root.querySelector<HTMLButtonElement>('.shell-admin')!;
     this.logoutButton = this.root.querySelector<HTMLButtonElement>('.shell-logout')!;
 
@@ -127,8 +135,9 @@ export class ApplicationShell {
     this.root.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && !this.createMenu.hidden) {
         event.preventDefault();
+        const opener = this.createMenuOpener;
         this.closeCreateMenu();
-        this.createTrigger.focus();
+        opener?.focus();
       }
     });
   }
@@ -142,13 +151,23 @@ export class ApplicationShell {
     this.mobileRouteTitle.textContent = meta.shortTitle;
     this.immersiveTitle.textContent = meta.title;
     this.immersiveStatus.textContent = meta.initialStatus;
+    const concealMobileAccount = route === 'login';
+    this.mobileAccountLink.classList.toggle('is-concealed', concealMobileAccount);
+    this.mobileAccountLink.tabIndex = concealMobileAccount ? -1 : 0;
+    if (concealMobileAccount) {
+      this.mobileAccountLink.setAttribute('aria-hidden', 'true');
+    } else {
+      this.mobileAccountLink.removeAttribute('aria-hidden');
+    }
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-nav-route], [data-nav-section]')) {
       const target = button.dataset.navRoute as HudRoute | undefined;
       const section = button.dataset.navSection;
       const isMobileArSection = target === 'ar'
         && meta.section === 'ar'
         && Boolean(button.closest('.mobile-bottom-nav'));
-      const active = target === route || isMobileArSection || section === meta.section;
+      const active = target === route
+        || isMobileArSection
+        || (!target && section === meta.section);
       if (active) {
         button.setAttribute('aria-current', 'page');
       } else {
@@ -176,7 +195,8 @@ export class ApplicationShell {
     this.root.toggleAttribute('data-restoring', isRestoring);
   }
 
-  openCreateMenu(): void {
+  openCreateMenu(opener: HTMLButtonElement = this.createTrigger): void {
+    this.createMenuOpener = opener;
     this.createMenu.hidden = false;
     this.createTrigger.setAttribute('aria-expanded', 'true');
     this.mobileCreateTrigger.setAttribute('aria-expanded', 'true');
@@ -201,7 +221,7 @@ export class ApplicationShell {
     }
     if (target.matches('.create-menu-trigger, .mobile-create-trigger')) {
       if (this.createMenu.hidden) {
-        this.openCreateMenu();
+        this.openCreateMenu(target);
       } else {
         this.closeCreateMenu();
       }
@@ -219,6 +239,7 @@ export class ApplicationShell {
     this.createMenu.hidden = true;
     this.createTrigger.setAttribute('aria-expanded', 'false');
     this.mobileCreateTrigger.setAttribute('aria-expanded', 'false');
+    this.createMenuOpener = null;
   }
 
   private setShell(shell: 'standard' | 'immersive'): void {

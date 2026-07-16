@@ -1,6 +1,7 @@
 interface DialogOptions {
   initialFocus?: HTMLElement;
   onClose(): void;
+  resolveReturnFocus?(): HTMLElement | null;
 }
 
 const focusableSelector = [
@@ -66,8 +67,11 @@ export function openDialog(dialog: HTMLElement, options: DialogOptions): () => v
     released = true;
     dialog.removeEventListener('keydown', onKeyDown);
     dialog.removeEventListener('click', onClick);
-    if (opener?.isConnected) {
-      opener.focus();
+    const returnFocus = opener?.isConnected
+      ? opener
+      : options.resolveReturnFocus?.() ?? null;
+    if (returnFocus?.isConnected) {
+      returnFocus.focus();
     }
   };
 }

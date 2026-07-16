@@ -66,4 +66,22 @@ describe('application design system', () => {
     expect(styles).toContain('.immersive-actions .rotate-control,');
     expect(styles).toContain('bottom: calc(108px + env(safe-area-inset-bottom));');
   });
+
+  it('keeps mobile account, upload, and admin controls compact and aligned', () => {
+    expect(styles).toContain('.mobile-account-link.is-concealed {');
+    expect(styles).toContain(
+      '  .app-shell[data-route="upload"] .creation-workspace.fullscreen,\n' +
+      '  .app-shell[data-route="upload-model"] .creation-workspace.fullscreen {',
+    );
+    expect(styles).toContain('grid-template-rows: auto auto;');
+    expect(styles).toContain(
+      '.admin-dashboard-section-header .admin-dashboard-actions {',
+    );
+    expect(styles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(styles).toContain(
+      '  .admin-account-row,\n' +
+      '  .admin-job-row {\n' +
+      '    grid-template-columns: 1fr;',
+    );
+  });
 });
