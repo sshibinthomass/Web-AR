@@ -31,6 +31,7 @@ export class ApplicationShell {
   private readonly identity: HTMLElement;
   private readonly adminLink: HTMLButtonElement;
   private readonly logoutButton: HTMLButtonElement;
+  private activeRoute: HudRoute = 'home';
 
   constructor(host: HTMLElement, private readonly handlers: ApplicationShellHandlers) {
     this.root = document.createElement('div');
@@ -134,17 +135,13 @@ export class ApplicationShell {
 
   setRoute(route: HudRoute): void {
     const meta = ROUTES[route];
+    this.activeRoute = route;
     this.root.dataset.route = route;
-    this.root.dataset.shell = meta.shell;
+    this.setShell(meta.shell);
     this.routeTitle.textContent = meta.title;
     this.mobileRouteTitle.textContent = meta.shortTitle;
     this.immersiveTitle.textContent = meta.title;
     this.immersiveStatus.textContent = meta.initialStatus;
-    this.root.querySelector<HTMLElement>('.app-header')!.setAttribute(
-      'aria-hidden',
-      String(meta.shell === 'immersive'),
-    );
-
     for (const button of this.root.querySelectorAll<HTMLElement>('[data-nav-route], [data-nav-section]')) {
       const target = button.dataset.navRoute as HudRoute | undefined;
       const section = button.dataset.navSection;
@@ -163,6 +160,10 @@ export class ApplicationShell {
       backButton.hidden = route === 'home';
     }
     this.closeCreateMenu();
+  }
+
+  setImmersiveMode(isImmersive: boolean): void {
+    this.setShell(isImmersive ? 'immersive' : ROUTES[this.activeRoute].shell);
   }
 
   setUser(user: AuthUser | null): void {
@@ -218,5 +219,13 @@ export class ApplicationShell {
     this.createMenu.hidden = true;
     this.createTrigger.setAttribute('aria-expanded', 'false');
     this.mobileCreateTrigger.setAttribute('aria-expanded', 'false');
+  }
+
+  private setShell(shell: 'standard' | 'immersive'): void {
+    this.root.dataset.shell = shell;
+    this.root.querySelector<HTMLElement>('.app-header')!.setAttribute(
+      'aria-hidden',
+      String(shell === 'immersive'),
+    );
   }
 }

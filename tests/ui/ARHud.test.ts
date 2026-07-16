@@ -247,7 +247,7 @@ describe('ARHud', () => {
 
     expect(window.location.hash).toBe('#/multi-object');
     expect(onStartMultiObject).toHaveBeenCalledTimes(1);
-    expect(root.querySelector('.layout-manager')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.layout-manager')).toBeNull();
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
 
@@ -636,12 +636,53 @@ describe('ARHud', () => {
 
     expect(window.location.hash).toBe('#/multi-object');
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
-    expect(root.querySelector('.layout-manager')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.layout-manager')).toBeNull();
     expect(root.textContent).not.toContain('Save Layout');
     expect(root.querySelector('.layout-row')).toBeNull();
     expect(startArCamera).toHaveBeenCalledTimes(1);
     expect(onStartMultiObject).toHaveBeenCalledTimes(1);
     expect(root.querySelector('.status-panel')?.classList.contains('layout-active')).toBe(true);
+  });
+
+  it('presents multi-object AR with one immersive control system', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="multi-object"]')?.click();
+
+    expect(root.querySelector('.app-shell')?.getAttribute('data-shell')).toBe('immersive');
+    expect(root.querySelector('.immersive-title')?.textContent).toBe('Multi-object AR');
+    expect(root.querySelector('.status-panel')?.classList.contains('immersive-inspector')).toBe(true);
+    expect(root.querySelector('.hud-actions')?.classList.contains('immersive-actions')).toBe(true);
+    expect(root.querySelector('.status-panel > .page-back')).toBeNull();
+    expect(root.querySelector('.layout-manager')).toBeNull();
+  });
+
+  it('switches from the standard AR picker to immersive controls for live placement', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="ar"]')?.click();
+    expect(root.querySelector('.app-shell')?.getAttribute('data-shell')).toBe('standard');
+
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-alpha"]')?.click();
+    hud.updateModelReady(true);
+    root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
+
+    expect(root.querySelector('.app-shell')?.getAttribute('data-shell')).toBe('immersive');
+    expect(root.querySelector('.status-panel')?.classList.contains('immersive-inspector')).toBe(true);
+    expect(root.querySelector('.hud-actions')?.classList.contains('immersive-actions')).toBe(true);
+  });
+
+  it('keeps delete separate and identifies the selected-object action', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+    root.querySelector<HTMLButtonElement>('[data-nav-route="multi-object"]')?.click();
+
+    const deleteButton = [...root.querySelectorAll<HTMLButtonElement>('.hud-actions button')]
+      .find((button) => button.textContent === 'Delete selected');
+    expect(deleteButton?.classList.contains('danger')).toBe(true);
+    expect(deleteButton?.getAttribute('aria-label')).toBe('Delete selected');
   });
 
   it('shows session-only controls for adding multiple objects', () => {
@@ -656,8 +697,8 @@ describe('ARHud', () => {
     hud.updateAuthState(activeUser);
 
     hud.showMultiObjectEditor();
-    [...root.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Add Object')?.click();
-    [...root.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Delete Object')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Add model')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Delete selected')?.click();
 
     expect(root.querySelector('.status-panel')?.classList.contains('layout-active')).toBe(true);
     expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
@@ -667,8 +708,8 @@ describe('ARHud', () => {
       'Place',
       'Scale 1x',
       'Reset',
-      'Add Object',
-      'Delete Object',
+      'Add model',
+      'Delete selected',
     ]);
     expect(actionButtons.every((button) => button.classList.contains('hud-action-chip'))).toBe(true);
     expect(actionButtons.every((button) => button.querySelector('svg') === null)).toBe(true);
@@ -1685,21 +1726,23 @@ describe('ARHud', () => {
     expect((placeButton as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('collapses AR status to only the Back button after an object is placed', () => {
+  it('keeps the immersive inspector visible after an object is placed', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
     hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-alpha"]')?.click();
+    hud.updateModelReady(true);
+    root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
     hud.update('placed');
 
     const statusPanel = root.querySelector('.status-panel');
-    const backButton = root.querySelector<HTMLButtonElement>('.status-panel > .page-back');
 
-    expect(statusPanel?.classList.contains('object-placed')).toBe(true);
+    expect(statusPanel?.classList.contains('immersive-inspector')).toBe(true);
     expect(statusPanel?.classList.contains('hidden')).toBe(false);
-    expect(backButton).toBeInstanceOf(HTMLButtonElement);
-    expect(backButton?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.status-panel > .page-back')).toBeNull();
+    expect(root.querySelector('.immersive-exit')).toBeInstanceOf(HTMLButtonElement);
   });
 
   it('provides a gesture surface after opening AR placement controls', () => {

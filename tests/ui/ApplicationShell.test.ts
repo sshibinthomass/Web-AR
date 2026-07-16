@@ -67,6 +67,26 @@ describe('ApplicationShell', () => {
     expect(onBack).toHaveBeenCalledOnce();
   });
 
+  it('can switch a standard route into and back out of live immersive mode', () => {
+    const host = document.createElement('div');
+    const shell = new ApplicationShell(host, {
+      onNavigate: vi.fn(),
+      onBack: vi.fn(),
+      onLogout: vi.fn(),
+    });
+
+    shell.setRoute('ar');
+    expect(host.querySelector('.app-shell')?.getAttribute('data-shell')).toBe('standard');
+
+    shell.setImmersiveMode(true);
+    expect(host.querySelector('.app-shell')?.getAttribute('data-shell')).toBe('immersive');
+    expect(host.querySelector('.app-header')?.getAttribute('aria-hidden')).toBe('true');
+
+    shell.setImmersiveMode(false);
+    expect(host.querySelector('.app-shell')?.getAttribute('data-shell')).toBe('standard');
+    expect(host.querySelector('.app-header')?.getAttribute('aria-hidden')).toBe('false');
+  });
+
   it('shows administrator navigation only for an active admin', () => {
     const host = document.createElement('div');
     const shell = new ApplicationShell(host, {

@@ -470,8 +470,7 @@ h3 {
 }
 
 .status-panel.camera-active,
-.status-panel.ar-picker-active,
-.status-panel.object-placed {
+.status-panel.ar-picker-active {
   max-width: none;
   margin: 0;
   padding: 0;
@@ -488,11 +487,7 @@ h3 {
 .status-panel.ar-picker-active > .status-label,
 .status-panel.ar-picker-active > .status-message,
 .status-panel.ar-picker-active > .status-source,
-.status-panel.ar-picker-active > .model-picker,
-.status-panel.object-placed > .status-label,
-.status-panel.object-placed > .status-message,
-.status-panel.object-placed > .status-source,
-.status-panel.object-placed > .model-picker {
+.status-panel.ar-picker-active > .model-picker {
   display: none;
 }
 
@@ -504,32 +499,6 @@ h3 {
   background: transparent;
   box-shadow: none;
   backdrop-filter: none;
-}
-
-.page-back {
-  min-height: 34px;
-  margin: 0 0 8px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
-  padding: 7px 10px;
-  color: #f8fafc;
-  background: rgba(5, 10, 14, 0.78);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 800;
-  backdrop-filter: blur(14px);
-  pointer-events: auto;
-  touch-action: manipulation;
-}
-
-.status-panel.camera-active > .page-back,
-.status-panel.ar-picker-active > .page-back,
-.status-panel.object-placed > .page-back {
-  position: fixed;
-  top: max(14px, env(safe-area-inset-top));
-  left: 14px;
-  z-index: 12;
-  margin: 0;
 }
 
 .full-flow-loading {
@@ -2237,44 +2206,6 @@ h3 {
   }
 }
 
-.layout-manager {
-  position: fixed;
-  inset: 0;
-  z-index: 9;
-  overflow-y: auto;
-  padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom));
-  background: rgba(2, 7, 11, 0.94);
-  pointer-events: auto;
-}
-
-.layout-manager-inner {
-  width: min(720px, 100%);
-  margin: 0 auto;
-}
-
-.layout-manager-header {
-  display: grid;
-  gap: 10px;
-  margin: 18px 0 14px;
-}
-
-.layout-manager-header h2 {
-  margin: 0;
-  color: #ffffff;
-  font-size: 30px;
-  line-height: 1;
-  letter-spacing: 0;
-}
-
-.layout-manager-header p,
-.layout-manager-message {
-  max-width: 48ch;
-  margin: 0;
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 14px;
-  line-height: 1.45;
-}
-
 .model-edit-dialog {
   position: fixed;
   inset: 0;
@@ -2555,14 +2486,6 @@ h3 {
   color: rgba(16, 35, 38, 0.7);
 }
 
-.model-manager .page-back,
-.status-panel.ar-picker-active > .page-back {
-  border-color: rgba(15, 118, 110, 0.2);
-  color: #102326;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 12px 32px rgba(15, 118, 110, 0.12);
-}
-
 .model-manager-empty,
 .ar-model-empty {
   border-color: rgba(15, 118, 110, 0.22);
@@ -2818,17 +2741,6 @@ h3 {
   background: rgba(255, 255, 255, 0.78);
   box-shadow: 0 22px 70px rgba(15, 118, 110, 0.16);
   backdrop-filter: blur(14px);
-}
-
-.auth-panel .page-back,
-.admin-dashboard .page-back,
-.speech-panel .page-back,
-.status-panel.camera-active > .page-back,
-.status-panel.full-flow-active > .page-back {
-  border-color: rgba(15, 118, 110, 0.2);
-  color: #102326;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 12px 32px rgba(15, 118, 110, 0.12);
 }
 
 .auth-panel-header h2,
@@ -4042,5 +3954,161 @@ h3 {
   .model-edit-panel,
   .confirmation-panel {
     padding: 20px;
+  }
+}
+
+/* Immersive single- and multi-object AR controls */
+.immersive-bar {
+  top: max(12px, env(safe-area-inset-top));
+  right: 14px;
+  left: 14px;
+  width: min(760px, calc(100% - 28px));
+}
+
+.immersive-inspector {
+  position: fixed;
+  top: 84px;
+  right: 24px;
+  z-index: 5;
+  display: grid;
+  gap: 6px;
+  width: min(340px, calc(100vw - 48px));
+  max-width: none;
+  max-height: calc(100dvh - 180px);
+  margin: 0;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: var(--radius-panel);
+  padding: 16px;
+  color: #ffffff;
+  background: rgba(16, 47, 47, 0.86);
+  box-shadow: 0 18px 50px rgba(3, 20, 20, 0.28);
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.immersive-inspector .status-label,
+.immersive-inspector .status-message,
+.immersive-inspector .status-source {
+  color: #ffffff;
+}
+
+.immersive-inspector .status-message {
+  margin-top: 2px;
+  font-size: 15px;
+}
+
+.immersive-inspector .status-source {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.immersive-actions {
+  position: fixed;
+  right: 24px;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  left: 24px;
+  z-index: 6;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: none;
+  margin: 0;
+}
+
+.immersive-actions .rotate-control,
+.immersive-actions .animation-control {
+  order: 0;
+  flex: 0 1 300px;
+  max-width: 300px;
+  color: #ffffff;
+  background: rgba(16, 47, 47, 0.88);
+}
+
+.immersive-actions .animation-control select {
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  background: rgba(4, 24, 24, 0.84);
+}
+
+.immersive-actions button.hud-action-chip {
+  min-height: var(--control-height);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  background: rgba(16, 47, 47, 0.88);
+}
+
+.immersive-actions button.hud-action-chip.primary {
+  border-color: var(--color-teal);
+  color: #ffffff;
+  background: var(--color-teal);
+}
+
+.immersive-actions button.hud-action-chip.danger {
+  border-color: color-mix(in srgb, var(--color-error) 62%, #ffffff);
+  color: #ffffff;
+  background: color-mix(in srgb, var(--color-error) 82%, #5d1f18);
+}
+
+.app-shell[data-shell="immersive"] .model-rail {
+  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 64px);
+}
+
+.app-shell[data-shell="immersive"] .model-rail.has-animation-control {
+  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 64px);
+}
+
+@media (max-width: 1023px) {
+  .immersive-actions {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    justify-content: flex-start;
+    padding: 2px;
+    scrollbar-width: none;
+  }
+
+  .immersive-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .immersive-actions .rotate-control,
+  .immersive-actions .animation-control {
+    flex: 0 0 min(300px, calc(100vw - 48px));
+  }
+}
+
+@media (max-width: 767px) {
+  .immersive-bar {
+    top: max(8px, env(safe-area-inset-top));
+    right: 10px;
+    left: 10px;
+    width: auto;
+  }
+
+  .immersive-inspector {
+    top: calc(68px + env(safe-area-inset-top));
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 150px;
+    padding: 12px;
+  }
+
+  .app-shell[data-shell="immersive"] .model-rail,
+  .app-shell[data-shell="immersive"] .model-rail.has-animation-control {
+    bottom: calc(108px + env(safe-area-inset-bottom));
+    justify-content: flex-start;
+  }
+
+  .immersive-actions {
+    right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    left: 10px;
+  }
+
+  .immersive-actions .rotate-control,
+  .immersive-actions .animation-control {
+    flex-basis: min(260px, calc(100vw - 36px));
   }
 }

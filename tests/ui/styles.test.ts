@@ -59,4 +59,11 @@ describe('application design system', () => {
     );
     expect(styles).toContain('.confirmation-actions {');
   });
+
+  it('separates immersive inspector, model rail, and actions across viewports', () => {
+    expect(styles).toContain('.immersive-inspector {');
+    expect(styles).toContain('.immersive-actions {');
+    expect(styles).toContain('.immersive-actions .rotate-control,');
+    expect(styles).toContain('bottom: calc(108px + env(safe-area-inset-bottom));');
+  });
 });

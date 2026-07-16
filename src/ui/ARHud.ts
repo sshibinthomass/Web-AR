@@ -134,8 +134,6 @@ export class ARHud {
   private readonly cameraPanel: HTMLElement;
   private readonly fullFlowLoading: HTMLElement;
   private readonly modelManager: HTMLElement;
-  private readonly layoutManager: HTMLElement;
-  private readonly layoutManagerMessage: HTMLElement;
   private readonly modelSearchInput: HTMLInputElement;
   private readonly modelFilterSelect: HTMLSelectElement;
   private readonly modelList: HTMLElement;
@@ -165,7 +163,6 @@ export class ARHud {
   private readonly targetObjectLabel: HTMLElement;
   private readonly targetObjectInput: HTMLInputElement;
   private readonly modelSelect: HTMLSelectElement;
-  private readonly backButton: HTMLButtonElement;
   private readonly placeButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
   private readonly resetScaleButton: HTMLButtonElement;
@@ -536,25 +533,6 @@ export class ARHud {
     this.modelManager.appendChild(this.modelPreview);
     shell.appendChild(this.modelManager);
 
-    this.layoutManager = document.createElement('section');
-    this.layoutManager.className = 'layout-manager hidden';
-    const layoutManagerInner = document.createElement('div');
-    layoutManagerInner.className = 'layout-manager-inner';
-    const layoutManagerHeader = document.createElement('div');
-    layoutManagerHeader.className = 'layout-manager-header';
-    const layoutManagerTitle = document.createElement('h2');
-    layoutManagerTitle.textContent = 'Multi Object';
-    const layoutManagerDescription = document.createElement('p');
-    layoutManagerDescription.textContent = 'This session starts empty each time. Place multiple objects, then exit when you are done.';
-    const startSessionButton = this.createButton('Start Session', 'primary', () => this.openMultiObjectEditor());
-    layoutManagerHeader.append(layoutManagerTitle, layoutManagerDescription, startSessionButton);
-    this.layoutManagerMessage = document.createElement('p');
-    this.layoutManagerMessage.className = 'layout-manager-message';
-    this.layoutManagerMessage.textContent = 'No layout is saved or reopened.';
-    layoutManagerInner.append(layoutManagerHeader, this.layoutManagerMessage);
-    this.layoutManager.appendChild(layoutManagerInner);
-    shell.appendChild(this.layoutManager);
-
     this.gestureSurface = document.createElement('div');
     this.gestureSurface.className = 'gesture-surface hidden';
     this.overlay.appendChild(this.gestureSurface);
@@ -568,9 +546,6 @@ export class ARHud {
     `;
     this.statusMessage = this.statusPanel.querySelector<HTMLElement>('.status-message')!;
     this.sourceMessage = this.statusPanel.querySelector<HTMLElement>('.status-source')!;
-    this.backButton = this.createButton('Back', 'page-back', () => this.navigateBack());
-    this.statusPanel.prepend(this.backButton);
-
     this.fullFlowLoading = document.createElement('section');
     this.fullFlowLoading.className = 'full-flow-loading hidden';
     this.fullFlowLoading.innerHTML = `
@@ -715,8 +690,8 @@ export class ARHud {
     this.placeButton = this.createHudActionButton('Place', 'Place', 'primary', this.handlers.onPlace);
     this.resetScaleButton = this.createHudActionButton('Scale 1x', '1x', '', this.handlers.onResetScale);
     this.resetButton = this.createHudActionButton('Reset', 'Reset', '', this.handlers.onReset);
-    this.addLayoutObjectButton = this.createHudActionButton('Add Object', 'Add', '', this.handlers.onAddLayoutObject);
-    this.deleteLayoutObjectButton = this.createHudActionButton('Delete Object', 'Delete', 'danger', this.handlers.onDeleteLayoutObject);
+    this.addLayoutObjectButton = this.createHudActionButton('Add model', 'Add model', '', this.handlers.onAddLayoutObject);
+    this.deleteLayoutObjectButton = this.createHudActionButton('Delete selected', 'Delete selected', 'danger', this.handlers.onDeleteLayoutObject);
     this.addLayoutObjectButton.classList.add('layout-action', 'hidden');
     this.deleteLayoutObjectButton.classList.add('layout-action', 'hidden');
 
@@ -744,7 +719,6 @@ export class ARHud {
       this.adminDashboard,
       this.speechPanel,
       this.modelManager,
-      this.layoutManager,
     );
 
     this.update('loading', 'Loading model...');
@@ -826,8 +800,9 @@ export class ARHud {
 
   showMultiObjectEditor(): void {
     this.closeModelPreviewIfOpen();
+    this.appShell.setImmersiveMode(true);
     this.statusPanel.classList.remove('hidden');
-    this.statusPanel.classList.add('layout-active');
+    this.statusPanel.classList.add('layout-active', 'immersive-inspector');
     this.statusPanel.classList.remove('camera-active', 'ar-picker-active', 'full-flow-active');
     this.cameraPanel.classList.add('hidden');
     this.cameraPanel.classList.remove('fullscreen');
@@ -835,6 +810,7 @@ export class ARHud {
     this.arModelPicker.classList.add('hidden');
     this.modelRail.classList.remove('hidden');
     this.hudActions.classList.remove('hidden');
+    this.hudActions.classList.add('immersive-actions');
     this.gestureSurface.classList.remove('hidden');
     this.showLayoutActionButtons(true);
     this.statusMessage.textContent = 'Place multiple objects in this session.';
@@ -842,7 +818,6 @@ export class ARHud {
 
   showMultiObjectMessage(message: string): void {
     this.statusMessage.textContent = message;
-    this.layoutManagerMessage.textContent = message;
   }
 
   showAdminJobMessage(message: string, isError = false): void {
@@ -854,7 +829,6 @@ export class ARHud {
     this.statusMessage.textContent = customMessage ?? this.messageForMode(mode);
 
     const hasPlacedObject = mode === 'placed' || mode === 'editing';
-    this.statusPanel.classList.toggle('object-placed', hasPlacedObject);
     this.placeButton.disabled = !this.modelReady || (mode !== 'scanning' && mode !== 'readyToPlace');
     this.resetScaleButton.disabled = !hasPlacedObject;
     this.rotateInput.disabled = !hasPlacedObject;
@@ -1512,8 +1486,10 @@ export class ARHud {
       'ar-picker-active',
       'full-flow-active',
       'layout-active',
-      'object-placed',
+      'immersive-inspector',
     );
+    this.hudActions.classList.remove('immersive-actions');
+    this.appShell.setImmersiveMode(false);
     this.cameraPanel.classList.remove('fullscreen');
     this.showLayoutActionButtons(false);
   }
@@ -2208,8 +2184,11 @@ export class ARHud {
   }
 
   private showARModelPicker(): void {
+    this.appShell.setImmersiveMode(false);
     this.statusPanel.classList.add('ar-picker-active');
+    this.statusPanel.classList.remove('immersive-inspector');
     this.hudActions.classList.add('hidden');
+    this.hudActions.classList.remove('immersive-actions');
     this.modelRail.classList.add('hidden');
     this.gestureSurface.classList.add('hidden');
     this.arModelPicker.classList.remove('hidden');
@@ -2223,9 +2202,12 @@ export class ARHud {
   }
 
   private showARPlacementControls(): void {
+    this.appShell.setImmersiveMode(true);
     this.statusPanel.classList.remove('ar-picker-active');
+    this.statusPanel.classList.add('immersive-inspector');
     this.arModelPicker.classList.add('hidden');
     this.hudActions.classList.remove('hidden');
+    this.hudActions.classList.add('immersive-actions');
     this.modelRail.classList.remove('hidden');
     this.gestureSurface.classList.remove('hidden');
     this.showLayoutActionButtons(false);
