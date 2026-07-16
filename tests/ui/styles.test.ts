@@ -40,4 +40,13 @@ describe('application design system', () => {
     expect(styles).toContain('@media (prefers-reduced-motion: reduce)');
     expect(styles).toContain('env(safe-area-inset-bottom)');
   });
+
+  it('defines explicit selection and mobile layouts for model collections', () => {
+    expect(styles).toContain(
+      '.ar-model-card[aria-pressed="true"],\n.model-manager-row.is-selected {',
+    );
+    expect(styles).toContain('.selection-label {');
+    expect(styles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(styles).toContain('grid-template-columns: repeat(3, 44px);');
+  });
 });

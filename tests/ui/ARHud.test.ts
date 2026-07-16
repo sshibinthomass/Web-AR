@@ -459,10 +459,18 @@ describe('ARHud', () => {
     expect(modelPicker?.classList.contains('hidden')).toBe(true);
     expect(arModelPicker?.classList.contains('hidden')).toBe(false);
     expect(modelRail?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.ar-picker-heading h2')?.textContent).toBe('Choose a model');
+    expect(root.querySelector('.ar-picker-heading p')?.textContent).toBe(
+      'Select one model, then continue to AR placement.',
+    );
     expect(modelCards.map((button) => button.dataset.modelId)).toEqual(['built-in-alpha', 'built-in-beta']);
     expect(modelCards.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Select Built-in alpha',
       'Select Built-in beta',
+    ]);
+    expect(modelCards.map((button) => button.querySelector('.selection-label')?.textContent)).toEqual([
+      'Select',
+      'Select',
     ]);
   });
 
@@ -483,9 +491,11 @@ describe('ARHud', () => {
     const placeArButton = root.querySelector<HTMLButtonElement>('.ar-model-place-button')!;
     expect(onModelSelect).toHaveBeenCalledWith('built-in-beta');
     expect(root.querySelector('.ar-model-card.is-selected')?.textContent).toContain('Built-in beta');
+    expect(root.querySelector('.ar-model-card.is-selected .selection-label')?.textContent).toBe('Selected');
     expect(placeArButton.disabled).toBe(true);
 
     hud.updateModelReady(true);
+    expect(placeArButton.textContent).toBe('Place selected model');
     placeArButton.click();
 
     expect(startArCamera).toHaveBeenCalledTimes(1);
@@ -706,6 +716,32 @@ describe('ARHud', () => {
     expect(root.querySelector('.upload-image-field input')?.getAttribute('aria-describedby')).toBe('imageUploadHint');
     expect(root.querySelector('.camera-actions')?.classList.contains('single-primary')).toBe(true);
     expect(root.querySelector('.camera-actions button.primary')?.textContent).toBe('Generate model');
+  });
+
+  it('does not replace focused model controls when refresh data is unchanged', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    const generated = {
+      id: 'generated-chair',
+      label: 'Generated chair',
+      url: 'https://assets.example/generated-chair.glb',
+      ownerEmail: activeUser.email,
+      visibility: 'private' as const,
+    };
+    hud.updateAuthState(activeUser);
+    hud.updateGeneratedModels([generated]);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click();
+
+    const previewButton = root.querySelector<HTMLButtonElement>(
+      '[data-model-id="generated-chair"] [data-action="preview"]',
+    )!;
+    previewButton.focus();
+    hud.updateGeneratedModels([{ ...generated }]);
+
+    expect(document.activeElement).toBe(previewButton);
+    expect(root.querySelector('[data-model-id="generated-chair"] [data-action="preview"]')).toBe(previewButton);
+    root.remove();
   });
 
   it('shows real Capture, Generate, Place steps for photo-to-ar routes only', () => {

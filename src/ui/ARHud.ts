@@ -4,6 +4,7 @@ import type { AuthUser } from '../services/authClient';
 import type { AdminJobEntry } from '../services/generatedModelClient';
 import { ApplicationShell } from './ApplicationShell';
 import { HashRouter } from './HashRouter';
+import { modelCollectionsEqual } from './modelCollections';
 import { parseRouteHash, ROUTES, routeCanOpen, type HudRoute } from './routes';
 
 interface HUDHandlers {
@@ -673,6 +674,13 @@ export class ARHud {
     this.arModelPicker.className = 'ar-model-picker hidden';
     const arModelPickerInner = document.createElement('div');
     arModelPickerInner.className = 'ar-model-picker-inner';
+    const arModelPickerHeading = document.createElement('header');
+    arModelPickerHeading.className = 'ar-picker-heading calibration-heading';
+    arModelPickerHeading.innerHTML = `
+      <span class="calibration-label">Placement library</span>
+      <h2>Choose a model</h2>
+      <p>Select one model, then continue to AR placement.</p>
+    `;
     const arModelControls = this.createModelLibraryControls('arModelSearch', 'arModelFilter');
     this.arModelSearchInput = arModelControls.searchInput;
     this.arModelFilterSelect = arModelControls.filterSelect;
@@ -683,7 +691,7 @@ export class ARHud {
     this.arPlaceButton = this.createButton('Select a model', 'ar-model-place-button primary', () => this.openSelectedModelInAR());
     this.arPlaceButton.disabled = true;
     arModelPlaceBar.appendChild(this.arPlaceButton);
-    arModelPickerInner.append(arModelControls.root, this.arModelList, arModelPlaceBar);
+    arModelPickerInner.append(arModelPickerHeading, arModelControls.root, this.arModelList, arModelPlaceBar);
     this.arModelPicker.appendChild(arModelPickerInner);
     this.overlay.appendChild(this.arModelPicker);
 
@@ -1184,6 +1192,9 @@ export class ARHud {
   }
 
   updateGeneratedModels(generatedModels: ModelOption[]): void {
+    if (modelCollectionsEqual(this.generatedModelOptions, generatedModels)) {
+      return;
+    }
     this.generatedModelOptions = [...generatedModels];
     this.renderModelSelect();
     if (!this.modelEditDialog) {
@@ -1192,6 +1203,9 @@ export class ARHud {
   }
 
   updateUploadedModels(uploadedModels: ModelOption[]): void {
+    if (modelCollectionsEqual(this.uploadedModelOptions, uploadedModels)) {
+      return;
+    }
     this.uploadedModelOptions = [...uploadedModels];
     this.renderModelSelect();
     if (!this.modelEditDialog) {
@@ -2169,7 +2183,11 @@ export class ARHud {
         typeof model.bytes === 'number' ? this.formatBytes(model.bytes) : 'Size unknown'
       }`;
 
-      item.append(thumbnail, label, meta);
+      const selectionLabel = document.createElement('span');
+      selectionLabel.className = 'selection-label';
+      selectionLabel.textContent = selectedModelId === model.id ? 'Selected' : 'Select';
+
+      item.append(thumbnail, label, meta, selectionLabel);
       this.arModelList.appendChild(item);
     });
 
@@ -2254,13 +2272,21 @@ export class ARHud {
       const isSelected = item.dataset.modelId === modelId;
       item.classList.toggle('is-selected', isSelected);
       item.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+      const selectionLabel = item.querySelector<HTMLElement>('.selection-label');
+      if (selectionLabel) {
+        selectionLabel.textContent = isSelected ? 'Selected' : 'Select';
+      }
     });
   }
 
   private updateARPlaceButton(): void {
     const hasSelection = Boolean(this.modelSelect.value);
     this.arPlaceButton.disabled = !hasSelection || !this.modelReady;
-    this.arPlaceButton.textContent = hasSelection && this.modelReady ? 'Place AR' : hasSelection ? 'Loading...' : 'Select a model';
+    this.arPlaceButton.textContent = hasSelection && this.modelReady
+      ? 'Place selected model'
+      : hasSelection
+        ? 'Preparing selected model...'
+        : 'Select a model';
   }
 
   private updateModelRailSelection(modelId: string): void {
