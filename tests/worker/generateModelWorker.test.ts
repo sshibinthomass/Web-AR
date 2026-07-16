@@ -328,13 +328,268 @@ describe('handleGenerateModelRequest', () => {
 
     expect(sessionResponse.status).toBe(200);
     expect(await sessionResponse.json()).toEqual({
-      user: {
+      user: expect.objectContaining({
         email: 'sshibinthomass@gmail.com',
         name: 'Shibin',
         role: 'admin',
         status: 'active',
-      },
+        plan: 'admin',
+        account_access: expect.objectContaining({ state: 'operational', locked: false }),
+      }),
     });
+  });
+
+  it('returns Starter access, usage, and calculated account state for an approved user session', async () => {
+    const { bucket } = createMemoryBucket();
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-16T12:00:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const userToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const response = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/session'), userToken),
+      env,
+      deps,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      user: expect.objectContaining({
+        email: 'maker@example.com',
+        role: 'user',
+        status: 'active',
+        plan: 'starter',
+        effective_entitlements: expect.objectContaining({
+          plan: 'starter',
+          max_targets: 3,
+          max_objects_per_target: 3,
+          features: expect.objectContaining({
+            scan: true,
+            groups: false,
+            animations: false,
+          }),
+        }),
+        usage: expect.objectContaining({
+          targets: 0,
+          objects: 0,
+          model_objects: 0,
+          text_objects: 0,
+          groups: 0,
+        }),
+        account_access: {
+          state: 'operational',
+          locked: false,
+          target_count: 0,
+          max_targets: 3,
+          excess_targets: 0,
+        },
+      }),
+    });
+  });
+
+  it('lets the configured admin assign plans and independent overrides with detailed usage', async () => {
+    const { bucket } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({
+        targets: [
+          {
+            id: 'maker-target',
+            label: 'Maker target',
+            image_url: 'https://worker.example/image-targets/images/maker-target.jpg',
+            image_object_key: 'image-targets/images/maker-target.jpg',
+            objects: [
+              {
+                id: 'model-one',
+                kind: 'model',
+                model: { id: 'chair', label: 'Chair', url: 'https://worker.example/chair.glb' },
+                placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+              },
+              {
+                id: 'text-one',
+                kind: 'text',
+                text: { value: 'Hello', language: 'english', font: 'studio-sans' },
+                placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+              },
+            ],
+            groups: [],
+            owner_email: 'maker@example.com',
+            scan_id: 'maker-scan',
+            access_mode: 'anyone_with_link',
+            allowed_emails: [],
+            created_at: '2026-07-15T10:00:00.000Z',
+            updated_at: '2026-07-15T10:00:00.000Z',
+          },
+        ],
+      }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-16T12:00:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const updateResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/users/maker%40example.com', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'active',
+          plan: 'creator',
+          entitlement_overrides: {
+            features: {
+              floor_placement: false,
+              groups: false,
+            },
+            maxTargets: 7,
+            maxObjectsPerTarget: 4,
+          },
+          role: 'admin',
+          usage: { targets: 0 },
+          account_access: { state: 'operational', locked: false },
+        }),
+      }), adminToken),
+      env,
+      deps,
+    );
+    const listResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/users'), adminToken),
+      env,
+      deps,
+    );
+
+    expect(updateResponse.status).toBe(200);
+    expect(await updateResponse.json()).toEqual({
+      user: expect.objectContaining({
+        email: 'maker@example.com',
+        role: 'user',
+        status: 'active',
+        plan: 'creator',
+        entitlement_overrides: {
+          features: {
+            floor_placement: false,
+            groups: false,
+          },
+          maxTargets: 7,
+          maxObjectsPerTarget: 4,
+        },
+        effective_entitlements: expect.objectContaining({
+          plan: 'creator',
+          max_targets: 7,
+          max_objects_per_target: 4,
+          features: expect.objectContaining({
+            floor_placement: false,
+            groups: false,
+            animations: true,
+          }),
+        }),
+        usage: expect.objectContaining({
+          targets: 1,
+          objects: 2,
+          model_objects: 1,
+          text_objects: 1,
+          groups: 0,
+          links: expect.objectContaining({
+            anyone_with_link: 1,
+          }),
+        }),
+      }),
+    });
+    expect(listResponse.status).toBe(200);
+    const listBody = await listResponse.json() as { users: Array<Record<string, unknown>> };
+    expect(listBody.users.find((user) => user.email === 'maker@example.com')).toEqual(expect.objectContaining({
+      role: 'user',
+      plan: 'creator',
+      created_at: '2026-07-16T12:00:00.000Z',
+      updated_at: '2026-07-16T12:00:00.000Z',
+      last_activity_at: '2026-07-16T12:00:00.000Z',
+    }));
+  });
+
+  it('supports disabled accounts and protects the configured administrator record', async () => {
+    const { bucket } = createMemoryBucket();
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-16T12:00:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const userToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const disableResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/users/maker%40example.com', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'disabled' }),
+      }), adminToken),
+      env,
+      deps,
+    );
+    const disabledSession = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/session'), userToken),
+      env,
+      deps,
+    );
+    const selfChange = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/users/sshibinthomass%40gmail.com', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'disabled', plan: 'starter' }),
+      }), adminToken),
+      env,
+      deps,
+    );
+
+    expect(disableResponse.status).toBe(200);
+    expect(await disableResponse.json()).toEqual({
+      user: expect.objectContaining({
+        email: 'maker@example.com',
+        status: 'disabled',
+        account_access: expect.objectContaining({ state: 'disabled', locked: true }),
+      }),
+    });
+    expect(disabledSession.status).toBe(403);
+    expect(await disabledSession.json()).toEqual({ error: 'Account disabled by admin.' });
+    expect(selfChange.status).toBe(400);
+    expect(await selfChange.json()).toEqual({
+      error: 'The configured administrator account cannot be disabled or assigned a user plan.',
+    });
+  });
+
+  it('records administrator changes and exposes audit events only to the configured admin', async () => {
+    const { bucket } = createMemoryBucket();
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-16T12:00:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const userToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/users/maker%40example.com', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: 'studio' }),
+      }), adminToken),
+      env,
+      deps,
+    );
+    const adminAudit = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/audit'), adminToken),
+      env,
+      deps,
+    );
+    const userAudit = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/audit'), userToken),
+      env,
+      deps,
+    );
+
+    expect(adminAudit.status).toBe(200);
+    expect(await adminAudit.json()).toEqual({
+      events: expect.arrayContaining([
+        expect.objectContaining({
+          actor: 'sshibinthomass@gmail.com',
+          action: 'admin.user.update',
+          target: 'maker@example.com',
+          status: 'ok',
+          metadata: expect.objectContaining({ plan: 'studio' }),
+        }),
+      ]),
+    });
+    expect(userAudit.status).toBe(403);
   });
 
   it('uses a Cloudflare-compatible PBKDF2 iteration count during signup', async () => {

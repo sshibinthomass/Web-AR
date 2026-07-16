@@ -1,3 +1,15 @@
+import {
+  normalizeEntitlementOverrides,
+  normalizePlanId,
+  resolveAccountAccess,
+  resolveEffectiveEntitlements,
+  type AccountAccess,
+  type AccountStatus,
+  type EffectiveEntitlements,
+  type EntitlementOverrides,
+  type PlanId,
+} from './entitlements';
+
 export interface ModelBucket {
   get(key: string): Promise<{
     body: BodyInit | null;
@@ -175,6 +187,8 @@ interface AuthRequestBody {
   password?: unknown;
   name?: unknown;
   status?: unknown;
+  plan?: unknown;
+  entitlement_overrides?: unknown;
 }
 
 type GenerationPipeline = 'trellis' | 'openai-to-3d' | 'dynamic' | 'speech' | 'text';
@@ -186,7 +200,6 @@ type GenerationStage =
   | 'completed'
   | 'failed';
 type AuthRole = 'admin' | 'user';
-type AccountStatus = 'active' | 'pending';
 type ModelVisibility = 'public' | 'private';
 
 interface StoredUser {
@@ -200,6 +213,8 @@ interface StoredUser {
   updated_at: string;
   approved_at?: string;
   approved_by?: string;
+  plan?: PlanId;
+  entitlement_overrides?: EntitlementOverrides;
 }
 
 interface UsersIndex {
@@ -267,6 +282,7 @@ interface AuditEvent {
   target?: string;
   status: string;
   created_at: string;
+  metadata?: Record<string, string | number | boolean | null>;
 }
 
 interface GeneratedModelEntry {
@@ -1220,7 +1236,17 @@ async function handleAuthRequest(
       return auth;
     }
 
-    return jsonResponse({ user: toPublicUser(auth.user) });
+    const targets = await readImageTargetsIndex(env);
+    return jsonResponse({ user: toSessionUser(auth.user, targets) });
+  }
+
+  if (request.method === 'GET' && url.pathname === '/auth/audit') {
+    const auth = await requireAdminUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    const audit = await readAuditLogIndex(env);
+    return jsonResponse({ events: audit.events });
   }
 
   if (request.method === 'POST' && url.pathname === '/auth/logout') {
@@ -1247,8 +1273,14 @@ async function handleAuthRequest(
       return auth;
     }
 
-    const index = await readUsersIndex(env);
-    return jsonResponse({ users: index.users.map(toPublicUser) });
+    const [index, targets, audit] = await Promise.all([
+      readUsersIndex(env),
+      readImageTargetsIndex(env),
+      readAuditLogIndex(env),
+    ]);
+    return jsonResponse({
+      users: index.users.map((user) => toAdminUser(user, targets, audit.events)),
+    });
   }
 
   if (url.pathname.startsWith('/auth/users/')) {
@@ -1267,7 +1299,7 @@ async function handleAuthRequest(
     }
 
     if (request.method === 'DELETE') {
-      return handleAccountRemovalRequest(env, email, auth.user);
+      return handleAccountRemovalRequest(env, deps, email, auth.user);
     }
   }
 
@@ -1304,6 +1336,7 @@ async function handleSignupRequest(request: Request, env: WorkerEnv, deps: Gener
     updated_at: now.toISOString(),
     approved_at: isAdmin ? now.toISOString() : undefined,
     approved_by: isAdmin ? email : undefined,
+    plan: 'starter',
   };
 
   return withMutationLease(env, 'auth', async () => {
@@ -1313,14 +1346,14 @@ async function handleSignupRequest(request: Request, env: WorkerEnv, deps: Gener
     }
     await writeUsersIndex(env, { users: [...index.users, user] });
 
-    if (user.status !== 'active') {
-      return jsonResponse({ user: toPublicUser(user) }, 201);
+  if (user.status !== 'active') {
+    return jsonResponse({ user: toPublicUser(user) }, 201);
     }
 
     return jsonResponse(
       {
-        user: toPublicUser(user),
-        token: await createSessionToken(user, env, now),
+      user: toPublicUser(user),
+      token: await createSessionToken(user, env, now),
       },
       201,
     );
@@ -1363,9 +1396,13 @@ async function handleLoginRequest(request: Request, env: WorkerEnv, deps: Genera
     await appendAuditEvent(env, deps, {
       actor: email,
       action: 'auth.login',
-      status: 'pending',
+      status: user.status,
     });
-    return jsonResponse({ error: 'Account pending admin approval.' }, 403);
+    return jsonResponse({
+      error: user.status === 'disabled'
+        ? 'Account disabled by admin.'
+        : 'Account pending admin approval.',
+    }, 403);
   }
 
   await appendAuditEvent(env, deps, {
@@ -1373,8 +1410,9 @@ async function handleLoginRequest(request: Request, env: WorkerEnv, deps: Genera
     action: 'auth.login',
     status: 'ok',
   });
+  const targets = await readImageTargetsIndex(env);
   return jsonResponse({
-    user: toPublicUser(user),
+    user: toSessionUser(user, targets),
     token: await createSessionToken(user, env, deps.now()),
   });
 }
@@ -1391,46 +1429,111 @@ async function handleAccountUpdateRequest(
     return jsonResponse({ error: body.error }, 400);
   }
 
-  if (body.value.status !== 'active' && body.value.status !== 'pending') {
-    return jsonResponse({ error: 'status must be active or pending.' }, 400);
+  const requestedStatus = body.value.status === undefined
+    ? undefined
+    : normalizeAccountStatus(body.value.status);
+  if (body.value.status !== undefined && !requestedStatus) {
+    return jsonResponse({ error: 'status must be active, pending, or disabled.' }, 400);
+  }
+  const requestedPlan = body.value.plan === undefined ? undefined : normalizePlanId(body.value.plan);
+  if (body.value.plan !== undefined && !requestedPlan) {
+    return jsonResponse({ error: 'plan must be starter, creator, or studio.' }, 400);
+  }
+  if (
+    body.value.entitlement_overrides !== undefined
+    && (!body.value.entitlement_overrides
+      || typeof body.value.entitlement_overrides !== 'object'
+      || Array.isArray(body.value.entitlement_overrides))
+  ) {
+    return jsonResponse({ error: 'entitlement_overrides must be an object.' }, 400);
+  }
+  const requestedOverrides = body.value.entitlement_overrides === undefined
+    ? undefined
+    : normalizeEntitlementOverrides(body.value.entitlement_overrides);
+  if (requestedStatus === undefined && requestedPlan === undefined && requestedOverrides === undefined) {
+    return jsonResponse({ error: 'status, plan, or entitlement_overrides is required.' }, 400);
+  }
+  if (
+    email === getAdminEmail(env)
+    && (requestedStatus && requestedStatus !== 'active' || requestedPlan || requestedOverrides)
+  ) {
+    return jsonResponse({
+      error: 'The configured administrator account cannot be disabled or assigned a user plan.',
+    }, 400);
   }
 
-  const index = await readUsersIndex(env);
-  const userIndex = index.users.findIndex((user) => user.email === email);
-  if (userIndex === -1) {
-    return jsonResponse({ error: 'Account not found.' }, 404);
-  }
+  return withMutationLease(env, 'auth', async () => {
+    const index = await readUsersIndex(env);
+    const userIndex = index.users.findIndex((user) => user.email === email);
+    if (userIndex === -1) {
+      return jsonResponse({ error: 'Account not found.' }, 404);
+    }
 
-  const now = deps.now();
-  const existingUser = index.users[userIndex];
-  const nextUser: StoredUser = {
-    ...existingUser,
-    role: existingUser.email === getAdminEmail(env) ? 'admin' : existingUser.role,
-    status: body.value.status,
-    updated_at: now.toISOString(),
-    approved_at: body.value.status === 'active' ? existingUser.approved_at ?? now.toISOString() : undefined,
-    approved_by: body.value.status === 'active' ? existingUser.approved_by ?? adminUser.email : undefined,
-  };
-  const users = [...index.users];
-  users[userIndex] = nextUser;
-  await writeUsersIndex(env, { users });
-
-  return jsonResponse({ user: toPublicUser(nextUser) });
+    const now = deps.now();
+    const existingUser = index.users[userIndex];
+    const nextStatus = requestedStatus ?? existingUser.status;
+    const nextUser: StoredUser = {
+      ...existingUser,
+      role: existingUser.email === getAdminEmail(env) ? 'admin' : 'user',
+      status: nextStatus,
+      plan: requestedPlan ?? existingUser.plan ?? 'starter',
+      ...(requestedOverrides !== undefined
+        ? { entitlement_overrides: requestedOverrides }
+        : {}),
+      updated_at: now.toISOString(),
+      approved_at: nextStatus === 'active' ? existingUser.approved_at ?? now.toISOString() : undefined,
+      approved_by: nextStatus === 'active' ? existingUser.approved_by ?? adminUser.email : undefined,
+    };
+    const users = [...index.users];
+    users[userIndex] = nextUser;
+    await writeUsersIndex(env, { users });
+    await appendAuditEvent(env, deps, {
+      actor: adminUser.email,
+      action: 'admin.user.update',
+      target: email,
+      status: 'ok',
+      metadata: {
+        ...(requestedStatus ? { account_status: requestedStatus } : {}),
+        ...(requestedPlan ? { plan: requestedPlan } : {}),
+        ...(requestedOverrides !== undefined
+          ? { entitlement_overrides: JSON.stringify(requestedOverrides) }
+          : {}),
+      },
+    });
+    const [targets, audit] = await Promise.all([
+      readImageTargetsIndex(env),
+      readAuditLogIndex(env),
+    ]);
+    return jsonResponse({ user: toAdminUser(nextUser, targets, audit.events) });
+  });
 }
 
-async function handleAccountRemovalRequest(env: WorkerEnv, email: string, adminUser: StoredUser): Promise<Response> {
+async function handleAccountRemovalRequest(
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  email: string,
+  adminUser: StoredUser,
+): Promise<Response> {
   if (email === adminUser.email) {
     return jsonResponse({ error: 'Admins cannot remove their own account.' }, 400);
   }
 
-  const index = await readUsersIndex(env);
-  const nextUsers = index.users.filter((user) => user.email !== email);
-  if (nextUsers.length === index.users.length) {
-    return jsonResponse({ error: 'Account not found.' }, 404);
-  }
+  return withMutationLease(env, 'auth', async () => {
+    const index = await readUsersIndex(env);
+    const nextUsers = index.users.filter((user) => user.email !== email);
+    if (nextUsers.length === index.users.length) {
+      return jsonResponse({ error: 'Account not found.' }, 404);
+    }
 
-  await writeUsersIndex(env, { users: nextUsers });
-  return jsonResponse({ deleted: true, email });
+    await writeUsersIndex(env, { users: nextUsers });
+    await appendAuditEvent(env, deps, {
+      actor: adminUser.email,
+      action: 'admin.user.delete',
+      target: email,
+      status: 'ok',
+    });
+    return jsonResponse({ deleted: true, email });
+  });
 }
 
 async function handleUploadedModelRequest(
@@ -3114,6 +3217,106 @@ function toPublicUser(user: StoredUser): { email: string; name?: string; role: A
   };
 }
 
+function toSessionUser(user: StoredUser, targetIndex: ImageTargetsIndex): Record<string, unknown> {
+  const entitlements = effectiveEntitlementsForUser(user);
+  const usage = imageTargetUsageForUser(user.email, targetIndex.targets);
+  const accountAccess = resolveAccountAccess(user, entitlements, usage.targets);
+  return {
+    ...toPublicUser(user),
+    plan: entitlements.plan,
+    effective_entitlements: effectiveEntitlementsResponse(entitlements),
+    usage,
+    account_access: accountAccessResponse(accountAccess),
+  };
+}
+
+function toAdminUser(
+  user: StoredUser,
+  targetIndex: ImageTargetsIndex,
+  auditEvents: AuditEvent[],
+): Record<string, unknown> {
+  const lastActivityAt = auditEvents.find((event) => event.actor === user.email || event.target === user.email)?.created_at;
+  return {
+    ...toSessionUser(user, targetIndex),
+    entitlement_overrides: normalizeEntitlementOverrides(user.entitlement_overrides),
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+    ...(user.approved_at ? { approved_at: user.approved_at } : {}),
+    ...(user.approved_by ? { approved_by: user.approved_by } : {}),
+    ...(lastActivityAt ? { last_activity_at: lastActivityAt } : {}),
+  };
+}
+
+function effectiveEntitlementsForUser(user: StoredUser): EffectiveEntitlements {
+  return resolveEffectiveEntitlements({
+    role: user.role,
+    plan: normalizePlanId(user.plan) ?? undefined,
+    entitlementOverrides: normalizeEntitlementOverrides(user.entitlement_overrides),
+  });
+}
+
+function effectiveEntitlementsResponse(entitlements: EffectiveEntitlements): Record<string, unknown> {
+  return {
+    plan: entitlements.plan,
+    features: { ...entitlements.features },
+    max_targets: entitlements.maxTargets,
+    max_objects_per_target: entitlements.maxObjectsPerTarget,
+  };
+}
+
+function accountAccessResponse(access: AccountAccess): Record<string, unknown> {
+  return {
+    state: access.state,
+    locked: access.locked,
+    target_count: access.targetCount,
+    max_targets: access.maxTargets,
+    excess_targets: access.excessTargets,
+  };
+}
+
+function imageTargetUsageForUser(email: string, targets: ImageTargetEntry[]): {
+  targets: number;
+  objects: number;
+  model_objects: number;
+  text_objects: number;
+  groups: number;
+  links: Record<ImageTargetAccessMode | 'total', number>;
+} {
+  const ownedTargets = targets.filter((target) => normalizeEmail(target.owner_email) === email);
+  const links: Record<ImageTargetAccessMode | 'total', number> = {
+    total: 0,
+    owner_only: 0,
+    anyone_with_link: 0,
+    any_signed_in: 0,
+    specific_accounts: 0,
+  };
+  let objects = 0;
+  let modelObjects = 0;
+  let textObjects = 0;
+  let groups = 0;
+  for (const target of ownedTargets) {
+    objects += target.objects.length;
+    modelObjects += target.objects.filter(isImageTargetModelObject).length;
+    textObjects += target.objects.filter((object) => object.kind === 'text').length;
+    groups += target.groups.length;
+    const accessMode = imageTargetAccessMode(target);
+    links.total += 1;
+    links[accessMode] += 1;
+  }
+  return {
+    targets: ownedTargets.length,
+    objects,
+    model_objects: modelObjects,
+    text_objects: textObjects,
+    groups,
+    links,
+  };
+}
+
+function normalizeAccountStatus(value: unknown): AccountStatus | null {
+  return value === 'active' || value === 'pending' || value === 'disabled' ? value : null;
+}
+
 async function requireApprovedUser(
   request: Request,
   env: WorkerEnv,
@@ -3143,7 +3346,11 @@ async function requireApprovedUser(
   }
 
   if (user.status !== 'active') {
-    return jsonResponse({ error: 'Account pending admin approval.' }, 403);
+    return jsonResponse({
+      error: user.status === 'disabled'
+        ? 'Account disabled by admin.'
+        : 'Account pending admin approval.',
+    }, 403);
   }
 
   return { user };
@@ -3429,6 +3636,9 @@ async function readUsersIndex(env: WorkerEnv): Promise<UsersIndex> {
     users: index.users.map((user) => ({
       ...user,
       role: user.email === adminEmail ? 'admin' : 'user',
+      status: normalizeAccountStatus(user.status) ?? 'pending',
+      plan: normalizePlanId(user.plan) ?? 'starter',
+      entitlement_overrides: normalizeEntitlementOverrides(user.entitlement_overrides),
     })),
   };
 }
@@ -3439,6 +3649,9 @@ async function writeUsersIndex(env: WorkerEnv, index: UsersIndex): Promise<void>
     users: index.users.map((user) => ({
       ...user,
       role: user.email === adminEmail ? 'admin' : 'user',
+      status: normalizeAccountStatus(user.status) ?? 'pending',
+      plan: normalizePlanId(user.plan) ?? 'starter',
+      entitlement_overrides: normalizeEntitlementOverrides(user.entitlement_overrides),
     })),
   });
 }
@@ -3548,7 +3761,7 @@ async function appendAuditEvent(
           created_at: deps.now().toISOString(),
         },
         ...index.events,
-      ].slice(0, 200),
+      ].slice(0, 1000),
     } satisfies AuditLogIndex);
   } catch {
     // Audit logging should not block the user-facing request path.
@@ -3762,6 +3975,10 @@ function isLocalDevelopmentOrigin(origin: string): boolean {
   } catch {
     return false;
   }
+}
+
+async function readAuditLogIndex(env: WorkerEnv): Promise<AuditLogIndex> {
+  return readJsonObject<AuditLogIndex>(env, auditLogIndexKey, { events: [] });
 }
 
 function appendVaryOrigin(value: string | null): string {
