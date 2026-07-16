@@ -571,6 +571,66 @@ describe('handleGenerateModelRequest', () => {
     });
   });
 
+  it('pauses scan URLs when their owner account is deleted while preserving admin inspection', async () => {
+    const targetId = 'deleted-owner-target';
+    const { bucket } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({
+        targets: [{
+          id: targetId,
+          label: 'Deleted owner target',
+          image_url: `https://worker.example/image-targets/images/${targetId}.jpg`,
+          image_object_key: `image-targets/images/${targetId}.jpg`,
+          objects: [{
+            kind: 'model',
+            id: 'model-1',
+            model: { id: 'chair', label: 'Chair', url: 'https://worker.example/chair.glb' },
+            placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+          }],
+          groups: [],
+          owner_email: 'maker@example.com',
+          scan_id: 'deleted-owner-scan',
+          access_mode: 'anyone_with_link',
+          allowed_emails: [],
+          created_at: '2026-07-15T12:00:00.000Z',
+          updated_at: '2026-07-15T12:00:00.000Z',
+        }],
+      }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-16T12:00:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const deleteAccount = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/users/maker%40example.com', {
+        method: 'DELETE',
+      }), adminToken),
+      env,
+      deps,
+    );
+    const guestScan = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/image-targets/scan/deleted-owner-scan'),
+      env,
+      deps,
+    );
+    const adminScan = await handleGenerateModelRequest(
+      withAuth(
+        new Request('https://worker.example/generate-3d/image-targets/scan/deleted-owner-scan'),
+        adminToken,
+      ),
+      env,
+      deps,
+    );
+
+    expect(deleteAccount.status).toBe(200);
+    expect(guestScan.status).toBe(423);
+    await expect(guestScan.json()).resolves.toMatchObject({
+      code: 'owner_account_missing',
+    });
+    expect(guestScan.headers.get('Cache-Control')).toBe('no-store');
+    expect(adminScan.status).toBe(200);
+  });
+
   it('records administrator changes and exposes audit events only to the configured admin', async () => {
     const { bucket } = createMemoryBucket();
     const env = createEnv({ MODEL_BUCKET: bucket });

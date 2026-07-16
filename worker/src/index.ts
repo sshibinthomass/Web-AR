@@ -1874,6 +1874,12 @@ async function handleImageTargetScanRequest(
   }
 
   const owner = target.owner_email ? await reloadStoredUser(env, target.owner_email) : null;
+  if (target.owner_email && !owner) {
+    return jsonResponse({
+      error: 'This scan URL is paused because its owner account no longer exists.',
+      code: 'owner_account_missing',
+    }, 423, { 'Cache-Control': 'no-store' });
+  }
   let ownerEntitlements: EffectiveEntitlements | null = null;
   if (owner) {
     const ownerAccess = markArAccessContext(owner, index);
