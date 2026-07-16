@@ -212,6 +212,27 @@ async function createApprovedUserToken(
   return loginBody.token;
 }
 
+async function setUserPlan(
+  env: WorkerEnv,
+  deps: { fetch: typeof fetch; now: () => Date },
+  adminToken: string,
+  email: string,
+  plan: 'starter' | 'creator' | 'studio',
+): Promise<void> {
+  const response = await handleGenerateModelRequest(
+    withAuth(new Request(`https://worker.example/auth/users/${encodeURIComponent(email)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan }),
+    }), adminToken),
+    env,
+    deps,
+  );
+  if (!response.ok) {
+    throw new Error(`Could not assign ${plan} to ${email}.`);
+  }
+}
+
 describe('handleGenerateModelRequest', () => {
   it('fails closed when the auth mutation coordinator binding is missing', async () => {
     const response = await handleGenerateModelRequest(
@@ -2491,6 +2512,515 @@ describe('handleGenerateModelRequest', () => {
     );
   });
 
+  it('locks an over-quota account to listing and deletion and pauses its scan URLs until cleanup', async () => {
+    const target = (index: number) => ({
+      id: `maker-target-${index}`,
+      label: `Maker target ${index}`,
+      image_url: `https://worker.example/image-targets/images/maker-target-${index}.jpg`,
+      image_object_key: `image-targets/images/maker-target-${index}.jpg`,
+      model: { id: `model-${index}`, label: 'Chair', url: `https://worker.example/model-${index}.glb` },
+      placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+      objects: [{
+        id: `object-${index}`,
+        kind: 'model',
+        model: { id: `model-${index}`, label: 'Chair', url: `https://worker.example/model-${index}.glb` },
+        placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+      }],
+      groups: [],
+      owner_email: 'maker@example.com',
+      visibility: 'private',
+      scan_id: `scan-${index}`,
+      access_mode: 'anyone_with_link',
+      allowed_emails: [],
+      created_at: `2026-07-15T10:0${index}:00.000Z`,
+      updated_at: `2026-07-15T10:0${index}:00.000Z`,
+    });
+    const targets = [1, 2, 3, 4].map(target);
+    const initialObjects: Record<string, string | ArrayBuffer> = {
+      'image-targets/index.json': JSON.stringify({ targets }),
+    };
+    for (const storedTarget of targets) {
+      initialObjects[`image-targets/records/${storedTarget.id}.json`] = JSON.stringify(storedTarget);
+      initialObjects[storedTarget.image_object_key] = new Uint8Array([1, 2, 3]).buffer;
+    }
+    const { bucket } = createMemoryBucket(initialObjects);
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = {
+      fetch: vi.fn(),
+      now: () => new Date('2026-07-16T12:00:00Z'),
+      randomUUID: () => 'replacement-scan-id',
+    };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const sessionBefore = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/session'), ownerToken),
+      env,
+      deps,
+    );
+    const listResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/image-targets'), ownerToken),
+      env,
+      deps,
+    );
+    const createResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/image-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: 'Blocked target',
+          image_base64: 'aW1hZ2U=',
+          image_mime_type: 'image/jpeg',
+          model: { id: 'new-model', label: 'New model', url: 'https://worker.example/new.glb' },
+          placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+        }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+    const updateResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/image-targets/maker-target-1', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: 'Blocked rename' }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+    const guestScanWhileLocked = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/image-targets/scan/scan-2'),
+      env,
+      deps,
+    );
+    const adminScanWhileLocked = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/image-targets/scan/scan-2'), adminToken),
+      env,
+      deps,
+    );
+    const deleteResponse = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/image-targets/maker-target-1', {
+        method: 'DELETE',
+      }), ownerToken),
+      env,
+      deps,
+    );
+    const sessionAfter = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/session'), ownerToken),
+      env,
+      deps,
+    );
+    const guestScanAfterCleanup = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/image-targets/scan/scan-2'),
+      env,
+      deps,
+    );
+    const createAtLimit = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/image-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: 'Fourth target again',
+          image_base64: 'aW1hZ2U=',
+          image_mime_type: 'image/jpeg',
+          model: { id: 'new-model', label: 'New model', url: 'https://worker.example/new.glb' },
+          placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+        }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+
+    expect(sessionBefore.status).toBe(200);
+    await expect(sessionBefore.json()).resolves.toEqual({
+      user: expect.objectContaining({
+        account_access: expect.objectContaining({
+          state: 'over_quota',
+          locked: true,
+          target_count: 4,
+          max_targets: 3,
+          excess_targets: 1,
+        }),
+      }),
+    });
+    expect(listResponse.status).toBe(200);
+    expect(((await listResponse.json()) as { targets: unknown[] }).targets).toHaveLength(4);
+    expect(createResponse.status).toBe(423);
+    await expect(createResponse.json()).resolves.toMatchObject({ code: 'account_over_quota' });
+    expect(updateResponse.status).toBe(423);
+    await expect(updateResponse.json()).resolves.toMatchObject({ code: 'account_over_quota' });
+    expect(guestScanWhileLocked.status).toBe(423);
+    await expect(guestScanWhileLocked.json()).resolves.toMatchObject({ code: 'owner_account_locked' });
+    expect(adminScanWhileLocked.status).toBe(200);
+    expect(deleteResponse.status).toBe(200);
+    expect(sessionAfter.status).toBe(200);
+    await expect(sessionAfter.json()).resolves.toEqual({
+      user: expect.objectContaining({
+        account_access: expect.objectContaining({
+          state: 'operational',
+          locked: false,
+          target_count: 3,
+          max_targets: 3,
+          excess_targets: 0,
+        }),
+      }),
+    });
+    expect(guestScanAfterCleanup.status).toBe(200);
+    expect(guestScanAfterCleanup.headers.get('Cache-Control')).toBe('no-store');
+    expect(createAtLimit.status).toBe(403);
+    await expect(createAtLimit.json()).resolves.toMatchObject({ code: 'target_quota_reached' });
+  });
+
+  it('enforces object quotas and each disabled authoring or sharing feature independently', async () => {
+    const env = createEnv();
+    const deps = {
+      fetch: vi.fn(),
+      now: () => new Date('2026-07-16T13:00:00Z'),
+      randomUUID: () => 'feature-scan-id',
+    };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    const modelObject = (id: string, extra: Record<string, unknown> = {}) => ({
+      kind: 'model',
+      id,
+      model: { id: `model-${id}`, label: `Model ${id}`, url: `https://worker.example/${id}.glb` },
+      placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+      ...extra,
+    });
+    const createTarget = (body: Record<string, unknown>) => handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/generate-3d/image-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: 'Feature target',
+          image_base64: 'aW1hZ2U=',
+          image_mime_type: 'image/jpeg',
+          ...body,
+        }),
+      }), ownerToken),
+      env,
+      deps,
+    );
+
+    const overObjectLimit = await createTarget({
+      objects: ['one', 'two', 'three', 'four'].map((id) => modelObject(id)),
+    });
+    const grouped = await createTarget({
+      groups: [{
+        id: 'group-1',
+        label: 'Group 1',
+        placement: {},
+        animation: { preset: 'none', tracks: [] },
+      }],
+      objects: [modelObject('grouped', {
+        group_id: 'group-1',
+        local_placement: {},
+      })],
+    });
+    const animated = await createTarget({
+      objects: [modelObject('animated', {
+        animation: {
+          preset: 'custom',
+          tracks: [{ property: 'rotation_y', motion: 'spin', amount: 360, speed: 0.25, phase: 0 }],
+        },
+      })],
+    });
+    const signedInSharing = await createTarget({
+      access_mode: 'any_signed_in',
+      objects: [modelObject('shared')],
+    });
+
+    await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/users/maker%40example.com', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entitlement_overrides: {
+            features: {
+              model_objects: false,
+              text_objects: false,
+            },
+          },
+        }),
+      }), adminToken),
+      env,
+      deps,
+    );
+    const modelDisabled = await createTarget({
+      objects: [modelObject('disabled-model')],
+    });
+    const textDisabled = await createTarget({
+      objects: [{
+        kind: 'text',
+        id: 'disabled-text',
+        text: { value: 'Disabled text' },
+        placement: {},
+      }],
+    });
+
+    expect(overObjectLimit.status).toBe(403);
+    await expect(overObjectLimit.json()).resolves.toMatchObject({
+      code: 'object_quota_exceeded',
+      max_objects_per_target: 3,
+    });
+    expect(grouped.status).toBe(403);
+    await expect(grouped.json()).resolves.toMatchObject({ code: 'feature_disabled', feature: 'groups' });
+    expect(animated.status).toBe(403);
+    await expect(animated.json()).resolves.toMatchObject({ code: 'feature_disabled', feature: 'animations' });
+    expect(signedInSharing.status).toBe(403);
+    await expect(signedInSharing.json()).resolves.toMatchObject({
+      code: 'feature_disabled',
+      feature: 'share_signed_in',
+    });
+    expect(modelDisabled.status).toBe(403);
+    await expect(modelDisabled.json()).resolves.toMatchObject({
+      code: 'feature_disabled',
+      feature: 'model_objects',
+    });
+    expect(textDisabled.status).toBe(403);
+    await expect(textDisabled.json()).resolves.toMatchObject({
+      code: 'feature_disabled',
+      feature: 'text_objects',
+    });
+  });
+
+  it('requires an over-limit target to reduce its object count before other edits', async () => {
+    const targetId = 'over-object-limit';
+    const existingObjects = ['one', 'two', 'three', 'four'].map((id) => ({
+      kind: 'model',
+      id,
+      model: { id: `model-${id}`, label: `Model ${id}`, url: `https://worker.example/${id}.glb` },
+      placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+    }));
+    const { bucket } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({
+        targets: [{
+          id: targetId,
+          label: 'Legacy large target',
+          image_url: `https://worker.example/image-targets/images/${targetId}.jpg`,
+          image_object_key: `image-targets/images/${targetId}.jpg`,
+          objects: existingObjects,
+          groups: [],
+          owner_email: 'maker@example.com',
+          scan_id: 'legacy-large-scan',
+          access_mode: 'owner_only',
+          allowed_emails: [],
+          created_at: '2026-07-15T12:00:00.000Z',
+          updated_at: '2026-07-15T12:00:00.000Z',
+        }],
+      }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-16T13:10:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    const update = (body: Record<string, unknown>) => handleGenerateModelRequest(
+      withAuth(new Request(`https://worker.example/generate-3d/image-targets/${targetId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }), ownerToken),
+      env,
+      deps,
+    );
+
+    const blockedRename = await update({ label: 'Still too large' });
+    const cleanup = await update({ objects: existingObjects.slice(0, 3) });
+    const blockedIncrease = await update({ objects: existingObjects });
+
+    expect(blockedRename.status).toBe(403);
+    await expect(blockedRename.json()).resolves.toMatchObject({
+      code: 'object_quota_exceeded',
+      current_objects: 4,
+      requested_objects: 4,
+      max_objects_per_target: 3,
+    });
+    expect(cleanup.status).toBe(200);
+    expect(((await cleanup.json()) as { objects: unknown[] }).objects).toHaveLength(3);
+    expect(blockedIncrease.status).toBe(403);
+    await expect(blockedIncrease.json()).resolves.toMatchObject({
+      code: 'object_quota_exceeded',
+      current_objects: 3,
+      requested_objects: 4,
+      max_objects_per_target: 3,
+    });
+  });
+
+  it('removes disabled runtime animation data and exposes floor capabilities on scan responses', async () => {
+    const targetId = 'animated-target';
+    const animation = {
+      preset: 'custom',
+      tracks: [{ property: 'rotation_y', motion: 'spin', amount: 360, speed: 0.25, phase: 0 }],
+    };
+    const { bucket } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({
+        targets: [{
+          id: targetId,
+          label: 'Animated target',
+          image_url: `https://worker.example/image-targets/images/${targetId}.jpg`,
+          image_object_key: `image-targets/images/${targetId}.jpg`,
+          objects: [{
+            kind: 'model',
+            id: 'model-1',
+            model: { id: 'chair', label: 'Chair', url: 'https://worker.example/chair.glb' },
+            placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+            group_id: 'group-1',
+            local_placement: {},
+            animation,
+          }],
+          groups: [{
+            id: 'group-1',
+            label: 'Group 1',
+            placement: {},
+            animation,
+          }],
+          owner_email: 'maker@example.com',
+          scan_id: 'animated-scan',
+          access_mode: 'anyone_with_link',
+          allowed_emails: [],
+          created_at: '2026-07-15T12:00:00.000Z',
+          updated_at: '2026-07-15T12:00:00.000Z',
+        }],
+      }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = { fetch: vi.fn(), now: () => new Date('2026-07-16T13:20:00Z') };
+    const adminToken = await createAdminToken(env, deps);
+    await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+
+    const starterScan = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/image-targets/scan/animated-scan'),
+      env,
+      deps,
+    );
+    const starterBody = await starterScan.json() as {
+      runtime_capabilities: Record<string, boolean>;
+      objects: Array<Record<string, unknown>>;
+      groups: Array<Record<string, unknown>>;
+    };
+
+    await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/users/maker%40example.com', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: 'creator' }),
+      }), adminToken),
+      env,
+      deps,
+    );
+    const creatorScan = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/image-targets/scan/animated-scan'),
+      env,
+      deps,
+    );
+    const creatorBody = await creatorScan.json() as {
+      runtime_capabilities: Record<string, boolean>;
+      objects: Array<Record<string, unknown>>;
+      groups: Array<Record<string, unknown>>;
+    };
+
+    expect(starterScan.status).toBe(200);
+    expect(starterBody.runtime_capabilities).toEqual({
+      animations: false,
+      floor_placement: false,
+    });
+    expect(starterBody.objects[0]).not.toHaveProperty('animation');
+    expect(starterBody.groups[0]).not.toHaveProperty('animation');
+    expect(creatorScan.status).toBe(200);
+    expect(creatorBody.runtime_capabilities).toEqual({
+      animations: true,
+      floor_placement: true,
+    });
+    expect(creatorBody.objects[0]).toHaveProperty('animation', animation);
+    expect(creatorBody.groups[0]).toHaveProperty('animation', animation);
+  });
+
+  it('allows only the configured admin to rotate a scan link and invalidates the old URL', async () => {
+    const targetId = 'rotate-target';
+    const { bucket, objects } = createMemoryBucket({
+      'image-targets/index.json': JSON.stringify({
+        targets: [{
+          id: targetId,
+          label: 'Rotating target',
+          image_url: `https://worker.example/image-targets/images/${targetId}.jpg`,
+          image_object_key: `image-targets/images/${targetId}.jpg`,
+          objects: [{
+            kind: 'model',
+            id: 'model-1',
+            model: { id: 'chair', label: 'Chair', url: 'https://worker.example/chair.glb' },
+            placement: { scale: 1, offset_x: 0, offset_y: 0, height: 0.12 },
+          }],
+          groups: [],
+          owner_email: 'maker@example.com',
+          scan_id: 'old-scan-id',
+          access_mode: 'anyone_with_link',
+          allowed_emails: [],
+          created_at: '2026-07-15T12:00:00.000Z',
+          updated_at: '2026-07-15T12:00:00.000Z',
+        }],
+      }),
+    });
+    const env = createEnv({ MODEL_BUCKET: bucket });
+    const deps = {
+      fetch: vi.fn(),
+      now: () => new Date('2026-07-16T13:30:00Z'),
+      randomUUID: () => 'new-scan-id',
+    };
+    const adminToken = await createAdminToken(env, deps);
+    const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    const rotateRequest = (token: string) => handleGenerateModelRequest(
+      withAuth(new Request(
+        `https://worker.example/generate-3d/image-targets/${targetId}/rotate-link`,
+        { method: 'POST' },
+      ), token),
+      env,
+      deps,
+    );
+
+    const ownerAttempt = await rotateRequest(ownerToken);
+    const adminRotation = await rotateRequest(adminToken);
+    const oldScan = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/image-targets/scan/old-scan-id'),
+      env,
+      deps,
+    );
+    const newScan = await handleGenerateModelRequest(
+      new Request('https://worker.example/generate-3d/image-targets/scan/new-scan-id'),
+      env,
+      deps,
+    );
+    const audit = await handleGenerateModelRequest(
+      withAuth(new Request('https://worker.example/auth/audit'), adminToken),
+      env,
+      deps,
+    );
+
+    expect(ownerAttempt.status).toBe(403);
+    expect(adminRotation.status).toBe(200);
+    await expect(adminRotation.json()).resolves.toMatchObject({
+      id: targetId,
+      scan_id: 'new-scan-id',
+      updated_at: '2026-07-16T13:30:00.000Z',
+    });
+    expect(oldScan.status).toBe(404);
+    expect(newScan.status).toBe(200);
+    expect(JSON.parse(objects.get('image-targets/index.json') as string).targets[0]).toMatchObject({
+      id: targetId,
+      scan_id: 'new-scan-id',
+    });
+    expect(JSON.parse(objects.get(`image-targets/records/${targetId}.json`) as string)).toMatchObject({
+      id: targetId,
+      scan_id: 'new-scan-id',
+    });
+    expect(await audit.json()).toEqual({
+      events: expect.arrayContaining([expect.objectContaining({
+        actor: 'sshibinthomass@gmail.com',
+        action: 'image-target.rotate-link',
+        target: targetId,
+        status: 'ok',
+      })]),
+    });
+  });
+
   it('normalizes shared target accounts and keeps the scan id stable across access updates', async () => {
     const { bucket } = createMemoryBucket({
       'image-targets/index.json': JSON.stringify({ targets: [] }),
@@ -2503,6 +3033,7 @@ describe('handleGenerateModelRequest', () => {
     };
     const adminToken = await createAdminToken(env, deps);
     const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    await setUserPlan(env, deps, adminToken, 'maker@example.com', 'creator');
 
     const created = await handleGenerateModelRequest(
       withAuth(new Request('https://worker.example/generate-3d/image-targets', {
@@ -2601,6 +3132,7 @@ describe('handleGenerateModelRequest', () => {
     const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:05:00Z') };
     const adminToken = await createAdminToken(env, deps);
     const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    await setUserPlan(env, deps, adminToken, 'maker@example.com', 'creator');
 
     const response = await handleGenerateModelRequest(
       withAuth(
@@ -2686,6 +3218,7 @@ describe('handleGenerateModelRequest', () => {
     const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:10:00Z') };
     const adminToken = await createAdminToken(env, deps);
     const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    await setUserPlan(env, deps, adminToken, 'maker@example.com', 'creator');
     const group = {
       id: 'group-1',
       label: 'Group 1',
@@ -3105,6 +3638,7 @@ describe('handleGenerateModelRequest', () => {
     const deps = { fetch: vi.fn(), now: () => new Date('2026-07-05T18:10:00Z') };
     const adminToken = await createAdminToken(env, deps);
     const ownerToken = await createApprovedUserToken(env, deps, adminToken, 'maker@example.com');
+    await setUserPlan(env, deps, adminToken, 'maker@example.com', 'creator');
     const friendToken = await createApprovedUserToken(env, deps, adminToken, 'friend@example.com');
     const otherToken = await createApprovedUserToken(env, deps, adminToken, 'other@example.com');
     const scan = (scanId: string, token?: string) => handleGenerateModelRequest(

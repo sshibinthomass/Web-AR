@@ -7,6 +7,7 @@ import {
   type AccountStatus,
   type EffectiveEntitlements,
   type EntitlementOverrides,
+  type FeatureKey,
   type PlanId,
 } from './entitlements';
 
@@ -558,13 +559,46 @@ async function routeGenerateModelRequest(
     return handleImageTargetScanRequest(request, env, deps, scanId);
   }
 
+  const rotateImageTargetLinkMatch = url.pathname.match(
+    /^\/generate-3d\/image-targets\/([^/]+)\/rotate-link$/,
+  );
+  if (request.method === 'POST' && rotateImageTargetLinkMatch) {
+    const auth = await requireAdminUser(request, env, deps);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    const targetId = decodeURIComponent(rotateImageTargetLinkMatch[1]);
+    return withMutationLease(env, 'targets', async () => {
+      const currentAdmin = await reloadStoredUser(env, auth.user.email);
+      if (
+        !currentAdmin
+        || currentAdmin.status !== 'active'
+        || currentAdmin.role !== 'admin'
+        || currentAdmin.email !== getAdminEmail(env)
+      ) {
+        return jsonResponse({ error: 'Admin access required.' }, 403);
+      }
+      return rotateImageTargetScanLink(env, deps, targetId, currentAdmin);
+    });
+  }
+
   if (request.method === 'GET' && url.pathname === '/generate-3d/image-targets') {
     const index = await readImageTargetsIndex(env);
-    const auth = await readOptionalApprovedUser(request, env, deps);
+    const auth = await readOptionalStoredUser(request, env, deps);
+    if (auth && auth.user.status !== 'active') {
+      return jsonResponse({
+        error: auth?.user.status === 'disabled'
+          ? 'Account disabled by admin.'
+          : 'Account pending admin approval.',
+      }, 403);
+    }
     if (auth) {
       await ensureImageTargetScanIds(env, index, auth.user, deps);
     }
-    const visibleTargets = index.targets.filter((target) => isImageTargetVisibleToUser(target, auth?.user ?? null));
+    const access = auth ? markArAccessContext(auth.user, index) : null;
+    const visibleTargets = access?.account.state === 'over_quota'
+      ? index.targets.filter((target) => target.owner_email === auth?.user.email)
+      : index.targets.filter((target) => isImageTargetVisibleToUser(target, auth?.user ?? null));
     return jsonResponse({
       targets: visibleTargets.sort((left, right) => right.created_at.localeCompare(left.created_at)),
     });
@@ -575,7 +609,13 @@ async function routeGenerateModelRequest(
     if (auth instanceof Response) {
       return auth;
     }
-    return handleImageTargetCreateRequest(request, env, deps, url, auth.user);
+    return withMutationLease(env, 'targets', async () => {
+      const currentUser = await reloadStoredUser(env, auth.user.email);
+      if (!currentUser || currentUser.status !== 'active') {
+        return jsonResponse({ error: 'Login required.' }, 401);
+      }
+      return handleImageTargetCreateRequest(request, env, deps, url, currentUser);
+    });
   }
 
   if (url.pathname.startsWith('/generate-3d/image-targets/')) {
@@ -584,7 +624,13 @@ async function routeGenerateModelRequest(
       return auth;
     }
     const targetId = decodeURIComponent(url.pathname.replace('/generate-3d/image-targets/', ''));
-    return handleImageTargetManagementRequest(request, env, deps, url, targetId, auth.user);
+    return withMutationLease(env, 'targets', async () => {
+      const currentUser = await reloadStoredUser(env, auth.user.email);
+      if (!currentUser || currentUser.status !== 'active') {
+        return jsonResponse({ error: 'Login required.' }, 401);
+      }
+      return handleImageTargetManagementRequest(request, env, deps, url, targetId, currentUser);
+    });
   }
 
   if (url.pathname.startsWith('/generate-3d/models/')) {
@@ -1597,6 +1643,26 @@ async function handleImageTargetCreateRequest(
     return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
   }
 
+  const targetIndex = await readImageTargetsIndex(env);
+  const accessContext = markArAccessContext(user, targetIndex);
+  if (user.role !== 'admin' && accessContext.account.state === 'over_quota') {
+    return accountOverQuotaResponse(accessContext.account);
+  }
+  if (user.role !== 'admin' && !accessContext.entitlements.features.target_create) {
+    return featureDeniedResponse('target_create');
+  }
+  if (
+    user.role !== 'admin'
+    && accessContext.entitlements.maxTargets !== null
+    && accessContext.targetCount >= accessContext.entitlements.maxTargets
+  ) {
+    return jsonResponse({
+      error: 'Target limit reached.',
+      code: 'target_quota_reached',
+      account_access: accountAccessResponse(accessContext.account),
+    }, 403);
+  }
+
   const body = await readJsonBody<ImageTargetRequestBody>(request);
   if (!body.ok) {
     return jsonResponse({ error: body.error }, 400);
@@ -1630,10 +1696,21 @@ async function handleImageTargetCreateRequest(
   if ('error' in access) {
     return jsonResponse({ error: access.error }, 400);
   }
+  if (user.role !== 'admin') {
+    const entitlementError = validateImageTargetCreateEntitlements(
+      accessContext.entitlements,
+      imageTargetObjects,
+      groups,
+      access.access_mode,
+    );
+    if (entitlementError) {
+      return entitlementError;
+    }
+  }
 
   const now = deps.now();
   const label = normalizeModelLabel(body.value.label) ?? 'Image target';
-  const existingTargets = (await readImageTargetsIndex(env)).targets;
+  const existingTargets = targetIndex.targets;
   const id = createUniqueImageTargetId(existingTargets, now, label);
   const extension = imageTargetExtension(imageMimeType);
   const objectKey = `${imageTargetImagePrefix}${id}.${extension}`;
@@ -1786,17 +1863,70 @@ async function handleImageTargetScanRequest(
   if (!target) {
     return jsonResponse({ error: 'Image target not found.' }, 404);
   }
+
+  const viewer = await readOptionalStoredUser(request, env, deps);
+  if (viewer?.user.role === 'admin' && viewer.user.email === getAdminEmail(env)) {
+    return jsonResponse(
+      imageTargetScanResponse(target, effectiveEntitlementsForUser(viewer.user)),
+      200,
+      { 'Cache-Control': 'no-store' },
+    );
+  }
+
+  const owner = target.owner_email ? await reloadStoredUser(env, target.owner_email) : null;
+  let ownerEntitlements: EffectiveEntitlements | null = null;
+  if (owner) {
+    const ownerAccess = markArAccessContext(owner, index);
+    ownerEntitlements = ownerAccess.entitlements;
+    if (owner.status !== 'active' || ownerAccess.account.locked) {
+      return jsonResponse({
+        error: 'This scan URL is paused because its owner account is locked.',
+        code: 'owner_account_locked',
+      }, 423, { 'Cache-Control': 'no-store' });
+    }
+    if (!ownerAccess.entitlements.features.scan_links) {
+      return jsonResponse({
+        error: 'This scan URL is paused by the account administrator.',
+        code: 'scan_links_disabled',
+      }, 403, { 'Cache-Control': 'no-store' });
+    }
+    const sharingFeature = sharingFeatureForAccessMode(imageTargetAccessMode(target));
+    if (sharingFeature && !ownerAccess.entitlements.features[sharingFeature]) {
+      return jsonResponse({
+        error: 'This target sharing mode is disabled.',
+        code: 'sharing_mode_disabled',
+      }, 403, { 'Cache-Control': 'no-store' });
+    }
+  }
+
+  if (viewer) {
+    if (viewer.user.status !== 'active') {
+      return jsonResponse({
+        error: viewer.user.status === 'disabled'
+          ? 'Account disabled by admin.'
+          : 'Account pending admin approval.',
+        code: 'viewer_account_locked',
+      }, 403, { 'Cache-Control': 'no-store' });
+    }
+    const viewerAccess = markArAccessContext(viewer.user, index);
+    if (viewerAccess.account.state === 'over_quota') {
+      return accountOverQuotaResponse(viewerAccess.account, { 'Cache-Control': 'no-store' });
+    }
+    if (!viewerAccess.entitlements.features.scan) {
+      return featureDeniedResponse('scan', { 'Cache-Control': 'no-store' });
+    }
+  }
+
   if (imageTargetAccessMode(target) === 'anyone_with_link') {
-    return jsonResponse(target);
+    return jsonResponse(imageTargetScanResponse(target, ownerEntitlements), 200, { 'Cache-Control': 'no-store' });
   }
-  const auth = await readOptionalApprovedUser(request, env, deps);
-  if (!auth) {
-    return jsonResponse({ error: 'Login required.' }, 401);
+  if (!viewer) {
+    return jsonResponse({ error: 'Login required.' }, 401, { 'Cache-Control': 'no-store' });
   }
-  if (!canScanImageTarget(target, auth.user)) {
+  if (!canScanImageTarget(target, viewer.user)) {
     return jsonResponse({ error: 'You do not have access to this image target.' }, 403);
   }
-  return jsonResponse(target);
+  return jsonResponse(imageTargetScanResponse(target, ownerEntitlements), 200, { 'Cache-Control': 'no-store' });
 }
 
 async function updateImageTarget(
@@ -1822,6 +1952,13 @@ async function updateImageTarget(
   if (!canManageImageTarget(existingTarget, user)) {
     return jsonResponse({ error: 'Only the owner or an admin can manage this image target.' }, 403);
   }
+  const accessContext = markArAccessContext(user, index);
+  if (user.role !== 'admin' && accessContext.account.state === 'over_quota') {
+    return accountOverQuotaResponse(accessContext.account);
+  }
+  if (user.role !== 'admin' && !accessContext.entitlements.features.target_edit) {
+    return featureDeniedResponse('target_edit');
+  }
 
   const requestedGroups = body.value.groups !== undefined
     ? normalizeImageTargetGroups(body.value.groups)
@@ -1842,6 +1979,18 @@ async function updateImageTarget(
   );
   if ('error' in access) {
     return jsonResponse({ error: access.error }, 400);
+  }
+  if (user.role !== 'admin') {
+    const entitlementError = validateImageTargetUpdateEntitlements(
+      accessContext.entitlements,
+      existingTarget,
+      nextObjects,
+      nextGroups,
+      access.access_mode,
+    );
+    if (entitlementError) {
+      return entitlementError;
+    }
   }
   const { model: _existingModel, placement: _existingPlacement, ...existingWithoutAliases } = existingTarget;
   const now = deps.now();
@@ -1939,6 +2088,14 @@ async function deleteImageTarget(
   if (!canManageImageTarget(target, user)) {
     return jsonResponse({ error: 'Only the owner or an admin can manage this image target.' }, 403);
   }
+  const accessContext = markArAccessContext(user, index);
+  if (
+    user.role !== 'admin'
+    && accessContext.account.state !== 'over_quota'
+    && !accessContext.entitlements.features.target_delete
+  ) {
+    return featureDeniedResponse('target_delete');
+  }
 
   await writeImageTargetsIndex(env, {
     targets: index.targets.filter((entry) => entry.id !== targetId),
@@ -1953,6 +2110,47 @@ async function deleteImageTarget(
   });
 
   return jsonResponse({ deleted: true, id: targetId });
+}
+
+async function rotateImageTargetScanLink(
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+  targetId: string,
+  admin: StoredUser,
+): Promise<Response> {
+  const index = await readImageTargetsIndex(env);
+  const targetIndex = index.targets.findIndex((target) => target.id === targetId);
+  if (targetIndex === -1) {
+    return jsonResponse({ error: 'Image target not found.' }, 404);
+  }
+
+  const existingTarget = index.targets[targetIndex];
+  const baseScanId = deps.randomUUID?.() ?? crypto.randomUUID();
+  let scanId = baseScanId;
+  let suffix = 2;
+  while (index.targets.some((target) => target.id !== targetId && target.scan_id === scanId)) {
+    scanId = `${baseScanId}-${suffix}`;
+    suffix += 1;
+  }
+  const nextTarget: ImageTargetEntry = {
+    ...existingTarget,
+    scan_id: scanId,
+    updated_at: deps.now().toISOString(),
+  };
+  index.targets[targetIndex] = nextTarget;
+  await writeJsonObject(env, imageTargetRecordKey(targetId), nextTarget);
+  await writeImageTargetsIndex(env, index);
+  await appendAuditEvent(env, deps, {
+    actor: admin.email,
+    action: 'image-target.rotate-link',
+    target: targetId,
+    status: 'ok',
+    metadata: {
+      previous_scan_id: existingTarget.scan_id ?? null,
+      scan_id: scanId,
+    },
+  });
+  return jsonResponse(nextTarget);
 }
 
 async function updateGeneratedModel(
@@ -3317,6 +3515,234 @@ function normalizeAccountStatus(value: unknown): AccountStatus | null {
   return value === 'active' || value === 'pending' || value === 'disabled' ? value : null;
 }
 
+type MarkArAccessContext = {
+  user: StoredUser;
+  entitlements: EffectiveEntitlements;
+  account: AccountAccess;
+  targetCount: number;
+};
+
+function markArAccessContext(user: StoredUser, targetIndex: ImageTargetsIndex): MarkArAccessContext {
+  const entitlements = effectiveEntitlementsForUser(user);
+  const targetCount = targetIndex.targets.filter((target) => target.owner_email === user.email).length;
+  return {
+    user,
+    entitlements,
+    account: resolveAccountAccess(user, entitlements, targetCount),
+    targetCount,
+  };
+}
+
+type ImageTargetFeatureUsage = {
+  objects: number;
+  modelObjects: number;
+  textObjects: number;
+  groups: number;
+  animations: number;
+};
+
+function validateImageTargetCreateEntitlements(
+  entitlements: EffectiveEntitlements,
+  objects: ImageTargetObject[],
+  groups: ImageTargetGroup[],
+  accessMode: ImageTargetAccessMode,
+): Response | null {
+  const usage = imageTargetFeatureUsage(objects, groups);
+  if (
+    entitlements.maxObjectsPerTarget !== null
+    && usage.objects > entitlements.maxObjectsPerTarget
+  ) {
+    return objectQuotaExceededResponse(0, usage.objects, entitlements.maxObjectsPerTarget);
+  }
+  const featureError = disabledImageTargetUsageFeature(entitlements, usage, {
+    objects: 0,
+    modelObjects: 0,
+    textObjects: 0,
+    groups: 0,
+    animations: 0,
+  });
+  if (featureError) {
+    return featureError;
+  }
+  const sharingFeature = sharingFeatureForAccessMode(accessMode);
+  return sharingFeature && !entitlements.features[sharingFeature]
+    ? featureDeniedResponse(sharingFeature)
+    : null;
+}
+
+function validateImageTargetUpdateEntitlements(
+  entitlements: EffectiveEntitlements,
+  existingTarget: ImageTargetEntry,
+  nextObjects: ImageTargetObject[],
+  nextGroups: ImageTargetGroup[],
+  nextAccessMode: ImageTargetAccessMode,
+): Response | null {
+  const existingObjects = imageTargetObjectsFromStoredTarget(existingTarget);
+  const existingGroups = usedImageTargetGroups(
+    normalizeImageTargetGroups(existingTarget.groups),
+    existingObjects,
+  );
+  const existingUsage = imageTargetFeatureUsage(existingObjects, existingGroups);
+  const nextUsage = imageTargetFeatureUsage(nextObjects, nextGroups);
+  const maxObjects = entitlements.maxObjectsPerTarget;
+  if (
+    maxObjects !== null
+    && (
+      (existingUsage.objects > maxObjects && nextUsage.objects >= existingUsage.objects)
+      || (existingUsage.objects <= maxObjects && nextUsage.objects > maxObjects)
+    )
+  ) {
+    return objectQuotaExceededResponse(existingUsage.objects, nextUsage.objects, maxObjects);
+  }
+
+  const featureError = disabledImageTargetUsageFeature(entitlements, nextUsage, existingUsage);
+  if (featureError) {
+    return featureError;
+  }
+
+  const existingAccessMode = imageTargetAccessMode(existingTarget);
+  const sharingFeature = sharingFeatureForAccessMode(nextAccessMode);
+  return nextAccessMode !== existingAccessMode
+    && sharingFeature
+    && !entitlements.features[sharingFeature]
+    ? featureDeniedResponse(sharingFeature)
+    : null;
+}
+
+function disabledImageTargetUsageFeature(
+  entitlements: EffectiveEntitlements,
+  nextUsage: ImageTargetFeatureUsage,
+  existingUsage: ImageTargetFeatureUsage,
+): Response | null {
+  const guardedUsage: Array<{
+    feature: FeatureKey;
+    next: number;
+    existing: number;
+  }> = [
+    { feature: 'model_objects', next: nextUsage.modelObjects, existing: existingUsage.modelObjects },
+    { feature: 'text_objects', next: nextUsage.textObjects, existing: existingUsage.textObjects },
+    { feature: 'groups', next: nextUsage.groups, existing: existingUsage.groups },
+    { feature: 'animations', next: nextUsage.animations, existing: existingUsage.animations },
+  ];
+  const disabledIncrease = guardedUsage.find(
+    (usage) => !entitlements.features[usage.feature] && usage.next > usage.existing,
+  );
+  return disabledIncrease ? featureDeniedResponse(disabledIncrease.feature) : null;
+}
+
+function imageTargetFeatureUsage(
+  objects: ImageTargetObject[],
+  groups: ImageTargetGroup[],
+): ImageTargetFeatureUsage {
+  return {
+    objects: objects.length,
+    modelObjects: objects.filter(isImageTargetModelObject).length,
+    textObjects: objects.filter((object) => object.kind === 'text').length,
+    groups: groups.length,
+    animations:
+      objects.filter((object) => hasActiveImageTargetAnimation(object.animation)).length
+      + groups.filter((group) => hasActiveImageTargetAnimation(group.animation)).length,
+  };
+}
+
+function hasActiveImageTargetAnimation(animation: ImageTargetAnimation | undefined): boolean {
+  if (!animation) {
+    return false;
+  }
+  if (animation.preset && animation.preset !== 'none') {
+    return true;
+  }
+  if (
+    animation.tracks?.some(
+      (track) => Math.abs(track.amount) > 0 && Math.abs(track.speed) > 0,
+    )
+  ) {
+    return true;
+  }
+  if (
+    animation.spin_axis
+    && animation.spin_axis !== 'none'
+    && Math.abs(animation.spin_speed ?? 0) > 0
+  ) {
+    return true;
+  }
+  return Math.abs(animation.bob_height ?? 0) > 0 && Math.abs(animation.bob_speed ?? 0) > 0;
+}
+
+function objectQuotaExceededResponse(
+  currentObjects: number,
+  requestedObjects: number,
+  maxObjectsPerTarget: number,
+): Response {
+  return jsonResponse({
+    error: 'This target exceeds the account object limit.',
+    code: 'object_quota_exceeded',
+    current_objects: currentObjects,
+    requested_objects: requestedObjects,
+    max_objects_per_target: maxObjectsPerTarget,
+  }, 403);
+}
+
+function imageTargetScanResponse(
+  target: ImageTargetEntry,
+  entitlements: EffectiveEntitlements | null,
+): Record<string, unknown> {
+  const animationsEnabled = entitlements?.features.animations ?? true;
+  const floorPlacementEnabled = entitlements?.features.floor_placement ?? true;
+  const objects = animationsEnabled
+    ? target.objects
+    : target.objects.map(({ animation: _animation, ...object }) => object);
+  const groups = animationsEnabled
+    ? target.groups
+    : target.groups.map(({ animation: _animation, ...group }) => group);
+  return {
+    ...target,
+    objects,
+    groups,
+    runtime_capabilities: {
+      animations: animationsEnabled,
+      floor_placement: floorPlacementEnabled,
+    },
+  };
+}
+
+function accountOverQuotaResponse(
+  account: AccountAccess,
+  headers?: Record<string, string>,
+): Response {
+  return jsonResponse({
+    error: 'This account must delete extra targets before Mark-AR can be used.',
+    code: 'account_over_quota',
+    account_access: accountAccessResponse(account),
+  }, 423, headers);
+}
+
+function featureDeniedResponse(feature: FeatureKey, headers?: Record<string, string>): Response {
+  return jsonResponse({
+    error: 'This Mark-AR functionality is disabled for the account.',
+    code: 'feature_disabled',
+    feature,
+  }, 403, headers);
+}
+
+function sharingFeatureForAccessMode(mode: ImageTargetAccessMode): FeatureKey | null {
+  if (mode === 'anyone_with_link') {
+    return 'share_link';
+  }
+  if (mode === 'any_signed_in') {
+    return 'share_signed_in';
+  }
+  if (mode === 'specific_accounts') {
+    return 'share_specific_accounts';
+  }
+  return null;
+}
+
+async function reloadStoredUser(env: WorkerEnv, email: string): Promise<StoredUser | null> {
+  const index = await readUsersIndex(env);
+  return index.users.find((user) => user.email === email) ?? null;
+}
+
 async function requireApprovedUser(
   request: Request,
   env: WorkerEnv,
@@ -3378,6 +3804,15 @@ async function readOptionalApprovedUser(
   env: WorkerEnv,
   deps: GenerateModelDeps,
 ): Promise<{ user: StoredUser } | null> {
+  const auth = await readOptionalStoredUser(request, env, deps);
+  return auth?.user.status === 'active' ? auth : null;
+}
+
+async function readOptionalStoredUser(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<{ user: StoredUser } | null> {
   const token = readBearerToken(request);
   if (!token || !env.AUTH_SECRET) {
     return null;
@@ -3390,7 +3825,7 @@ async function readOptionalApprovedUser(
 
   const index = await readUsersIndex(env);
   const user = index.users.find((entry) => entry.email === payload.sub);
-  return user?.status === 'active' ? { user } : null;
+  return user ? { user } : null;
 }
 
 function isModelVisibleToUser(model: GeneratedModelEntry, user: StoredUser | null): boolean {
@@ -3922,12 +4357,17 @@ async function storeUpdatedModelPreview(
   };
 }
 
-function jsonResponse(body: unknown, status = 200): Response {
+function jsonResponse(
+  body: unknown,
+  status = 200,
+  extraHeaders: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       ...corsHeaders,
       'Content-Type': 'application/json',
+      ...extraHeaders,
     },
   });
 }
