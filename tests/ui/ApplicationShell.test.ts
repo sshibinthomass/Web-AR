@@ -1,8 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApplicationShell } from '../../src/ui/ApplicationShell';
 
+const activeUser = {
+  email: 'maker@example.com',
+  name: 'Maya Stone',
+  role: 'user' as const,
+  status: 'active' as const,
+};
+
 const adminUser = {
   email: 'admin@example.com',
+  name: 'Alex Admin',
   role: 'admin' as const,
   status: 'active' as const,
 };
@@ -71,6 +79,107 @@ describe('ApplicationShell', () => {
     expect(mobileTrigger.getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('changes both account triggers to Hi, Name and opens one shared menu', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const shell = new ApplicationShell(host, {
+      onNavigate: vi.fn(),
+      onBack: vi.fn(),
+      onLogout: vi.fn(),
+    });
+
+    shell.setUser(activeUser);
+
+    const triggers = [...host.querySelectorAll<HTMLButtonElement>('.account-menu-trigger')];
+    expect(triggers.map((trigger) => trigger.textContent?.trim())).toEqual([
+      'Hi, Maya Stone',
+      'Hi, Maya Stone',
+    ]);
+
+    const mobileTrigger = host.querySelector<HTMLButtonElement>('.mobile-account-link')!;
+    mobileTrigger.click();
+
+    const menu = host.querySelector<HTMLElement>('.account-menu')!;
+    expect(menu.hidden).toBe(false);
+    expect(mobileTrigger.getAttribute('aria-expanded')).toBe('true');
+    expect(menu.querySelector('.account-menu-name')?.textContent).toBe('Maya Stone');
+    expect(menu.querySelector('.account-menu-email')?.textContent).toBe('maker@example.com');
+    expect(document.activeElement).toBe(menu.querySelector('.account-menu-logout'));
+    host.remove();
+  });
+
+  it('routes guests to Login instead of opening an empty account menu', () => {
+    const host = document.createElement('div');
+    const onNavigate = vi.fn();
+    const shell = new ApplicationShell(host, {
+      onNavigate,
+      onBack: vi.fn(),
+      onLogout: vi.fn(),
+    });
+
+    shell.setUser(null);
+    host.querySelector<HTMLButtonElement>('.mobile-account-link')?.click();
+
+    expect(onNavigate).toHaveBeenCalledWith('login');
+    expect(host.querySelector<HTMLElement>('.account-menu')?.hidden).toBe(true);
+  });
+
+  it('makes Admin and Log out available from the shared mobile menu', () => {
+    const host = document.createElement('div');
+    const onNavigate = vi.fn();
+    const onLogout = vi.fn();
+    const shell = new ApplicationShell(host, {
+      onNavigate,
+      onBack: vi.fn(),
+      onLogout,
+    });
+    shell.setUser(adminUser);
+
+    host.querySelector<HTMLButtonElement>('.mobile-account-link')?.click();
+    host.querySelector<HTMLButtonElement>('.account-menu-admin')?.click();
+    expect(onNavigate).toHaveBeenCalledWith('admin');
+
+    host.querySelector<HTMLButtonElement>('.mobile-account-link')?.click();
+    host.querySelector<HTMLButtonElement>('.account-menu-logout')?.click();
+    expect(onLogout).toHaveBeenCalledOnce();
+  });
+
+  it('closes the account menu on Escape and restores the actual opener', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const shell = new ApplicationShell(host, {
+      onNavigate: vi.fn(),
+      onBack: vi.fn(),
+      onLogout: vi.fn(),
+    });
+    shell.setUser(activeUser);
+    const mobileTrigger = host.querySelector<HTMLButtonElement>('.mobile-account-link')!;
+    const menu = host.querySelector<HTMLElement>('.account-menu')!;
+
+    mobileTrigger.click();
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(menu.hidden).toBe(true);
+    expect(document.activeElement).toBe(mobileTrigger);
+    host.remove();
+  });
+
+  it('closes the account menu when another page area is activated', () => {
+    const host = document.createElement('div');
+    const shell = new ApplicationShell(host, {
+      onNavigate: vi.fn(),
+      onBack: vi.fn(),
+      onLogout: vi.fn(),
+    });
+    shell.setUser(activeUser);
+    const menu = host.querySelector<HTMLElement>('.account-menu')!;
+
+    host.querySelector<HTMLButtonElement>('.mobile-account-link')?.click();
+    host.querySelector<HTMLElement>('.app-page-host')?.click();
+
+    expect(menu.hidden).toBe(true);
+  });
+
   it('uses immersive chrome without standard navigation', () => {
     const host = document.createElement('div');
     const onBack = vi.fn();
@@ -110,24 +219,27 @@ describe('ApplicationShell', () => {
     expect(host.querySelector('.app-header')?.getAttribute('aria-hidden')).toBe('false');
   });
 
-  it('shows administrator navigation only for an active admin', () => {
+  it('shows the account-menu administrator action only for an active admin', () => {
     const host = document.createElement('div');
     const shell = new ApplicationShell(host, {
       onNavigate: vi.fn(),
       onBack: vi.fn(),
       onLogout: vi.fn(),
     });
-    const adminLink = host.querySelector<HTMLButtonElement>('.shell-admin')!;
+    const adminLink = host.querySelector<HTMLButtonElement>('.account-menu-admin')!;
 
     shell.setUser(null);
     expect(adminLink.hidden).toBe(true);
 
+    shell.setUser(activeUser);
+    expect(adminLink.hidden).toBe(true);
+
     shell.setUser(adminUser);
     expect(adminLink.hidden).toBe(false);
-    expect(host.querySelector('.shell-identity')?.textContent).toBe(adminUser.email);
+    expect(host.querySelector('.account-menu-name')?.textContent).toBe(adminUser.name);
   });
 
-  it('avoids duplicate account destinations and marks only the exact admin route current', () => {
+  it('conceals the redundant mobile account trigger on Login and restores it elsewhere', () => {
     const host = document.createElement('div');
     const shell = new ApplicationShell(host, {
       onNavigate: vi.fn(),
@@ -135,10 +247,6 @@ describe('ApplicationShell', () => {
       onLogout: vi.fn(),
     });
     const mobileAccountLink = host.querySelector<HTMLButtonElement>('.mobile-account-link')!;
-    const desktopAccountLink = host.querySelector<HTMLButtonElement>(
-      '.shell-account [data-nav-route="login"]',
-    )!;
-    const adminLink = host.querySelector<HTMLButtonElement>('.shell-admin')!;
 
     shell.setRoute('login');
 
@@ -151,7 +259,7 @@ describe('ApplicationShell', () => {
     expect(mobileAccountLink.classList.contains('is-concealed')).toBe(false);
     expect(mobileAccountLink.hasAttribute('aria-hidden')).toBe(false);
     expect(mobileAccountLink.tabIndex).toBe(0);
-    expect(desktopAccountLink.hasAttribute('aria-current')).toBe(false);
-    expect(adminLink.getAttribute('aria-current')).toBe('page');
+    expect(host.querySelector('.app-route-title')?.textContent).toBe('Admin');
+    expect(mobileAccountLink.hasAttribute('aria-current')).toBe(false);
   });
 });

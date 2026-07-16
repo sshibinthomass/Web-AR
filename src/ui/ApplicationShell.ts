@@ -1,4 +1,5 @@
 import type { AuthUser } from '../services/authClient';
+import { getAccountDisplayName } from './accountIdentity';
 import { ROUTES, type HudRoute } from './routes';
 
 interface ApplicationShellHandlers {
@@ -28,11 +29,18 @@ export class ApplicationShell {
   private readonly createTrigger: HTMLButtonElement;
   private readonly mobileCreateTrigger: HTMLButtonElement;
   private readonly createMenu: HTMLElement;
-  private readonly identity: HTMLElement;
+  private readonly accountTriggers: HTMLButtonElement[];
   private readonly mobileAccountLink: HTMLButtonElement;
-  private readonly adminLink: HTMLButtonElement;
-  private readonly logoutButton: HTMLButtonElement;
+  private readonly accountMenu: HTMLElement;
+  private readonly accountName: HTMLElement;
+  private readonly accountEmail: HTMLElement;
+  private readonly accountAdminButton: HTMLButtonElement;
+  private readonly accountLogoutButton: HTMLButtonElement;
+  private readonly sessionNotice: HTMLElement;
   private createMenuOpener: HTMLButtonElement | null = null;
+  private accountMenuOpener: HTMLButtonElement | null = null;
+  private currentUser: AuthUser | null = null;
+  private sessionNoticeTimer: number | null = null;
   private activeRoute: HudRoute = 'home';
 
   constructor(host: HTMLElement, private readonly handlers: ApplicationShellHandlers) {
@@ -60,10 +68,15 @@ export class ApplicationShell {
           <button type="button" data-nav-route="multi-object">Multi-object</button>
         </nav>
         <div class="shell-account">
-          <span class="shell-identity">Guest</span>
-          <button type="button" data-nav-route="login" data-nav-section="account">Account</button>
-          <button class="shell-admin" type="button" data-nav-route="admin" hidden>Admin</button>
-          <button class="shell-logout" type="button" hidden>Log out</button>
+          <button
+            class="account-menu-trigger desktop-account-trigger"
+            type="button"
+            aria-expanded="false"
+            aria-controls="accountMenu"
+          >
+            <span class="account-status-dot" aria-hidden="true" hidden></span>
+            <span class="account-trigger-label">Account</span>
+          </button>
         </div>
       </header>
       <div id="createMenu" class="create-menu" role="menu" aria-label="Creation methods" hidden></div>
@@ -78,12 +91,28 @@ export class ApplicationShell {
         <button class="route-back" type="button">Back</button>
         <strong class="mobile-route-title"></strong>
         <button
-          class="mobile-account-link"
+          class="mobile-account-link account-menu-trigger"
           type="button"
-          data-nav-route="login"
-          data-nav-section="account"
-        >Account</button>
+          aria-expanded="false"
+          aria-controls="accountMenu"
+        >
+          <span class="account-status-dot" aria-hidden="true" hidden></span>
+          <span class="account-trigger-label">Account</span>
+        </button>
       </div>
+      <section id="accountMenu" class="account-menu" role="menu" aria-label="Account" hidden>
+        <div class="account-menu-identity" role="none">
+          <strong class="account-menu-name"></strong>
+          <span class="account-menu-email"></span>
+        </div>
+        <button class="account-menu-admin" type="button" role="menuitem" hidden>
+          Admin dashboard
+        </button>
+        <button class="account-menu-logout" type="button" role="menuitem">
+          Log out
+        </button>
+      </section>
+      <div class="session-notice" role="status" aria-live="polite" hidden></div>
       <div class="immersive-bar">
         <button class="immersive-exit" type="button">Exit</button>
         <div>
@@ -117,10 +146,16 @@ export class ApplicationShell {
     this.createTrigger = this.root.querySelector<HTMLButtonElement>('.create-menu-trigger')!;
     this.mobileCreateTrigger = this.root.querySelector<HTMLButtonElement>('.mobile-create-trigger')!;
     this.createMenu = this.root.querySelector<HTMLElement>('.create-menu')!;
-    this.identity = this.root.querySelector<HTMLElement>('.shell-identity')!;
+    this.accountTriggers = [
+      ...this.root.querySelectorAll<HTMLButtonElement>('.account-menu-trigger'),
+    ];
     this.mobileAccountLink = this.root.querySelector<HTMLButtonElement>('.mobile-account-link')!;
-    this.adminLink = this.root.querySelector<HTMLButtonElement>('.shell-admin')!;
-    this.logoutButton = this.root.querySelector<HTMLButtonElement>('.shell-logout')!;
+    this.accountMenu = this.root.querySelector<HTMLElement>('.account-menu')!;
+    this.accountName = this.root.querySelector<HTMLElement>('.account-menu-name')!;
+    this.accountEmail = this.root.querySelector<HTMLElement>('.account-menu-email')!;
+    this.accountAdminButton = this.root.querySelector<HTMLButtonElement>('.account-menu-admin')!;
+    this.accountLogoutButton = this.root.querySelector<HTMLButtonElement>('.account-menu-logout')!;
+    this.sessionNotice = this.root.querySelector<HTMLElement>('.session-notice')!;
 
     for (const route of createRoutes) {
       const button = document.createElement('button');
@@ -133,7 +168,15 @@ export class ApplicationShell {
 
     this.root.addEventListener('click', (event) => this.handleClick(event));
     this.root.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !this.createMenu.hidden) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      if (!this.accountMenu.hidden) {
+        event.preventDefault();
+        this.closeAccountMenu(true);
+        return;
+      }
+      if (!this.createMenu.hidden) {
         event.preventDefault();
         const opener = this.createMenuOpener;
         this.closeCreateMenu();
@@ -179,6 +222,7 @@ export class ApplicationShell {
       backButton.hidden = route === 'home';
     }
     this.closeCreateMenu();
+    this.closeAccountMenu();
   }
 
   setImmersiveMode(isImmersive: boolean): void {
@@ -186,16 +230,43 @@ export class ApplicationShell {
   }
 
   setUser(user: AuthUser | null): void {
-    this.identity.textContent = user ? user.email : 'Guest';
-    this.logoutButton.hidden = !user;
-    this.adminLink.hidden = user?.role !== 'admin' || user.status !== 'active';
+    this.currentUser = user;
+    this.closeAccountMenu();
+
+    const displayName = user ? getAccountDisplayName(user) : '';
+    for (const trigger of this.accountTriggers) {
+      const label = trigger.querySelector<HTMLElement>('.account-trigger-label')!;
+      const dot = trigger.querySelector<HTMLElement>('.account-status-dot')!;
+      label.textContent = user ? `Hi, ${displayName}` : 'Account';
+      dot.hidden = !user;
+      trigger.title = user
+        ? `Signed in as ${displayName}. Open account menu.`
+        : 'Sign in or create an account.';
+    }
+
+    this.accountName.textContent = displayName;
+    this.accountEmail.textContent = user?.email ?? '';
+    this.accountAdminButton.hidden = user?.role !== 'admin' || user.status !== 'active';
   }
 
   setRestoring(isRestoring: boolean): void {
     this.root.toggleAttribute('data-restoring', isRestoring);
   }
 
+  showSessionNotice(message: string): void {
+    if (this.sessionNoticeTimer !== null) {
+      window.clearTimeout(this.sessionNoticeTimer);
+    }
+    this.sessionNotice.textContent = message;
+    this.sessionNotice.hidden = false;
+    this.sessionNoticeTimer = window.setTimeout(() => {
+      this.sessionNotice.hidden = true;
+      this.sessionNoticeTimer = null;
+    }, 4500);
+  }
+
   openCreateMenu(opener: HTMLButtonElement = this.createTrigger): void {
+    this.closeAccountMenu();
     this.createMenuOpener = opener;
     this.createMenu.hidden = false;
     this.createTrigger.setAttribute('aria-expanded', 'true');
@@ -204,8 +275,16 @@ export class ApplicationShell {
   }
 
   private handleClick(event: MouseEvent): void {
-    const target = event.target instanceof Element
-      ? event.target.closest<HTMLButtonElement>('button')
+    const eventTarget = event.target instanceof Element ? event.target : null;
+    if (
+      !this.accountMenu.hidden
+      && !eventTarget?.closest('.account-menu, .account-menu-trigger')
+    ) {
+      this.closeAccountMenu();
+    }
+
+    const target = eventTarget
+      ? eventTarget.closest<HTMLButtonElement>('button')
       : null;
     if (!target) {
       return;
@@ -215,8 +294,22 @@ export class ApplicationShell {
       this.handlers.onBack();
       return;
     }
-    if (target.matches('.shell-logout')) {
+    if (target.matches('.account-menu-trigger')) {
+      if (this.accountMenu.hidden) {
+        this.openAccountMenu(target);
+      } else {
+        this.closeAccountMenu();
+      }
+      return;
+    }
+    if (target.matches('.account-menu-logout')) {
+      this.closeAccountMenu();
       this.handlers.onLogout();
+      return;
+    }
+    if (target.matches('.account-menu-admin')) {
+      this.closeAccountMenu();
+      this.handlers.onNavigate('admin');
       return;
     }
     if (target.matches('.create-menu-trigger, .mobile-create-trigger')) {
@@ -240,6 +333,36 @@ export class ApplicationShell {
     this.createTrigger.setAttribute('aria-expanded', 'false');
     this.mobileCreateTrigger.setAttribute('aria-expanded', 'false');
     this.createMenuOpener = null;
+  }
+
+  private openAccountMenu(opener: HTMLButtonElement): void {
+    if (!this.currentUser) {
+      this.handlers.onNavigate('login');
+      return;
+    }
+
+    this.closeCreateMenu();
+    this.accountMenuOpener = opener;
+    this.accountMenu.hidden = false;
+    for (const trigger of this.accountTriggers) {
+      trigger.setAttribute('aria-expanded', String(trigger === opener));
+    }
+    const initialFocus = this.accountAdminButton.hidden
+      ? this.accountLogoutButton
+      : this.accountAdminButton;
+    initialFocus.focus();
+  }
+
+  private closeAccountMenu(restoreFocus = false): void {
+    const opener = this.accountMenuOpener;
+    this.accountMenu.hidden = true;
+    for (const trigger of this.accountTriggers) {
+      trigger.setAttribute('aria-expanded', 'false');
+    }
+    this.accountMenuOpener = null;
+    if (restoreFocus) {
+      opener?.focus();
+    }
   }
 
   private setShell(shell: 'standard' | 'immersive'): void {
