@@ -678,7 +678,7 @@ describe('ARHud', () => {
     const landing = root.querySelector('.landing');
     const statusPanel = root.querySelector('.status-panel');
     const cameraPanel = root.querySelector('.camera-panel');
-    const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept="image/*"]');
+    const uploadInput = root.querySelector<HTMLInputElement>('input[name="uploadImage"]');
     const captureButton = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Capture');
     const generateButton = [...root.querySelectorAll<HTMLButtonElement>('.camera-actions button')].find(
       (button) => button.textContent === 'Generate model',
@@ -694,6 +694,34 @@ describe('ARHud', () => {
     expect(captureButton?.classList.contains('hidden')).toBe(true);
     expect((generateButton as HTMLButtonElement).disabled).toBe(true);
     expect(root.textContent).toContain('Choose an image to create a 3D model.');
+  });
+
+  it('uses a compact upload drop zone and one full-width primary action', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="upload"]')?.click();
+
+    expect(root.querySelector('.upload-image-field')?.classList.contains('upload-drop-zone')).toBe(true);
+    expect(root.querySelector('.upload-image-field input')?.getAttribute('aria-describedby')).toBe('imageUploadHint');
+    expect(root.querySelector('.camera-actions')?.classList.contains('single-primary')).toBe(true);
+    expect(root.querySelector('.camera-actions button.primary')?.textContent).toBe('Generate model');
+  });
+
+  it('shows real Capture, Generate, Place steps for photo-to-ar routes only', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="full-flow"]')?.click();
+    expect([...root.querySelectorAll('.creation-step-list li')].map((item) => item.textContent?.trim())).toEqual([
+      'Capture',
+      'Generate',
+      'Place',
+    ]);
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="camera"]')?.click();
+    expect(root.querySelector('.creation-step-list')?.classList.contains('hidden')).toBe(true);
   });
 
   it('opens upload model from the first screen with a GLB picker', () => {
@@ -1636,7 +1664,7 @@ describe('ARHud', () => {
     hud.updateAuthState(activeUser);
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Image to 3D')?.click();
-    const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept="image/*"]')!;
+    const uploadInput = root.querySelector<HTMLInputElement>('input[name="uploadImage"]')!;
     const file = new File(['fake image bytes'], 'chair.png', { type: 'image/png' });
     Object.defineProperty(uploadInput, 'files', { value: [file], configurable: true });
 

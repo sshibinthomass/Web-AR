@@ -592,25 +592,37 @@ export class ARHud {
     this.statusPanel.appendChild(modelPicker);
 
     const cameraPanel = document.createElement('section');
-    cameraPanel.className = 'camera-panel hidden';
+    cameraPanel.className = 'camera-panel creation-workspace hidden';
     cameraPanel.innerHTML = `
-      <p class="camera-label">Camera</p>
-      <video class="camera-preview" muted playsinline></video>
-      <img class="camera-preview hidden" alt="Captured image preview">
-      <label class="upload-image-field hidden">
-        <span>Image file</span>
-        <input name="uploadImage" type="file" accept="image/*">
-      </label>
-      <label class="upload-model-field upload-image-field hidden">
-        <span>GLB model file</span>
-        <input name="uploadModel" type="file" accept=".glb,model/gltf-binary">
-      </label>
-      <label class="target-object-field hidden">
-        <span>Object to extract</span>
-        <input name="targetObject" type="text" autocomplete="off" placeholder="Optional, e.g. laptop">
-      </label>
-      <p class="camera-status">${ROUTES.camera.initialStatus}</p>
-      <p class="generated-model-status">No model generated yet.</p>
+      <div class="creation-stage calibration-frame">
+        <p class="camera-label utility-label"></p>
+        <video class="camera-preview" muted playsinline></video>
+        <img class="camera-preview hidden" alt="Selected object preview">
+        <label class="upload-image-field upload-drop-zone hidden">
+          <span>Choose an image</span>
+          <small id="imageUploadHint">PNG, JPG, or WebP with one clearly visible object.</small>
+          <input name="uploadImage" type="file" accept="image/png,image/jpeg,image/webp" aria-describedby="imageUploadHint">
+        </label>
+        <label class="upload-model-field upload-drop-zone hidden">
+          <span>Choose a GLB model</span>
+          <small id="modelUploadHint">Use a binary .glb file ready for AR placement.</small>
+          <input name="uploadModel" type="file" accept=".glb,model/gltf-binary" aria-describedby="modelUploadHint">
+        </label>
+      </div>
+      <aside class="creation-guidance">
+        <ol class="creation-step-list hidden" aria-label="Progress">
+          <li data-creation-stage="capture">Capture</li>
+          <li data-creation-stage="generate">Generate</li>
+          <li data-creation-stage="place">Place</li>
+        </ol>
+        <label class="target-object-field hidden">
+          <span>Object to extract <small>(optional)</small></span>
+          <input name="targetObject" type="text" autocomplete="off" placeholder="For example: laptop">
+        </label>
+        <p class="camera-status" aria-live="polite">${ROUTES.camera.initialStatus}</p>
+        <p class="generated-model-status">No model generated yet.</p>
+        <div class="camera-actions sticky-primary-action"></div>
+      </aside>
     `;
     this.cameraPreviewVideo = cameraPanel.querySelector<HTMLVideoElement>('.camera-preview')!;
     this.cameraPreviewImage = cameraPanel.querySelector<HTMLImageElement>('img.camera-preview')!;
@@ -637,8 +649,7 @@ export class ARHud {
       }
     });
 
-    const cameraActions = document.createElement('div');
-    cameraActions.className = 'camera-actions';
+    const cameraActions = cameraPanel.querySelector<HTMLElement>('.camera-actions')!;
     this.cameraActions = cameraActions;
     this.captureButton = this.createButton('Capture', '', () => this.handleCaptureClick());
     this.submitButton = this.createButton('Extract object', '', () => this.handleSubmitClick());
@@ -650,7 +661,6 @@ export class ARHud {
     this.storeModelButton.classList.add('hidden');
     this.storeModelButton.disabled = true;
     cameraActions.append(this.captureButton, this.submitButton, this.generateButton, this.storeModelButton);
-    cameraPanel.appendChild(cameraActions);
     this.statusPanel.appendChild(cameraPanel);
     this.overlay.appendChild(this.statusPanel);
 
@@ -885,6 +895,7 @@ export class ARHud {
     if (!this.submitButton.classList.contains('hidden')) {
       this.submitButton.disabled = !canGenerate;
     }
+    this.syncCameraActionLayout();
   }
 
   showSpeechReady(message = 'Type a description or push to talk, then generate a 3D-ready image and model.'): void {
@@ -1038,6 +1049,8 @@ export class ARHud {
     this.generateButton.disabled = true;
     this.storeModelButton.classList.add('hidden');
     this.storeModelButton.disabled = true;
+    this.setCreationStage('capture');
+    this.syncCameraActionLayout();
   }
 
   showUploadImagePicker(): void {
@@ -1066,6 +1079,7 @@ export class ARHud {
     this.storeModelButton.disabled = true;
     this.generatedModelMessage.textContent = 'No model generated yet.';
     this.updateCameraStatus(meta.initialStatus, false);
+    this.setCreationStage(null);
   }
 
   showUploadModelPicker(): void {
@@ -1092,6 +1106,7 @@ export class ARHud {
     this.storeModelButton.disabled = true;
     this.generatedModelMessage.classList.add('hidden');
     this.updateUploadModelStatus(meta.initialStatus, false);
+    this.setCreationStage(null);
   }
 
   showCapturedImagePreview(imageUrl: string): void {
@@ -1118,6 +1133,7 @@ export class ARHud {
         : 'Image captured. Submit to GPT or generate a 3D model directly.',
       true,
     );
+    this.setCreationStage('generate');
   }
 
   showUploadedImagePreview(imageUrl: string): void {
@@ -1138,6 +1154,7 @@ export class ARHud {
     this.storeModelButton.classList.add('hidden');
     this.storeModelButton.disabled = true;
     this.updateCameraStatus('Image uploaded. Submit to GPT or generate a 3D model directly.', true);
+    this.setCreationStage('generate');
   }
 
   showExtractedImageReady(imageUrl: string): void {
@@ -1159,6 +1176,7 @@ export class ARHud {
     this.storeModelButton.classList.add('hidden');
     this.storeModelButton.disabled = true;
     this.updateCameraStatus('GPT extraction complete. Generate the 3D model when ready.', true);
+    this.setCreationStage('generate');
   }
 
   updateGeneratedModelSource(modelUrl: string): void {
@@ -1209,6 +1227,7 @@ export class ARHud {
   updateUploadModelStatus(message: string, canStore = false): void {
     this.cameraStatusMessage.textContent = message;
     this.storeModelButton.disabled = !canStore;
+    this.syncCameraActionLayout();
   }
 
   updateUploadedModelStatus(message: string): void {
@@ -1274,6 +1293,7 @@ export class ARHud {
   }
 
   showFullFlowLoading(message: string): void {
+    this.setCreationStage('generate');
     this.landing.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
     this.statusPanel.classList.add('full-flow-active');
@@ -1292,6 +1312,7 @@ export class ARHud {
   }
 
   showFullFlowReady(message: string, modelOption?: ModelOption): void {
+    this.setCreationStage('place');
     this.navigateTo('ar', 'replace');
     this.arPlacementStarted = true;
     this.openARPage();
@@ -1304,6 +1325,7 @@ export class ARHud {
   }
 
   showFullFlowError(message: string): void {
+    this.setCreationStage('generate');
     this.fullFlowLoading.classList.add('hidden');
     this.statusPanel.classList.add('camera-active');
     this.statusPanel.classList.remove('ar-picker-active');
@@ -2558,6 +2580,27 @@ export class ARHud {
     return this.activeRoute === 'full-flow' || this.activeRoute === 'dynamic'
       ? 'Generate and place'
       : 'Generate model';
+  }
+
+  private syncCameraActionLayout(): void {
+    const visibleButtons = [...this.cameraActions.querySelectorAll<HTMLButtonElement>('button')]
+      .filter((button) => !button.classList.contains('hidden'));
+    this.cameraActions.classList.toggle('single-primary', visibleButtons.length === 1);
+  }
+
+  private setCreationStage(stage: 'capture' | 'generate' | 'place' | null): void {
+    const showSteps = this.activeRoute === 'full-flow' || this.activeRoute === 'dynamic';
+    const list = this.cameraPanel.querySelector<HTMLElement>('.creation-step-list')!;
+    list.classList.toggle('hidden', !showSteps);
+    for (const item of list.querySelectorAll<HTMLElement>('[data-creation-stage]')) {
+      const itemStage = item.dataset.creationStage;
+      item.classList.toggle('is-active', itemStage === stage);
+      item.classList.toggle(
+        'is-done',
+        (stage === 'generate' && itemStage === 'capture')
+          || (stage === 'place' && itemStage !== 'place'),
+      );
+    }
   }
 
   private startAttachedARCamera(): void {

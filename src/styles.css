@@ -3544,3 +3544,205 @@ h3 {
     grid-template-columns: 1fr;
   }
 }
+
+/* Camera, upload, and photo-to-AR workspaces */
+.creation-workspace.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: minmax(0, 8fr) minmax(320px, 4fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 24px;
+  margin: 0;
+  padding: 84px max(24px, calc((100vw - var(--content-max)) / 2)) 24px;
+  border: 0;
+  color: var(--color-ink);
+  background: var(--color-canvas);
+  pointer-events: auto;
+}
+
+.app-shell[data-shell="standard"] .creation-workspace.fullscreen {
+  padding-top: 168px;
+}
+
+.creation-stage,
+.creation-guidance {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.creation-stage {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 18px;
+  overflow: hidden;
+}
+
+.creation-stage .camera-label {
+  margin: 0;
+  color: var(--color-ink-muted);
+}
+
+.creation-stage .camera-preview,
+.creation-stage .upload-drop-zone {
+  grid-row: 2;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  border-radius: var(--radius-control);
+}
+
+.creation-guidance {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 22px;
+  overflow-y: auto;
+}
+
+.upload-drop-zone {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 8px;
+  min-height: 260px;
+  border: 2px dashed var(--color-border);
+  padding: 32px;
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--color-canvas) 72%, var(--color-surface));
+  box-shadow: none;
+}
+
+.upload-drop-zone > span {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.upload-drop-zone > small {
+  color: var(--color-ink-muted);
+  font-size: 14px;
+}
+
+.upload-drop-zone input {
+  width: 100%;
+  margin-top: 10px;
+  border-color: var(--color-border);
+  color: var(--color-ink);
+  background: var(--color-surface);
+}
+
+.creation-step-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.creation-step-list li {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  padding: 10px;
+  color: var(--color-ink-muted);
+  background: var(--color-canvas);
+  font-family: var(--font-utility);
+  font-size: 12px;
+  text-align: center;
+}
+
+.creation-step-list li.is-active {
+  border-color: var(--color-teal);
+  color: #ffffff;
+  background: var(--color-teal);
+}
+
+.creation-step-list li.is-done {
+  border-color: color-mix(in srgb, var(--color-success) 38%, var(--color-border));
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 10%, var(--color-surface));
+}
+
+.creation-guidance .target-object-field {
+  color: var(--color-ink-muted);
+}
+
+.creation-guidance .target-object-field input {
+  border-color: var(--color-border);
+  color: var(--color-ink);
+  background: var(--color-surface);
+}
+
+.creation-guidance .camera-status,
+.creation-guidance .generated-model-status {
+  color: var(--color-ink-muted);
+}
+
+.creation-guidance .camera-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.camera-actions.single-primary {
+  grid-template-columns: 1fr;
+}
+
+.creation-guidance .camera-actions button,
+.creation-guidance .camera-actions button.primary {
+  min-height: var(--control-height);
+  border-radius: var(--radius-control);
+}
+
+.creation-guidance .camera-actions button.primary {
+  border-color: var(--color-teal);
+  color: #ffffff;
+  background: var(--color-teal);
+}
+
+@media (max-width: 1023px) {
+  .creation-workspace.fullscreen {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(260px, 1fr) auto;
+    gap: 12px;
+    padding: calc(64px + env(safe-area-inset-top)) 14px calc(88px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+
+  .app-shell[data-shell="standard"] .creation-workspace.fullscreen {
+    padding-top: calc(72px + env(safe-area-inset-top));
+  }
+
+  .creation-stage {
+    min-height: 260px;
+  }
+
+  .creation-guidance {
+    overflow: visible;
+  }
+
+  .upload-drop-zone {
+    min-height: 220px;
+  }
+
+  .camera-actions .primary {
+    width: 100%;
+  }
+
+  .creation-guidance .camera-actions {
+    position: sticky;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    z-index: 4;
+    padding-top: 10px;
+    background: var(--color-surface);
+  }
+}
