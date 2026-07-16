@@ -36,6 +36,7 @@ import { WebARApp } from '../../src/app/WebARApp';
 
 const activeUser = {
   email: 'maker@example.com',
+  name: 'Maya Stone',
   role: 'user' as const,
   status: 'active' as const,
 };
@@ -113,6 +114,25 @@ describe('WebARApp route restoration', () => {
 
     expect(window.location.hash).toBe('#/speech');
     expect(root.querySelector('.speech-panel')?.classList.contains('hidden')).toBe(false);
+  });
+
+  it('returns a direct Login to Home and shows persistent and transient signed-in feedback', async () => {
+    authMocks.loadAuthToken.mockReturnValue(null);
+    window.localStorage.clear();
+    window.history.replaceState(null, '', '/#/login');
+    const root = document.createElement('div');
+    const app = new WebARApp(root) as unknown as {
+      login(email: string, password: string): Promise<void>;
+      start(): Promise<void>;
+    };
+
+    await app.start();
+    await app.login('maker@example.com', 'password');
+
+    expect(window.location.hash).toBe('#/');
+    expect(root.querySelector('.account-trigger-label')?.textContent).toBe('Hi, Maya Stone');
+    expect(root.querySelector('.session-notice')?.textContent).toBe('Welcome back, Maya Stone.');
+    expect(root.querySelector<HTMLElement>('.session-notice')?.hidden).toBe(false);
   });
 
   it('replaces Login with the intended route after an immediately approved signup', async () => {

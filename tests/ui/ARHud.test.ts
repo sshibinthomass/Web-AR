@@ -65,6 +65,7 @@ function createHandlers(overrides: Partial<ConstructorParameters<typeof ARHud>[2
 
 const activeUser = {
   email: 'maker@example.com',
+  name: 'Maya Stone',
   role: 'user' as const,
   status: 'active' as const,
 };
@@ -141,10 +142,40 @@ describe('ARHud', () => {
     expect(root.querySelector<HTMLElement>('.create-menu')?.hidden).toBe(false);
   });
 
+  it('removes duplicate home account actions and redirects an authenticated Login route home', () => {
+    window.history.replaceState(null, '', '/#/login');
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    expect(root.querySelector('.home-route-groups .auth-actions')).toBeNull();
+
+    hud.updateAuthState(activeUser);
+
+    expect(window.location.hash).toBe('#/');
+    expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.account-trigger-label')?.textContent).toBe('Hi, Maya Stone');
+  });
+
+  it('shows a global signed-in notice outside the login panel', () => {
+    vi.useFakeTimers();
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+
+    hud.showSessionNotice('Welcome back, Maya Stone.');
+
+    const notice = root.querySelector<HTMLElement>('.session-notice')!;
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toBe('Welcome back, Maya Stone.');
+
+    vi.advanceTimersByTime(4500);
+    expect(notice.hidden).toBe(true);
+    vi.useRealTimers();
+  });
+
   it('fully hides the name field in login mode and reveals it in signup mode', () => {
     const root = document.createElement('div');
     new ARHud(root, modelOptions, createHandlers());
-    root.querySelector<HTMLButtonElement>('[data-nav-route="login"]')?.click();
+    root.querySelector<HTMLButtonElement>('.desktop-account-trigger')?.click();
 
     const nameLabel = root.querySelector<HTMLInputElement>('input[name="authName"]')?.closest('label');
     expect(nameLabel?.hidden).toBe(true);
@@ -363,7 +394,7 @@ describe('ARHud', () => {
     const nameLabel = (): HTMLLabelElement =>
       root.querySelector<HTMLInputElement>('input[name="authName"]')!.closest('label') as HTMLLabelElement;
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Login')?.click();
+    root.querySelector<HTMLButtonElement>('.desktop-account-trigger')?.click();
     const authForm = root.querySelector<HTMLFormElement>('form.auth-panel-inner')!;
     expect(authForm).not.toBeNull();
     expect(root.querySelector('input[name="authPassword"]')?.closest('form')).toBe(authForm);
@@ -397,7 +428,8 @@ describe('ARHud', () => {
     );
 
     hud.updateAuthState(adminUser);
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Admin')?.click();
+    root.querySelector<HTMLButtonElement>('.desktop-account-trigger')?.click();
+    root.querySelector<HTMLButtonElement>('.account-menu-admin')?.click();
     hud.updateAdminAccounts([
       adminUser,
       { email: 'maker@example.com', name: 'Maker', role: 'user', status: 'pending' },

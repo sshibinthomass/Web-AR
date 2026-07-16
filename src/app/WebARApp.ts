@@ -52,6 +52,7 @@ import {
   type AuthUser,
 } from '../services/authClient';
 import { AppState } from '../state/AppState';
+import { getAccountDisplayName } from '../ui/accountIdentity';
 import { ARHud } from '../ui/ARHud';
 import type { HudRoute } from '../ui/routes';
 import { getGenerateModelApiUrl } from './config';
@@ -206,7 +207,9 @@ export class WebARApp {
       this.currentUser = session.user;
       saveAuthToken(session.token);
       this.hud?.updateAuthState(session.user);
-      this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
+      this.hud?.showSessionNotice(
+        `Welcome back, ${getAccountDisplayName(session.user)}.`,
+      );
       void this.refreshGeneratedModels();
       void this.prepareMultiObject();
     } catch (error) {
@@ -229,7 +232,9 @@ export class WebARApp {
       this.currentUser = session.user;
       saveAuthToken(session.token);
       this.hud?.updateAuthState(session.user);
-      this.hud?.showAuthMessage(`Signed in as ${session.user.email}.`);
+      this.hud?.showSessionNotice(
+        `Welcome, ${getAccountDisplayName(session.user)}.`,
+      );
       void this.refreshGeneratedModels();
       void this.prepareMultiObject();
     } catch (error) {

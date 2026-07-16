@@ -98,11 +98,6 @@ export class ARHud {
   readonly modelPreviewViewport: HTMLElement;
 
   private readonly landing: HTMLElement;
-  private readonly authActions: HTMLElement;
-  private readonly authIdentity: HTMLElement;
-  private readonly loginButton: HTMLButtonElement;
-  private readonly logoutButton: HTMLButtonElement;
-  private readonly adminButton: HTMLButtonElement;
   private readonly authPanel: HTMLElement;
   private readonly authMessage: HTMLElement;
   private readonly authEmailInput: HTMLInputElement;
@@ -278,17 +273,7 @@ export class ARHud {
         ],
       ),
     );
-    this.authActions = document.createElement('div');
-    this.authActions.className = 'auth-actions';
-    this.authIdentity = document.createElement('p');
-    this.authIdentity.className = 'auth-identity';
-    this.loginButton = this.createButton('Login', '', () => this.navigateTo('login'));
-    this.adminButton = this.createButton('Admin', '', () => this.navigateTo('admin'));
-    this.logoutButton = this.createButton('Logout', '', this.handlers.onLogout);
-    this.adminButton.classList.add('hidden');
-    this.logoutButton.classList.add('hidden');
-    this.authActions.append(this.authIdentity, this.loginButton, this.adminButton, this.logoutButton);
-    this.landing.querySelector('.home-route-groups')?.append(modePicker, this.authActions);
+    this.landing.querySelector('.home-route-groups')?.append(modePicker);
     shell.appendChild(this.landing);
 
     this.authPanel = document.createElement('section');
@@ -758,6 +743,10 @@ export class ARHud {
     }
 
     const currentRoute = parseRouteHash(window.location.hash);
+    if (this.currentUser && currentRoute === 'login') {
+      this.navigateHome('replace');
+      return;
+    }
     if (!routeCanOpen(currentRoute, this.currentUser)) {
       this.pendingRoute = currentRoute;
       this.redirectToLogin(
@@ -794,6 +783,10 @@ export class ARHud {
   showAuthMessage(message: string, isError = false): void {
     this.authMessage.textContent = message;
     this.authMessage.classList.toggle('is-error', isError);
+  }
+
+  showSessionNotice(message: string): void {
+    this.appShell.showSessionNotice(message);
   }
 
   updateAdminAccounts(users: AuthUser[]): void {
@@ -1959,19 +1952,6 @@ export class ARHud {
 
   private renderAuthControls(): void {
     this.appShell.setUser(this.currentUser);
-    if (!this.currentUser) {
-      this.authIdentity.textContent = 'Guest access';
-      this.loginButton.classList.remove('hidden');
-      this.logoutButton.classList.add('hidden');
-      this.adminButton.classList.add('hidden');
-      this.renderModelManagerList();
-      return;
-    }
-
-    this.authIdentity.textContent = `${this.currentUser.email} (${this.currentUser.role})`;
-    this.loginButton.classList.add('hidden');
-    this.logoutButton.classList.remove('hidden');
-    this.adminButton.classList.toggle('hidden', this.currentUser.role !== 'admin');
     this.renderModelManagerList();
   }
 
