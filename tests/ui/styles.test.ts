@@ -72,6 +72,25 @@ describe('application design system', () => {
     }
   });
 
+  it('styles the endorsed shell and standard workspaces as one Precision Spatial system', () => {
+    for (const contract of [
+      '.brand-aperture {',
+      '.brand-product-name {',
+      '.brand-endorsement {',
+      '.webxr-aperture-stage {',
+      '.brand-endorsement-panel {',
+      '.auth-brand-context {',
+      '.speech-stage-list li.is-active {',
+      '.admin-workspace {',
+      '.model-manager-row {',
+      '.ar-model-card[aria-pressed="true"],',
+      '.model-preview,\n.model-edit-dialog,\n.confirmation-dialog {',
+      'min-height: 44px;',
+    ]) {
+      expect(styles).toContain(contract);
+    }
+  });
+
   it('makes semantic hidden state and keyboard focus reliable', () => {
     expect(styles).toContain('[hidden] {\n  display: none !important;\n}');
     expect(styles).toContain(':focus-visible');
