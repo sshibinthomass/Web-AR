@@ -94,11 +94,14 @@ describe('ARHud', () => {
     const cameraPanel = root.querySelector('.camera-panel');
     const hudActions = root.querySelector('.hud-actions');
 
-    expect(root.querySelector('.landing h1')?.textContent).toBe('Make it real. Place it here.');
-    expect(root.querySelector('.landing-preview')?.classList.contains('calibration-frame')).toBe(true);
+    expect(root.querySelector('.landing .product-name')?.textContent).toBe('WebXRify by Arvenilo');
+    expect(root.querySelector('.availability-label')?.textContent).toBe('AVAILABLE NOW');
+    expect(root.querySelector('.webxr-aperture-stage')?.getAttribute('role')).toBe('img');
+    expect(root.querySelector('.webxr-aperture-stage')?.getAttribute('aria-label')).toBeTruthy();
+    expect(root.querySelector<HTMLImageElement>('.arvenilo-lockup')?.alt).toBe('Arvenilo');
+    expect(root.textContent).toContain('Where Intelligence Meets Reality.');
     expect(root.textContent).toContain('Explore in AR');
     expect(root.textContent).toContain('Create a model');
-    expect(root.querySelector('.landing-preview')).not.toBeNull();
     expect(choiceButtons).toEqual([
       'Single-Object AR',
       'Model Library',
@@ -134,9 +137,13 @@ describe('ARHud', () => {
     const root = document.createElement('div');
     new ARHud(root, modelOptions, createHandlers());
 
-    expect(root.querySelector('.landing-preview')?.classList.contains('calibration-frame')).toBe(true);
+    expect(root.querySelector('.landing .product-name')?.textContent).toBe('WebXRify by Arvenilo');
+    expect(root.querySelector('.availability-label')?.textContent).toBe('AVAILABLE NOW');
+    expect(root.querySelector('.webxr-aperture-stage')?.getAttribute('role')).toBe('img');
+    expect(root.querySelector('.webxr-aperture-stage')?.getAttribute('aria-label')).toBeTruthy();
+    expect(root.querySelector<HTMLImageElement>('.arvenilo-lockup')?.alt).toBe('Arvenilo');
+    expect(root.textContent).toContain('Where Intelligence Meets Reality.');
     expect(root.querySelector('.home-primary-action')?.textContent).toBe('Create a model');
-    expect(root.querySelector('.landing h1')?.textContent).toBe('Make it real. Place it here.');
 
     root.querySelector<HTMLButtonElement>('.home-primary-action')?.click();
     expect(root.querySelector<HTMLElement>('.create-menu')?.hidden).toBe(false);
@@ -395,7 +402,7 @@ describe('ARHud', () => {
       root.querySelector<HTMLInputElement>('input[name="authName"]')!.closest('label') as HTMLLabelElement;
 
     root.querySelector<HTMLButtonElement>('.desktop-account-trigger')?.click();
-    const authForm = root.querySelector<HTMLFormElement>('form.auth-panel-inner')!;
+    const authForm = root.querySelector<HTMLFormElement>('form.auth-form')!;
     expect(authForm).not.toBeNull();
     expect(root.querySelector('input[name="authPassword"]')?.closest('form')).toBe(authForm);
     expect(nameLabel().hidden).toBe(true);

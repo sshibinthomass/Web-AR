@@ -16,6 +16,25 @@ const adminUser = {
 };
 
 describe('ApplicationShell', () => {
+  it('renders the endorsed WebXRify identity with the approved master aperture', () => {
+    const host = document.createElement('div');
+    new ApplicationShell(host, {
+      onNavigate: vi.fn(),
+      onBack: vi.fn(),
+      onLogout: vi.fn(),
+    });
+
+    const brand = host.querySelector<HTMLButtonElement>('.brand-button')!;
+    expect(brand.dataset.navRoute).toBe('home');
+    expect(brand.getAttribute('aria-label')).toBe('WebXRify by Arvenilo home');
+    expect(brand.querySelector('.brand-product-name')?.textContent).toBe('WebXRify');
+    expect(brand.querySelector('.brand-endorsement')?.textContent).toBe('by Arvenilo');
+    const image = brand.querySelector<HTMLImageElement>('img.brand-aperture')!;
+    expect(image.alt).toBe('');
+    expect(image.src).toContain('00-arvenilo-master-transparent-logo.png');
+    expect(host.querySelector('.mobile-brand-button img.brand-aperture')).not.toBeNull();
+  });
+
   it('renders labelled desktop and mobile navigation with one active section', () => {
     const host = document.createElement('div');
     const onNavigate = vi.fn();

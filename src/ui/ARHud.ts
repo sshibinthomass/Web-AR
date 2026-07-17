@@ -3,6 +3,7 @@ import type { ModelOption, ModelVisibility } from '../app/models';
 import type { AuthUser } from '../services/authClient';
 import type { AdminJobEntry } from '../services/generatedModelClient';
 import { ApplicationShell } from './ApplicationShell';
+import { apertureLogoUrl, arveniloLockupUrl } from './brandAssets';
 import { openDialog } from './dialog';
 import { HashRouter } from './HashRouter';
 import { modelCollectionsEqual } from './modelCollections';
@@ -229,20 +230,43 @@ export class ARHud {
     this.landing.innerHTML = `
       <div class="landing-inner">
         <div class="landing-copy">
-          <p class="landing-kicker">Spatial creation workspace</p>
+          <p class="landing-kicker">
+            <span class="product-name">WebXRify by Arvenilo</span>
+            <span class="availability-label">AVAILABLE NOW</span>
+          </p>
           <h1>Make it real. Place it here.</h1>
           <p>Turn a photo, description, or existing model into something you can view in your own space.</p>
           <button class="home-primary-action primary" type="button">Create a model</button>
         </div>
-        <div class="landing-preview calibration-frame" aria-hidden="true">
-          <div class="preview-stage">
+        <div
+          class="landing-preview webxr-aperture-stage calibration-frame"
+          role="img"
+          aria-label="A digital object converging on one selected spatial anchor."
+        >
+          <div class="preview-stage" aria-hidden="true">
+            <span class="aperture-path aperture-path-left"></span>
+            <span class="aperture-path aperture-path-right"></span>
             <span class="preview-floor"></span>
             <span class="preview-anchor"></span>
             <span class="preview-object"></span>
           </div>
-          <p><strong>Spatial preview</strong><span>Choose a model and place it at room scale.</span></p>
+          <p><strong>WebXR aperture</strong><span>Create a model, then place it at room scale.</span></p>
         </div>
         <div class="home-route-groups"></div>
+        <section class="brand-endorsement-panel" aria-label="About Arvenilo">
+          <div>
+            <p class="utility-label">AN ARVENILO PRODUCT</p>
+            <h2>Where Intelligence Meets Reality.</h2>
+            <p>WebXRify turns digital creation into something you can experience in the world around you.</p>
+          </div>
+          <img
+            class="arvenilo-lockup"
+            src="${arveniloLockupUrl}"
+            alt="Arvenilo"
+            width="1952"
+            height="806"
+          >
+        </section>
       </div>
     `;
     this.landing.querySelector<HTMLButtonElement>('.home-primary-action')?.addEventListener('click', () => {
@@ -279,25 +303,33 @@ export class ARHud {
     this.authPanel = document.createElement('section');
     this.authPanel.className = 'auth-panel hidden';
     this.authPanel.innerHTML = `
-      <form class="auth-panel-inner surface">
-        <div class="auth-panel-header">
-          <h2>Login</h2>
-          <p class="auth-message">Sign in with an approved account, or create one for admin approval.</p>
-        </div>
-        <label class="field">
-          <span>Email</span>
-          <input name="authEmail" type="email" autocomplete="email">
-        </label>
-        <label class="field">
-          <span>Password</span>
-          <input name="authPassword" type="password" autocomplete="current-password">
-        </label>
-        <label class="field" hidden>
-          <span>Name</span>
-          <input name="authName" type="text" autocomplete="name">
-        </label>
-        <div class="auth-form-actions"></div>
-      </form>
+      <div class="auth-panel-inner">
+        <aside class="auth-brand-context">
+          <img class="brand-aperture" src="${apertureLogoUrl}" alt="" width="325" height="325">
+          <p class="auth-endorsement utility-label">WebXRify by Arvenilo</p>
+          <h2>Bring digital objects into the world around you.</h2>
+          <p>Sign in to create models, manage your library, and continue protected creation workflows.</p>
+        </aside>
+        <form class="auth-form surface">
+          <div class="auth-panel-header">
+            <h2>Login</h2>
+            <p class="auth-message">Sign in with an approved account, or create one for admin approval.</p>
+          </div>
+          <label class="field">
+            <span>Email</span>
+            <input name="authEmail" type="email" autocomplete="email">
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input name="authPassword" type="password" autocomplete="current-password">
+          </label>
+          <label class="field" hidden>
+            <span>Name</span>
+            <input name="authName" type="text" autocomplete="name">
+          </label>
+          <div class="auth-form-actions"></div>
+        </form>
+      </div>
     `;
     this.authMessage = this.authPanel.querySelector<HTMLElement>('.auth-message')!;
     this.authEmailInput = this.authPanel.querySelector<HTMLInputElement>('input[name="authEmail"]')!;

@@ -32,5 +32,14 @@ describe('WebXRify brand assets', () => {
     };
     expect(packageJson.name).toBe('webxrify');
     expect(packageJson.description).toContain('WebXRify by Arvenilo');
+
+    const interfaceSources = [
+      'index.html',
+      'src/main.ts',
+      'src/ui/ApplicationShell.ts',
+      'src/ui/ARHud.ts',
+      'src/ui/routes.ts',
+    ].map((path) => read(path).toString('utf8')).join('\n');
+    expect(interfaceSources).not.toMatch(/Anima You 3D|Arvenilo Agent|WebXRify Agent/i);
   });
 });
