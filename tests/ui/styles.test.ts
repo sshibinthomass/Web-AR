@@ -9,25 +9,44 @@ const styles = readFileSync(
 ).replace(/\r\n/g, '\n');
 
 describe('application design system', () => {
-  it('defines the approved spatial-workbench tokens', () => {
+  it('defines the approved Arvenilo tokens and local font families', () => {
     for (const declaration of [
-      '--color-canvas: #f4f8f7;',
-      '--color-surface: #ffffff;',
-      '--color-ink: #102f2f;',
-      '--color-teal: #0b8f87;',
-      '--color-amber: #f2a93b;',
-      '--color-error: #d85d4a;',
-      '--content-max: 1280px;',
-      '--control-height: 48px;',
+      '--color-spatial-void: #020a0c;',
+      '--color-spatial-ink: #081d21;',
+      '--color-spatial-surface: #0d2a2e;',
+      '--color-spatial-surface-raised: #12363a;',
+      '--color-reality-mist: #f4fbfa;',
+      '--color-interface-white: #ffffff;',
+      '--color-signal-mint: #5eead4;',
+      '--color-digital-violet: #7456f1;',
+      '--color-anchor-gold: #f4b942;',
+      '--color-context-slate: #4d6265;',
+      '--color-mist-slate: #a8b9bb;',
+      '--color-border-dark: #1d454a;',
+      '--color-border-light: #c9dada;',
+      '--color-mint-wash: #d8f8f2;',
+      '--color-violet-wash: #e9e5ff;',
+      '--color-gold-wash: #fff1cf;',
+      '--color-error-dark: #b83e4b;',
+      '--color-error-light: #ff9099;',
+      '--content-max: 1600px;',
+      '--radius-control: 10px;',
+      '--radius-card: 16px;',
+      '--radius-stage: 24px;',
     ]) {
       expect(styles).toContain(declaration);
     }
+    expect(styles).toContain('font-family: "Sora Variable";');
+    expect(styles).toContain('font-family: "Inter Variable";');
+    expect(styles).toContain('font-family: "IBM Plex Mono";');
+    expect(styles).toContain('outline: 3px solid var(--color-signal-mint);');
+    expect(styles).toContain('outline-offset: 3px;');
   });
 
   it('makes semantic hidden state and keyboard focus reliable', () => {
     expect(styles).toContain('[hidden] {\n  display: none !important;\n}');
     expect(styles).toContain(':focus-visible');
-    expect(styles).toContain('outline: 3px solid var(--color-focus);');
+    expect(styles).toContain('outline: 3px solid var(--color-signal-mint);');
   });
 
   it('defines separate mobile, intermediate, and desktop behavior', () => {

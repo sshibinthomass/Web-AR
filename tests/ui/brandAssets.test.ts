@@ -1,12 +1,18 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { apertureLogoUrl, arveniloLockupUrl } from '../../src/ui/brandAssets';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const read = (path: string): Buffer => readFileSync(resolve(repoRoot, path));
+const sourceRoot = [repoRoot, resolve(repoRoot, '../..')].find((root) => (
+  existsSync(resolve(root, 'Arvenilo-Design-Handoff'))
+)) ?? repoRoot;
+const read = (path: string): Buffer => readFileSync(resolve(
+  path.startsWith('Arvenilo-Design-Handoff/') ? sourceRoot : repoRoot,
+  path,
+));
 const sha256 = (path: string): string => createHash('sha256').update(read(path)).digest('hex').toUpperCase();
 
 describe('WebXRify brand assets', () => {
@@ -41,5 +47,41 @@ describe('WebXRify brand assets', () => {
       'src/ui/routes.ts',
     ].map((path) => read(path).toString('utf8')).join('\n');
     expect(interfaceSources).not.toMatch(/Anima You 3D|Arvenilo Agent|WebXRify Agent/i);
+  });
+
+  it('copies the approved local font bundle and removes Fontsource dependencies', () => {
+    const fontPairs = [
+      ['Arvenilo-Design-Handoff/04-Fonts/Sora/sora-latin-wght-normal.woff2', 'src/assets/fonts/sora-latin-wght-normal.woff2'],
+      ['Arvenilo-Design-Handoff/04-Fonts/Inter/inter-latin-wght-normal.woff2', 'src/assets/fonts/inter-latin-wght-normal.woff2'],
+      ['Arvenilo-Design-Handoff/04-Fonts/Inter/inter-latin-wght-italic.woff2', 'src/assets/fonts/inter-latin-wght-italic.woff2'],
+      ['Arvenilo-Design-Handoff/04-Fonts/IBM-Plex-Mono/ibm-plex-mono-latin-400-normal.woff2', 'src/assets/fonts/ibm-plex-mono-latin-400-normal.woff2'],
+      ['Arvenilo-Design-Handoff/04-Fonts/IBM-Plex-Mono/ibm-plex-mono-latin-400-italic.woff2', 'src/assets/fonts/ibm-plex-mono-latin-400-italic.woff2'],
+      ['Arvenilo-Design-Handoff/04-Fonts/IBM-Plex-Mono/ibm-plex-mono-latin-500-normal.woff2', 'src/assets/fonts/ibm-plex-mono-latin-500-normal.woff2'],
+      ['Arvenilo-Design-Handoff/04-Fonts/IBM-Plex-Mono/ibm-plex-mono-latin-500-italic.woff2', 'src/assets/fonts/ibm-plex-mono-latin-500-italic.woff2'],
+    ] as const;
+    for (const [source, runtime] of fontPairs) {
+      expect(read(runtime).equals(read(source))).toBe(true);
+    }
+
+    const licensePairs = [
+      ['Arvenilo-Design-Handoff/04-Fonts/Sora/LICENSE.txt', 'src/assets/fonts/LICENSE-Sora.txt'],
+      ['Arvenilo-Design-Handoff/04-Fonts/Inter/LICENSE.txt', 'src/assets/fonts/LICENSE-Inter.txt'],
+      ['Arvenilo-Design-Handoff/04-Fonts/IBM-Plex-Mono/LICENSE.txt', 'src/assets/fonts/LICENSE-IBM-Plex-Mono.txt'],
+    ] as const;
+    for (const [source, runtime] of licensePairs) {
+      expect(read(runtime).equals(read(source))).toBe(true);
+    }
+
+    expect(read('src/main.ts').toString('utf8')).not.toContain('@fontsource');
+    const packageJson = JSON.parse(read('package.json').toString('utf8')) as {
+      dependencies?: Record<string, string>;
+    };
+    for (const dependency of [
+      '@fontsource/ibm-plex-mono',
+      '@fontsource/sora',
+      '@fontsource/source-sans-3',
+    ]) {
+      expect(packageJson.dependencies).not.toHaveProperty(dependency);
+    }
   });
 });

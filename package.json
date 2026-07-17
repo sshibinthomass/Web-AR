@@ -13,9 +13,6 @@
     "worker:deploy": "wrangler deploy"
   },
   "dependencies": {
-    "@fontsource/ibm-plex-mono": "5.2.6",
-    "@fontsource/sora": "5.2.8",
-    "@fontsource/source-sans-3": "5.2.9",
     "three": "^0.185.0"
   },
   "devDependencies": {

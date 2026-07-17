@@ -1,26 +1,111 @@
+@font-face {
+  font-family: "Sora Variable";
+  src: url("./assets/fonts/sora-latin-wght-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter Variable";
+  src: url("./assets/fonts/inter-latin-wght-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter Variable";
+  src: url("./assets/fonts/inter-latin-wght-italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./assets/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./assets/fonts/ibm-plex-mono-latin-400-italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./assets/fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./assets/fonts/ibm-plex-mono-latin-500-italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 500;
+  font-display: swap;
+}
+
 :root {
-  --color-canvas: #f4f8f7;
-  --color-surface: #ffffff;
-  --color-ink: #102f2f;
-  --color-ink-muted: #496664;
-  --color-teal: #0b8f87;
-  --color-teal-deep: #076a65;
-  --color-amber: #f2a93b;
-  --color-error: #d85d4a;
-  --color-border: #d5e4e1;
-  --color-success: #2c8b5e;
-  --color-focus: #0b8f87;
-  --font-display: "Sora", sans-serif;
-  --font-body: "Source Sans 3", sans-serif;
-  --font-utility: "IBM Plex Mono", monospace;
-  --content-max: 1280px;
+  --color-spatial-void: #020a0c;
+  --color-spatial-ink: #081d21;
+  --color-spatial-surface: #0d2a2e;
+  --color-spatial-surface-raised: #12363a;
+  --color-reality-mist: #f4fbfa;
+  --color-interface-white: #ffffff;
+  --color-signal-mint: #5eead4;
+  --color-digital-violet: #7456f1;
+  --color-anchor-gold: #f4b942;
+  --color-context-slate: #4d6265;
+  --color-mist-slate: #a8b9bb;
+  --color-border-dark: #1d454a;
+  --color-border-light: #c9dada;
+  --color-mint-wash: #d8f8f2;
+  --color-violet-wash: #e9e5ff;
+  --color-gold-wash: #fff1cf;
+  --color-error-dark: #b83e4b;
+  --color-error-light: #ff9099;
+  --color-canvas: var(--color-reality-mist);
+  --color-surface: var(--color-interface-white);
+  --color-ink: var(--color-spatial-ink);
+  --color-ink-muted: var(--color-context-slate);
+  --color-teal: var(--color-signal-mint);
+  --color-teal-deep: color-mix(in srgb, var(--color-signal-mint) 68%, var(--color-spatial-ink));
+  --color-amber: var(--color-anchor-gold);
+  --color-error: var(--color-error-dark);
+  --color-border: var(--color-border-light);
+  --color-success: color-mix(in srgb, var(--color-signal-mint) 56%, var(--color-spatial-ink));
+  --color-focus: var(--color-signal-mint);
+  --font-display: "Sora Variable", "Sora", "Avenir Next", "Segoe UI", sans-serif;
+  --font-text: "Inter Variable", "Inter", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  --font-body: var(--font-text);
+  --font-utility: "IBM Plex Mono", "Cascadia Mono", "SFMono-Regular", monospace;
+  --content-reading: 720px;
+  --content-standard: 1200px;
+  --content-wide: 1440px;
+  --content-max: 1600px;
+  --gutter-mobile: 20px;
+  --gutter-tablet: 32px;
+  --gutter-desktop: 48px;
+  --gutter-wide: 64px;
   --control-height: 48px;
   --radius-control: 10px;
-  --radius-panel: 16px;
-  --shadow-panel: 0 18px 55px rgba(16, 47, 47, 0.11);
-  color: var(--color-ink);
-  background: var(--color-canvas);
-  font-family: var(--font-body);
+  --radius-card: 16px;
+  --radius-stage: 24px;
+  --radius-panel: var(--radius-card);
+  --radius-status: 999px;
+  --shadow-panel: 0 22px 60px rgba(8, 29, 33, 0.1);
+  color: var(--color-spatial-ink);
+  background: var(--color-reality-mist);
+  font-family: var(--font-text);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -52,11 +137,7 @@ body,
 body {
   min-width: 320px;
   overflow-x: hidden;
-  background:
-    linear-gradient(rgba(11, 143, 135, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(11, 143, 135, 0.055) 1px, transparent 1px),
-    var(--color-canvas);
-  background-size: 48px 48px;
+  background: var(--color-reality-mist);
 }
 
 canvas {
@@ -84,7 +165,7 @@ a {
 }
 
 :focus-visible {
-  outline: 3px solid var(--color-focus);
+  outline: 3px solid var(--color-signal-mint);
   outline-offset: 3px;
 }
 
@@ -101,9 +182,9 @@ button {
 
 button.primary,
 .primary {
-  border-color: var(--color-teal);
-  color: #ffffff;
-  background: var(--color-teal);
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 button.primary:hover,
