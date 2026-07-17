@@ -46,6 +46,7 @@ describe('application design system', () => {
       '.camera-media-layer {\n' +
       '  position: relative;\n' +
       '  grid-row: 2;\n' +
+      '  grid-column: 1;\n' +
       '  min-width: 0;\n' +
       '  min-height: 0;\n' +
       '  pointer-events: none;\n' +
@@ -65,7 +66,11 @@ describe('application design system', () => {
       '  z-index: 2;\n' +
       '  pointer-events: none;',
     );
-    expect(styles).toContain('.creation-stage > .upload-drop-zone {');
+    expect(styles).toContain(
+      '.creation-stage > .upload-drop-zone {\n' +
+      '  grid-row: 2;\n' +
+      '  grid-column: 1;',
+    );
   });
 
   it('uses a restrained segmentation pulse and removes it for reduced motion', () => {
