@@ -202,6 +202,24 @@ describe('application design system', () => {
     expect(styles).toContain('outline: 3px solid var(--color-signal-mint);');
   });
 
+  it('defines complete Precision Spatial responsive and immersive behavior', () => {
+    for (const contract of [
+      '@media (max-width: 767px)',
+      '@media (min-width: 768px) and (max-width: 1023px)',
+      '@media (min-width: 1024px)',
+      '@media (min-width: 1440px)',
+      'env(safe-area-inset-bottom)',
+      'overflow-wrap: anywhere;',
+      'grid-template-columns: minmax(0, 1fr);',
+      '.app-shell[data-shell="immersive"] {',
+      '.immersive-inspector {',
+      '.immersive-actions {',
+      '@media (prefers-reduced-motion: reduce)',
+    ]) {
+      expect(styles).toContain(contract);
+    }
+  });
+
   it('defines separate mobile, intermediate, and desktop behavior', () => {
     expect(styles).toContain('@media (max-width: 767px)');
     expect(styles).toContain('@media (min-width: 768px) and (max-width: 1023px)');
@@ -219,7 +237,7 @@ describe('application design system', () => {
     );
     expect(styles).toContain('.selection-label {');
     expect(styles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
-    expect(styles).toContain('grid-template-columns: repeat(3, 44px);');
+    expect(styles).toContain('grid-template-columns: repeat(3, minmax(44px, 1fr));');
   });
 
   it('uses one modal layer for preview, edit, and confirmation dialogs', () => {

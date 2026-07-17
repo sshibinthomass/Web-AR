@@ -136,7 +136,6 @@ body,
 
 body {
   min-width: 320px;
-  overflow-x: hidden;
   background: var(--color-reality-mist);
 }
 
@@ -306,6 +305,29 @@ h3 {
 
 .app-shell {
   min-height: 100dvh;
+}
+
+.app-shell,
+.app-page-host,
+.landing-inner,
+.auth-panel-inner,
+.speech-panel-inner,
+.admin-dashboard-inner,
+.creation-workspace,
+.model-manager-inner,
+.ar-model-picker-inner,
+.model-manager-row,
+.ar-model-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.model-manager-name,
+.admin-account-email,
+.admin-job-meta,
+.account-menu-email,
+.speech-transcript {
+  overflow-wrap: anywhere;
 }
 
 .xr-overlay {
@@ -487,12 +509,13 @@ h3 {
   gap: 12px;
   width: min(680px, calc(100% - 24px));
   margin-inline: auto;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 0;
+  border-bottom: 1px solid var(--color-border-dark);
   border-radius: var(--radius-panel);
   padding: 8px;
-  color: #ffffff;
-  background: rgba(8, 30, 30, 0.82);
-  box-shadow: 0 18px 50px rgba(3, 20, 20, 0.26);
+  color: var(--color-interface-white);
+  background: color-mix(in srgb, var(--color-spatial-ink) 92%, transparent);
+  box-shadow: 0 18px 50px color-mix(in srgb, var(--color-spatial-void) 70%, transparent);
   backdrop-filter: blur(16px);
   pointer-events: auto;
 }
@@ -505,7 +528,7 @@ h3 {
 
 .immersive-status {
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.76);
+  color: var(--color-mist-slate);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3102,183 +3125,6 @@ h3 {
   border-top-color: #0f766e;
 }
 
-@media (max-width: 860px) {
-  .landing {
-    align-items: flex-start;
-    padding-top: max(28px, env(safe-area-inset-top));
-  }
-
-  .landing-inner {
-    grid-template-columns: 1fr;
-    gap: 18px;
-  }
-
-  .landing-copy,
-  .mode-picker,
-  .auth-actions {
-    grid-column: 1;
-  }
-
-  .landing-preview {
-    grid-column: 1;
-    grid-row: auto;
-    min-height: 180px;
-  }
-
-  .preview-stage {
-    inset: 18px 16px 62px;
-  }
-
-  .preview-object {
-    right: 35%;
-    bottom: 25%;
-    width: 68px;
-    height: 88px;
-  }
-
-  .preview-anchor {
-    right: 28%;
-    bottom: 14%;
-    width: 90px;
-    height: 90px;
-  }
-
-  .mode-group-heading {
-    display: grid;
-    gap: 4px;
-  }
-
-  .mode-group p {
-    max-width: none;
-    text-align: left;
-  }
-}
-
-@media (min-width: 620px) {
-  .model-rail {
-    justify-content: center;
-  }
-
-  .model-manager-row.has-preview {
-    grid-template-columns: 74px minmax(0, 1fr) 260px;
-    align-items: center;
-  }
-
-  .model-manager-actions {
-    grid-column: auto;
-  }
-}
-
-@media (max-width: 420px) {
-  .landing {
-    padding-bottom: 28px;
-  }
-
-  .landing-inner {
-    gap: 14px;
-  }
-
-  .landing h1 {
-    font-size: 38px;
-  }
-
-  .landing-preview {
-    min-height: 120px;
-  }
-
-  .preview-stage {
-    inset: 8px 14px 36px;
-  }
-
-  .preview-object {
-    width: 44px;
-    height: 60px;
-  }
-
-  .preview-object::before {
-    top: 8px;
-    left: 10px;
-    width: 20px;
-    height: 20px;
-  }
-
-  .preview-anchor {
-    width: 58px;
-    height: 58px;
-  }
-
-  .landing-preview p {
-    right: 16px;
-    bottom: 8px;
-    left: 16px;
-    font-size: 12px;
-  }
-
-  .mode-group {
-    padding: 12px;
-  }
-
-  .mode-action-list {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-
-  .mode-action button {
-    min-height: 50px;
-  }
-
-  .speech-actions {
-    grid-template-columns: 1fr;
-  }
-
-  .model-library-controls {
-    grid-template-columns: 1fr;
-  }
-
-  .model-rail {
-    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 118px);
-    padding-inline: 12px;
-  }
-
-  .model-rail-item {
-    flex-basis: 76px;
-    min-width: 76px;
-  }
-
-  .model-manager-row {
-    grid-template-columns: 62px minmax(0, 1fr);
-  }
-
-  .model-manager-thumbnail {
-    width: 62px;
-    height: 62px;
-  }
-
-  .model-preview-panel {
-    min-height: 0;
-    height: 100%;
-  }
-
-  .model-preview-bar {
-    flex-wrap: wrap;
-  }
-
-  .model-preview-heading {
-    flex: 1 1 calc(100% - 84px);
-  }
-
-  .model-preview-controls {
-    order: 3;
-    flex-basis: 100%;
-    grid-template-columns: 1fr;
-    min-width: 0;
-  }
-
-  .model-preview-control {
-    grid-template-columns: auto minmax(0, 1fr) 44px;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .speech-visualizer.is-listening span,
   .speech-visualizer.is-working span,
@@ -4175,22 +4021,44 @@ h3 {
   min-height: 44px;
 }
 
-@media (max-width: 1023px) {
+@media (min-width: 768px) and (max-width: 1023px) {
   .landing,
   .auth-panel,
   .speech-panel,
   .admin-dashboard {
-    padding: 72px 16px calc(96px + env(safe-area-inset-bottom));
+    padding-top: calc(72px + env(safe-area-inset-top));
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
+  .landing,
+  .auth-panel,
+  .speech-panel,
+  .admin-dashboard,
+  .model-manager,
+  .ar-model-picker {
+    padding-right: var(--gutter-tablet);
+    padding-left: var(--gutter-tablet);
+  }
+
+  .landing-inner,
+  .auth-panel-inner,
+  .speech-workspace,
+  .admin-workspace {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .landing-inner {
-    grid-template-columns: 1fr;
-    gap: 20px;
+    gap: 18px;
   }
 
   .auth-panel-inner {
-    grid-template-columns: 1fr;
     gap: 28px;
+  }
+
+  .landing-copy,
+  .mode-picker,
+  .auth-actions {
+    grid-column: 1;
   }
 
   .landing-preview {
@@ -4203,12 +4071,6 @@ h3 {
     grid-column: 1;
   }
 
-  .home-route-groups .mode-picker,
-  .speech-workspace,
-  .admin-workspace {
-    grid-template-columns: 1fr;
-  }
-
   .brand-endorsement-panel {
     grid-template-columns: minmax(0, 1fr) minmax(160px, 240px);
   }
@@ -4216,9 +4078,196 @@ h3 {
   .speech-actions {
     grid-template-columns: 1fr;
   }
+
+  .preview-stage {
+    inset: 18px 16px 62px;
+  }
+
+  .preview-object {
+    right: 35%;
+    bottom: 25%;
+    width: 68px;
+    height: 88px;
+  }
+
+  .preview-anchor {
+    right: 28%;
+    bottom: 14%;
+    width: 90px;
+    height: 90px;
+  }
+
+  .mode-group-heading {
+    display: grid;
+    gap: 4px;
+  }
+
+  .mode-group p {
+    max-width: none;
+    text-align: left;
+  }
+
+  .model-rail {
+    justify-content: center;
+  }
+
+  .model-manager-row.has-preview {
+    grid-template-columns: 74px minmax(0, 1fr) 260px;
+    align-items: center;
+  }
+
+  .model-manager-actions {
+    grid-column: auto;
+  }
 }
 
 @media (max-width: 767px) {
+  .app-header,
+  .route-bar {
+    display: none;
+  }
+
+  .mobile-top-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    min-height: calc(56px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) var(--gutter-mobile) 0;
+  }
+
+  .mobile-brand-button {
+    grid-column: 1;
+    display: none;
+    justify-self: start;
+    min-width: 44px;
+    min-height: 44px;
+    border-color: transparent;
+    padding: 4px;
+    background: transparent;
+  }
+
+  .app-shell[data-route="home"] .mobile-brand-button {
+    display: inline-flex;
+  }
+
+  .mobile-brand-button .brand-aperture {
+    width: 36px;
+  }
+
+  .landing,
+  .auth-panel,
+  .speech-panel,
+  .admin-dashboard {
+    padding-top: calc(72px + env(safe-area-inset-top));
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
+  .landing,
+  .auth-panel,
+  .speech-panel,
+  .admin-dashboard,
+  .model-manager,
+  .ar-model-picker {
+    padding-right: var(--gutter-mobile);
+    padding-left: var(--gutter-mobile);
+  }
+
+  .landing-inner,
+  .auth-panel-inner,
+  .speech-workspace,
+  .admin-workspace,
+  .brand-endorsement-panel,
+  .model-manager-list,
+  .home-route-groups .mode-picker {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .landing-inner {
+    gap: 14px;
+  }
+
+  .landing-copy,
+  .mode-picker,
+  .auth-actions,
+  .home-route-groups {
+    grid-column: 1;
+  }
+
+  .landing h1 {
+    max-width: 100%;
+    font-size: clamp(42px, 13vw, 58px);
+    overflow-wrap: anywhere;
+  }
+
+  .webxr-aperture-stage {
+    min-height: 300px;
+  }
+
+  .landing-preview {
+    grid-column: 1;
+    grid-row: auto;
+    min-height: 120px;
+  }
+
+  .preview-stage {
+    inset: 8px 14px 36px;
+  }
+
+  .preview-object {
+    right: 35%;
+    bottom: 25%;
+    width: 44px;
+    height: 60px;
+  }
+
+  .preview-object::before {
+    top: 8px;
+    left: 10px;
+    width: 20px;
+    height: 20px;
+  }
+
+  .preview-anchor {
+    right: 28%;
+    bottom: 14%;
+    width: 58px;
+    height: 58px;
+  }
+
+  .landing-preview p {
+    right: 16px;
+    bottom: 8px;
+    left: 16px;
+    font-size: 12px;
+  }
+
+  .mode-group-heading {
+    display: grid;
+    gap: 4px;
+  }
+
+  .mode-group {
+    padding: 12px;
+  }
+
+  .mode-group p {
+    max-width: none;
+    text-align: left;
+  }
+
+  .mode-action-list,
+  .speech-actions,
+  .model-library-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mode-action-list {
+    gap: 8px;
+  }
+
+  .mode-action button {
+    min-height: 50px;
+  }
+
   .brand-endorsement-panel {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -4267,6 +4316,74 @@ h3 {
   .admin-job-actions a {
     width: 100%;
     min-width: 0;
+  }
+
+  .mobile-bottom-nav {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .model-rail {
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 118px);
+    padding-inline: 12px;
+  }
+
+  .model-rail-item {
+    flex-basis: 76px;
+    min-width: 76px;
+  }
+
+  .model-manager-row {
+    grid-template-columns: 62px minmax(0, 1fr);
+  }
+
+  .model-manager-thumbnail {
+    width: 62px;
+    height: 62px;
+  }
+
+  .model-manager-actions {
+    grid-template-columns: repeat(3, minmax(44px, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-header,
+  .route-bar,
+  .landing,
+  .auth-panel,
+  .speech-panel,
+  .admin-dashboard,
+  .model-manager,
+  .ar-model-picker {
+    padding-right: var(--gutter-desktop);
+    padding-left: var(--gutter-desktop);
+  }
+
+  .model-rail {
+    justify-content: center;
+  }
+
+  .model-manager-row.has-preview {
+    grid-template-columns: 74px minmax(0, 1fr) 260px;
+    align-items: center;
+  }
+
+  .model-manager-actions {
+    grid-column: auto;
+  }
+}
+
+@media (min-width: 1440px) {
+  .app-header,
+  .route-bar,
+  .landing,
+  .auth-panel,
+  .speech-panel,
+  .admin-dashboard,
+  .model-manager,
+  .ar-model-picker {
+    padding-right: var(--gutter-wide);
+    padding-left: var(--gutter-wide);
   }
 }
 
@@ -4514,12 +4631,67 @@ h3 {
   background: var(--color-reality-mist);
 }
 
-@media (max-width: 1023px) {
+@media (min-width: 768px) and (max-width: 1023px) {
   .creation-workspace.fullscreen {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(260px, 1fr) auto;
     gap: 12px;
     padding: calc(64px + env(safe-area-inset-top)) 14px calc(88px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+
+  .app-shell[data-shell="standard"] .creation-workspace.fullscreen {
+    padding-top: calc(72px + env(safe-area-inset-top));
+  }
+
+  .creation-stage {
+    min-height: 260px;
+  }
+
+  .creation-guidance {
+    overflow: visible;
+  }
+
+  .upload-drop-zone {
+    min-height: 220px;
+  }
+
+  .app-shell[data-route="upload"] .creation-workspace.fullscreen,
+  .app-shell[data-route="upload-model"] .creation-workspace.fullscreen {
+    grid-template-rows: auto auto;
+    align-content: start;
+  }
+
+  .app-shell[data-route="upload"] .creation-stage,
+  .app-shell[data-route="upload-model"] .creation-stage {
+    min-height: 0;
+  }
+
+  .app-shell[data-route="upload"] .upload-drop-zone,
+  .app-shell[data-route="upload-model"] .upload-drop-zone {
+    height: auto;
+    min-height: clamp(260px, 34dvh, 340px);
+  }
+
+  .camera-actions .primary {
+    width: 100%;
+  }
+
+  .creation-guidance .camera-actions {
+    position: sticky;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    z-index: 4;
+    padding-top: 10px;
+    background: var(--color-interface-white);
+  }
+}
+
+@media (max-width: 767px) {
+  .creation-workspace.fullscreen {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(260px, 1fr) auto;
+    gap: 12px;
+    padding: calc(64px + env(safe-area-inset-top)) var(--gutter-mobile) calc(88px + env(safe-area-inset-bottom));
     overflow-y: auto;
   }
 
@@ -4874,10 +5046,10 @@ h3 {
   background: var(--color-signal-mint);
 }
 
-@media (max-width: 1023px) {
+@media (min-width: 768px) and (max-width: 1023px) {
   .model-manager,
   .ar-model-picker {
-    padding: calc(72px + env(safe-area-inset-top)) 16px calc(164px + env(safe-area-inset-bottom));
+    padding: calc(72px + env(safe-area-inset-top)) var(--gutter-tablet) calc(164px + env(safe-area-inset-bottom));
   }
 
   .ar-model-place-bar {
@@ -4898,7 +5070,21 @@ h3 {
 @media (max-width: 767px) {
   .model-manager,
   .ar-model-picker {
-    padding-inline: 14px;
+    padding: calc(72px + env(safe-area-inset-top)) var(--gutter-mobile) calc(164px + env(safe-area-inset-bottom));
+  }
+
+  .ar-model-place-bar {
+    right: var(--gutter-mobile);
+    bottom: calc(80px + env(safe-area-inset-bottom));
+    left: var(--gutter-mobile);
+  }
+
+  .ar-model-place-button {
+    width: min(460px, 100%);
+  }
+
+  .model-manager-list {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .ar-picker-heading h2 {
@@ -4911,7 +5097,7 @@ h3 {
 
   .model-manager-actions {
     display: grid;
-    grid-template-columns: repeat(3, 44px);
+    grid-template-columns: repeat(3, minmax(44px, 1fr));
     justify-content: end;
   }
 
@@ -4933,6 +5119,31 @@ h3 {
 
   .ar-model-card-label {
     text-align: left;
+  }
+
+  .model-manager-row {
+    grid-template-columns: 62px minmax(0, 1fr);
+  }
+
+  .model-manager-thumbnail {
+    width: 62px;
+    height: 62px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .model-manager,
+  .ar-model-picker {
+    padding-right: var(--gutter-desktop);
+    padding-left: var(--gutter-desktop);
+  }
+}
+
+@media (min-width: 1440px) {
+  .model-manager,
+  .ar-model-picker {
+    padding-right: var(--gutter-wide);
+    padding-left: var(--gutter-wide);
   }
 }
 
@@ -5108,7 +5319,7 @@ h3 {
 
   .model-preview-panel {
     width: 100%;
-    height: calc(100dvh - 28px);
+    height: 100%;
     min-height: 0;
   }
 
@@ -5123,6 +5334,10 @@ h3 {
     min-width: 0;
   }
 
+  .model-preview-heading {
+    flex: 1 1 calc(100% - 84px);
+  }
+
   .model-preview-control {
     grid-template-columns: auto minmax(0, 1fr) 44px;
   }
@@ -5134,11 +5349,30 @@ h3 {
 }
 
 /* Immersive single- and multi-object AR controls */
+.app-shell[data-shell="immersive"] {
+  color: var(--color-interface-white);
+  background: var(--color-spatial-void);
+}
+
 .immersive-bar {
   top: max(12px, env(safe-area-inset-top));
   right: 14px;
   left: 14px;
   width: min(760px, calc(100% - 28px));
+  border-bottom: 1px solid var(--color-border-dark);
+  color: var(--color-interface-white);
+  background: color-mix(in srgb, var(--color-spatial-ink) 92%, transparent);
+}
+
+.creation-workspace.fullscreen .creation-stage,
+.model-preview-viewport {
+  border-color: var(--color-border-dark);
+  border-radius: var(--radius-stage);
+  background: var(--color-spatial-void);
+}
+
+.creation-workspace.fullscreen .creation-stage .camera-label {
+  color: var(--color-mist-slate);
 }
 
 .immersive-inspector {
@@ -5153,29 +5387,26 @@ h3 {
   max-height: calc(100dvh - 180px);
   margin: 0;
   overflow: auto;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: var(--radius-panel);
+  border: 1px solid var(--color-border-dark);
+  border-radius: var(--radius-card);
   padding: 16px;
-  color: #ffffff;
-  background: rgba(16, 47, 47, 0.86);
-  box-shadow: 0 18px 50px rgba(3, 20, 20, 0.28);
+  color: var(--color-interface-white);
+  background: color-mix(in srgb, var(--color-spatial-surface) 94%, transparent);
+  box-shadow: 0 18px 50px color-mix(in srgb, var(--color-spatial-void) 70%, transparent);
   backdrop-filter: blur(16px);
   pointer-events: auto;
 }
 
 .immersive-inspector .status-label,
-.immersive-inspector .status-message,
-.immersive-inspector .status-source {
-  color: #ffffff;
+.immersive-inspector .status-source,
+.immersive-status {
+  color: var(--color-mist-slate);
 }
 
 .immersive-inspector .status-message {
   margin-top: 2px;
+  color: var(--color-interface-white);
   font-size: 15px;
-}
-
-.immersive-inspector .status-source {
-  color: rgba(255, 255, 255, 0.7);
 }
 
 .immersive-actions {
@@ -5191,6 +5422,10 @@ h3 {
   gap: 8px;
   max-width: none;
   margin: 0;
+  border: 1px solid var(--color-border-dark);
+  border-radius: var(--radius-card);
+  padding: 8px;
+  background: color-mix(in srgb, var(--color-spatial-ink) 92%, transparent);
 }
 
 .immersive-actions .rotate-control,
@@ -5198,21 +5433,25 @@ h3 {
   order: 0;
   flex: 0 1 300px;
   max-width: 300px;
-  color: #ffffff;
-  background: rgba(16, 47, 47, 0.88);
+}
+
+.immersive-actions button.hud-action-chip,
+.immersive-actions .rotate-control,
+.immersive-actions .animation-control {
+  min-height: 44px;
+  border-color: var(--color-border-dark);
+  color: var(--color-interface-white);
+  background: var(--color-spatial-surface);
 }
 
 .immersive-actions .animation-control select {
-  border-color: rgba(255, 255, 255, 0.22);
-  color: #ffffff;
-  background: rgba(4, 24, 24, 0.84);
+  border-color: var(--color-border-dark);
+  color: var(--color-interface-white);
+  background: var(--color-spatial-surface);
 }
 
 .immersive-actions button.hud-action-chip {
-  min-height: var(--control-height);
-  border-color: rgba(255, 255, 255, 0.22);
-  color: #ffffff;
-  background: rgba(16, 47, 47, 0.88);
+  min-height: 44px;
 }
 
 .immersive-actions button.hud-action-chip.primary {
@@ -5222,9 +5461,9 @@ h3 {
 }
 
 .immersive-actions button.hud-action-chip.danger {
-  border-color: color-mix(in srgb, var(--color-error) 62%, #ffffff);
-  color: #ffffff;
-  background: color-mix(in srgb, var(--color-error) 82%, #5d1f18);
+  border-color: var(--color-error-light);
+  color: var(--color-error-light);
+  background: var(--color-spatial-surface);
 }
 
 .app-shell[data-shell="immersive"] .model-rail {
@@ -5235,7 +5474,7 @@ h3 {
   bottom: calc(max(20px, env(safe-area-inset-bottom)) + 64px);
 }
 
-@media (max-width: 1023px) {
+@media (min-width: 768px) and (max-width: 1023px) {
   .immersive-actions {
     overflow-x: auto;
     overscroll-behavior-x: contain;
@@ -5281,10 +5520,18 @@ h3 {
     right: 10px;
     bottom: calc(10px + env(safe-area-inset-bottom));
     left: 10px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    justify-content: flex-start;
+    scrollbar-width: none;
+  }
+
+  .immersive-actions::-webkit-scrollbar {
+    display: none;
   }
 
   .immersive-actions .rotate-control,
   .immersive-actions .animation-control {
-    flex-basis: min(260px, calc(100vw - 36px));
+    flex: 0 0 min(260px, calc(100vw - 36px));
   }
 }
