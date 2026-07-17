@@ -12,7 +12,7 @@ describe('segmentObject', () => {
       new Response(
         JSON.stringify({
           detected: true,
-          mask_base64: 'bWFzaw==',
+          mask_base64: 'iVBORw0KGgo=',
           mask_mime_type: 'image/png',
           bounds: { x: 0.18, y: 0.12, width: 0.64, height: 0.73 },
           confidence: 0.94,
@@ -23,7 +23,7 @@ describe('segmentObject', () => {
 
     await expect(
       segmentObject({
-        apiUrl: 'https://worker.example/generate-3d',
+        apiUrl: 'https://worker.example/generate-3d/?stage=beta#ignored-fragment',
         imageBase64: 'cGhvdG8=',
         imageMimeType: 'image/webp',
         authToken: 'signed-token',
@@ -32,13 +32,13 @@ describe('segmentObject', () => {
       }),
     ).resolves.toEqual({
       detected: true,
-      maskBase64: 'bWFzaw==',
+      maskBase64: 'iVBORw0KGgo=',
       maskMimeType: 'image/png',
       bounds: { x: 0.18, y: 0.12, width: 0.64, height: 0.73 },
       confidence: 0.94,
     } satisfies ObjectSegmentationResult);
 
-    expect(fetchImpl).toHaveBeenCalledWith('https://worker.example/segment-image', {
+    expect(fetchImpl).toHaveBeenCalledWith('https://worker.example/segment-image?stage=beta', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -89,6 +89,45 @@ describe('segmentObject', () => {
   });
 
   it.each([
+    ['missing', { confidence: 0.2 }],
+    ['non-boolean', { detected: 'false', confidence: 0.2 }],
+  ])('rejects a %s detection discriminator even below the confidence threshold', async (_label, body) => {
+    await expect(
+      segmentObject({
+        apiUrl: 'https://worker.example/generate-3d',
+        imageBase64: 'cGhvdG8=',
+        imageMimeType: 'image/jpeg',
+        fetchImpl: vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 })),
+      }),
+    ).rejects.toThrow('Worker returned an invalid segmentation detection result.');
+  });
+
+  it.each([
+    ['non-PNG mask data', 'bm90LWEtcG5n'],
+    ['noncanonical mask base64', 'iVBORw0KGgo'],
+  ])('rejects %s', async (_label, maskBase64) => {
+    await expect(
+      segmentObject({
+        apiUrl: 'https://worker.example/generate-3d',
+        imageBase64: 'cGhvdG8=',
+        imageMimeType: 'image/jpeg',
+        fetchImpl: vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              detected: true,
+              mask_base64: maskBase64,
+              mask_mime_type: 'image/png',
+              bounds: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
+              confidence: 0.9,
+            }),
+            { status: 200 },
+          ),
+        ),
+      }),
+    ).rejects.toThrow('Worker returned an invalid object segmentation mask.');
+  });
+
+  it.each([
     ['invalid confidence', { detected: false, confidence: 2 }, 'Worker returned an invalid segmentation confidence.'],
     [
       'malformed bounds',
@@ -132,5 +171,40 @@ describe('segmentObject', () => {
         fetchImpl: vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'Object segmentation failed.' }), { status: 502 })),
       }),
     ).rejects.toThrow('Object segmentation failed.');
+  });
+
+  it('preserves AbortError raised while reading the Worker response', async () => {
+    const abortError = Object.assign(new Error('request cancelled'), { name: 'AbortError' });
+    const response = {
+      ok: false,
+      status: 502,
+      json: vi.fn().mockRejectedValue(abortError),
+    } as unknown as Response;
+
+    await expect(
+      segmentObject({
+        apiUrl: 'https://worker.example/generate-3d',
+        imageBase64: 'cGhvdG8=',
+        imageMimeType: 'image/jpeg',
+        fetchImpl: vi.fn().mockResolvedValue(response),
+      }),
+    ).rejects.toBe(abortError);
+  });
+
+  it('normalizes malformed Worker error bodies without leaking parser failures', async () => {
+    const response = {
+      ok: false,
+      status: 502,
+      json: vi.fn().mockRejectedValue(new Error('internal parser detail')),
+    } as unknown as Response;
+
+    await expect(
+      segmentObject({
+        apiUrl: 'https://worker.example/generate-3d',
+        imageBase64: 'cGhvdG8=',
+        imageMimeType: 'image/jpeg',
+        fetchImpl: vi.fn().mockResolvedValue(response),
+      }),
+    ).rejects.toThrow('Object segmentation failed with HTTP 502.');
   });
 });

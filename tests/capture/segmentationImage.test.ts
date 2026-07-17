@@ -61,4 +61,64 @@ describe('prepareSegmentationImage', () => {
     expect(toBlob).toHaveBeenNthCalledWith(2, expect.any(Function), 'image/jpeg', 0.82);
     expect(prepared.imageMimeType).toBe('image/jpeg');
   });
+
+  it('closes the decoded bitmap when canvas creation throws', async () => {
+    const close = vi.fn();
+
+    await expect(
+      prepareSegmentationImage(new Blob(['image'], { type: 'image/png' }), {
+        createImageBitmapImpl: vi.fn().mockResolvedValue({ width: 100, height: 80, close }),
+        createCanvas: vi.fn(() => {
+          throw new Error('canvas unavailable');
+        }),
+      }),
+    ).rejects.toThrow('canvas unavailable');
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('revokes a fallback object URL when image decoding fails', async () => {
+    const createObjectURL = vi.fn(() => 'blob:failed-image');
+    const revokeObjectURL = vi.fn();
+    class FailingImage {
+      onerror: ((event: Event | string) => void) | null = null;
+      onload: (() => void) | null = null;
+      height = 0;
+      naturalHeight = 0;
+      naturalWidth = 0;
+      width = 0;
+
+      set src(_value: string) {
+        this.onerror?.(new Event('error'));
+      }
+    }
+
+    vi.stubGlobal('createImageBitmap', undefined);
+    vi.stubGlobal('Image', FailingImage);
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+
+    try {
+      await expect(prepareSegmentationImage(new Blob(['image'], { type: 'image/png' }))).rejects.toThrow(
+        'Could not read segmentation image.',
+      );
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:failed-image');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([
+    ['nonfinite decoded width', { width: Number.POSITIVE_INFINITY, height: 100 }, {}, 'Could not determine segmentation image dimensions.'],
+    ['nonpositive decoded height', { width: 100, height: 0 }, {}, 'Could not determine segmentation image dimensions.'],
+    ['nonpositive maximum dimension', { width: 100, height: 80 }, { maxDimension: 0 }, 'Invalid segmentation image options.'],
+    ['nonfinite quality', { width: 100, height: 80 }, { quality: Number.POSITIVE_INFINITY }, 'Invalid segmentation image options.'],
+  ])('rejects a %s', async (_label, bitmap, options, error) => {
+    await expect(
+      prepareSegmentationImage(new Blob(['image'], { type: 'image/png' }), {
+        createImageBitmapImpl: vi.fn().mockResolvedValue({ ...bitmap, close: vi.fn() }),
+        createCanvas: vi.fn(),
+        ...options,
+      }),
+    ).rejects.toThrow(error);
+  });
 });

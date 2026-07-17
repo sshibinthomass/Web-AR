@@ -61,13 +61,15 @@ export async function segmentObject({
   if (!isConfidence(confidence)) {
     throw new Error('Worker returned an invalid segmentation confidence.');
   }
+  if (typeof body.detected !== 'boolean') {
+    throw new Error('Worker returned an invalid segmentation detection result.');
+  }
   if (body.detected === false || confidence < OBJECT_SEGMENTATION_CONFIDENCE_THRESHOLD) {
     return { detected: false, confidence };
   }
   if (
-    body.detected !== true ||
     typeof body.mask_base64 !== 'string' ||
-    !body.mask_base64 ||
+    !isPngBase64(body.mask_base64) ||
     body.mask_mime_type !== 'image/png' ||
     !isObjectBounds(body.bounds)
   ) {
@@ -84,14 +86,23 @@ export async function segmentObject({
 }
 
 function toSegmentationUrl(apiUrl: string): string {
-  return apiUrl.replace(/\/+$/, '').replace(/\/generate-3d$/, '/segment-image');
+  const url = new URL(apiUrl);
+  const pathname = url.pathname.replace(/\/+$/, '');
+  url.pathname = pathname.endsWith('/generate-3d')
+    ? `${pathname.slice(0, -'/generate-3d'.length)}/segment-image`
+    : pathname;
+  url.hash = '';
+  return url.toString();
 }
 
 async function readResponseBody(response: Response): Promise<Record<string, unknown>> {
   try {
     const body: unknown = await response.json();
     return isRecord(body) ? body : {};
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
     return {};
   }
 }
@@ -117,6 +128,22 @@ function isObjectBounds(value: unknown): value is ObjectBounds {
     x + width <= 1 &&
     y + height <= 1
   );
+}
+
+function isPngBase64(value: string): boolean {
+  try {
+    const binary = atob(value);
+    if (btoa(binary) !== value || binary.length < 8) {
+      return false;
+    }
+    return [137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => binary.charCodeAt(index) === byte);
+  } catch {
+    return false;
+  }
+}
+
+function isAbortError(value: unknown): boolean {
+  return isRecord(value) && value.name === 'AbortError';
 }
 
 function isFiniteNumber(value: unknown): value is number {
