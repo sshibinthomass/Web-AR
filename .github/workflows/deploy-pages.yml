@@ -39,6 +39,7 @@ jobs:
         env:
           GITHUB_PAGES: "true"
           VITE_GENERATE_MODEL_API_URL: ${{ vars.VITE_GENERATE_MODEL_API_URL }}
+          VITE_OBJECT_SEGMENTATION_ENABLED: ${{ vars.VITE_OBJECT_SEGMENTATION_ENABLED }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

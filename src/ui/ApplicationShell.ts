@@ -1,5 +1,6 @@
 import type { AuthUser } from '../services/authClient';
 import { getAccountDisplayName } from './accountIdentity';
+import { apertureLogoUrl } from './brandAssets';
 import { ROUTES, type HudRoute } from './routes';
 
 interface ApplicationShellHandlers {
@@ -48,9 +49,18 @@ export class ApplicationShell {
     this.root.className = 'app-shell';
     this.root.innerHTML = `
       <header class="app-header">
-        <button class="brand-button" type="button" data-nav-route="home" aria-label="Anima You 3D home">
-          <span class="brand-mark" aria-hidden="true"></span>
-          <span>Anima You 3D</span>
+        <button class="brand-button" type="button" data-nav-route="home" aria-label="WebXRify by Arvenilo home">
+          <img
+            class="brand-aperture"
+            src="${apertureLogoUrl}"
+            alt=""
+            width="325"
+            height="325"
+          >
+          <span class="brand-copy" aria-hidden="true">
+            <strong class="brand-product-name">WebXRify</strong>
+            <small class="brand-endorsement">by Arvenilo</small>
+          </span>
         </button>
         <nav class="desktop-nav" aria-label="Primary">
           <button type="button" data-nav-route="home">Home</button>
@@ -88,6 +98,20 @@ export class ApplicationShell {
         </div>
       </div>
       <div class="mobile-top-bar">
+        <button
+          class="mobile-brand-button"
+          type="button"
+          data-nav-route="home"
+          aria-label="WebXRify by Arvenilo home"
+        >
+          <img
+            class="brand-aperture"
+            src="${apertureLogoUrl}"
+            alt=""
+            width="325"
+            height="325"
+          >
+        </button>
         <button class="route-back" type="button">Back</button>
         <strong class="mobile-route-title"></strong>
         <button
