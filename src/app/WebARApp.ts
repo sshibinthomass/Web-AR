@@ -544,6 +544,13 @@ export class WebARApp {
       const cameraStream = await startCameraPreview(preview);
       if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
         stopCameraPreview(cameraStream);
+        if (preview.srcObject === cameraStream) {
+          const currentCameraStream = this.cameraStream;
+          preview.srcObject = currentCameraStream;
+          if (currentCameraStream) {
+            await preview.play().catch(() => undefined);
+          }
+        }
         return;
       }
       this.cameraStream = cameraStream;

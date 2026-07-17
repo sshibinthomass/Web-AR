@@ -136,6 +136,43 @@ function mediaStream(label: string): MediaStream {
   return { label, getTracks: () => [] } as unknown as MediaStream;
 }
 
+function deferredCameraStart(stream: MediaStream) {
+  const pending = deferred<MediaStream>();
+  let preview: HTMLVideoElement | null = null;
+  return {
+    start: (cameraPreview: HTMLVideoElement) => {
+      preview = cameraPreview;
+      return pending.promise;
+    },
+    resolve: () => {
+      if (!preview) {
+        throw new Error('Camera preview was not provided.');
+      }
+      preview.srcObject = stream;
+      pending.resolve(stream);
+    },
+  };
+}
+
+function prepareCameraPreview(app: TestApp, playResult: 'resolve' | 'reject' = 'resolve') {
+  const preview = app.hud.cameraPreviewVideo;
+  const play = vi.fn(
+    playResult === 'resolve'
+      ? () => Promise.resolve()
+      : () => Promise.reject(new Error('Autoplay blocked.')),
+  );
+  Object.defineProperty(preview, 'srcObject', {
+    configurable: true,
+    value: null,
+    writable: true,
+  });
+  Object.defineProperty(preview, 'play', {
+    configurable: true,
+    value: play,
+  });
+  return { play, preview };
+}
+
 function createHud(): HudFixture {
   return {
     cameraPreviewVideo: document.createElement('video'),
@@ -380,20 +417,23 @@ describe('WebARApp object segmentation orchestration', () => {
   });
 
   it('stops a camera stream returned after route reset while permission was pending', async () => {
-    const pendingStart = deferred<MediaStream>();
     const existingStream = mediaStream('existing');
     const staleStream = mediaStream('stale-after-route-reset');
-    dependencies.startCameraPreview.mockReturnValueOnce(pendingStart.promise);
+    const pendingStart = deferredCameraStart(staleStream);
+    dependencies.startCameraPreview.mockImplementationOnce(pendingStart.start);
     const app = createApp();
+    const { play, preview } = prepareCameraPreview(app);
     app.cameraStream = existingStream;
 
     const startOperation = app.startCamera();
     await app.resetTransientExperience();
-    pendingStart.resolve(staleStream);
+    pendingStart.resolve();
     await startOperation;
 
     expect(dependencies.stopCameraPreview).toHaveBeenCalledWith(staleStream);
     expect(app.cameraStream).toBeNull();
+    expect(preview.srcObject).toBeNull();
+    expect(play).not.toHaveBeenCalled();
     expect(app.hud.updateCameraStatus).not.toHaveBeenCalledWith(
       expect.stringContaining('Camera ready'),
       expect.anything(),
@@ -419,30 +459,53 @@ describe('WebARApp object segmentation orchestration', () => {
   });
 
   it('keeps the newest camera start when two permission requests resolve in reverse order', async () => {
-    const firstStart = deferred<MediaStream>();
-    const secondStart = deferred<MediaStream>();
     const existingStream = mediaStream('existing');
     const firstStream = mediaStream('first-stale');
     const secondStream = mediaStream('second-current');
+    const firstStart = deferredCameraStart(firstStream);
+    const secondStart = deferredCameraStart(secondStream);
     dependencies.startCameraPreview
-      .mockReturnValueOnce(firstStart.promise)
-      .mockReturnValueOnce(secondStart.promise);
+      .mockImplementationOnce(firstStart.start)
+      .mockImplementationOnce(secondStart.start);
     const app = createApp();
+    const { play, preview } = prepareCameraPreview(app, 'reject');
     app.cameraStream = existingStream;
 
     const firstOperation = app.startCamera();
     const secondOperation = app.startCamera();
-    secondStart.resolve(secondStream);
+    secondStart.resolve();
     await secondOperation;
-    firstStart.resolve(firstStream);
+    expect(preview.srcObject).toBe(secondStream);
+    firstStart.resolve();
     await firstOperation;
 
     expect(app.cameraStream).toBe(secondStream);
+    expect(preview.srcObject).toBe(secondStream);
+    expect(play).toHaveBeenCalledOnce();
     expect(dependencies.stopCameraPreview).toHaveBeenCalledWith(existingStream);
     expect(dependencies.stopCameraPreview.mock.calls.filter(([stream]) => stream === existingStream)).toHaveLength(1);
     expect(dependencies.stopCameraPreview).toHaveBeenCalledWith(firstStream);
     expect(dependencies.stopCameraPreview).not.toHaveBeenCalledWith(secondStream);
     expect(app.hud.updateCameraStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not overwrite a newer preview attachment while cleaning up a stale camera start', async () => {
+    const staleStream = mediaStream('stale');
+    const newerAttachment = mediaStream('newer-third-attachment');
+    const pendingStart = deferredCameraStart(staleStream);
+    dependencies.startCameraPreview.mockImplementationOnce(pendingStart.start);
+    const app = createApp();
+    const { play, preview } = prepareCameraPreview(app);
+
+    const startOperation = app.startCamera();
+    app.clearCapturedImagePreview();
+    pendingStart.resolve();
+    preview.srcObject = newerAttachment;
+    await startOperation;
+
+    expect(dependencies.stopCameraPreview).toHaveBeenCalledWith(staleStream);
+    expect(preview.srcObject).toBe(newerAttachment);
+    expect(play).not.toHaveBeenCalled();
   });
 
   it('does not let an upload resolve after reset and resurrect captured media', async () => {
