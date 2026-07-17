@@ -22,6 +22,28 @@ describe('WebARApp route cleanup', () => {
     await app.leaveRoute('camera', 'upload');
     expect(app.resetTransientExperience).toHaveBeenCalledOnce();
   });
+
+  it('aborts object segmentation and clears reconstruction during a transient reset', async () => {
+    const controller = new AbortController();
+    const clearObjectReconstruction = vi.fn();
+    const app = new WebARApp(document.createElement('div')) as unknown as {
+      capturedImagePreviewUrl: string | null;
+      hud: {
+        clearObjectReconstruction: ReturnType<typeof vi.fn>;
+        hideModelPreview: ReturnType<typeof vi.fn>;
+      };
+      objectSegmentationController: AbortController | null;
+      resetTransientExperience(): Promise<void>;
+    };
+    app.capturedImagePreviewUrl = null;
+    app.hud = { clearObjectReconstruction, hideModelPreview: vi.fn() };
+    app.objectSegmentationController = controller;
+
+    await app.resetTransientExperience();
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(clearObjectReconstruction).toHaveBeenCalled();
+  });
 });
 
 describe('WebARApp layout reset', () => {

@@ -17,6 +17,7 @@ import {
   type RecordedAudio,
 } from '../capture/audioCapture';
 import { compressThumbnailImage } from '../capture/thumbnailCompression';
+import { prepareSegmentationImage } from '../capture/segmentationImage';
 import type { ModelPreviewViewer } from '../scene/ModelPreviewViewer';
 import {
   cleanupFailedJobArtifacts as cleanupFailedJobArtifactsRequest,
@@ -51,10 +52,18 @@ import {
   signup as signupRequest,
   type AuthUser,
 } from '../services/authClient';
+import {
+  OBJECT_SEGMENTATION_CONFIDENCE_THRESHOLD,
+  segmentObject,
+} from '../services/objectSegmentationClient';
 import { AppState } from '../state/AppState';
 import { getAccountDisplayName } from '../ui/accountIdentity';
 import { ARHud } from '../ui/ARHud';
-import type { HudRoute } from '../ui/routes';
+import {
+  isPhotoToARRoute,
+  type CameraCaptureRoute,
+  type HudRoute,
+} from '../ui/routes';
 import { getGenerateModelApiUrl } from './config';
 import type { ARRuntime, PlacementGestureZone, Point2, SceneContext } from './arRuntime';
 
@@ -79,6 +88,8 @@ export class WebARApp {
   private capturedImage: CapturedImage | null = null;
   private capturedImageGenerationPipeline: GenerationPipeline = 'openai-to-3d';
   private capturedImagePreviewUrl: string | null = null;
+  private objectSegmentationController: AbortController | null = null;
+  private objectSegmentationToken = 0;
   private speechRecordingSession: AudioRecordingSession | null = null;
   private speechAudio: RecordedAudio | null = null;
   private speechJobWatchToken = 0;
@@ -108,7 +119,7 @@ export class WebARApp {
       onRotate: (deltaRadians) => this.rotateBy(deltaRadians),
       onModelSelect: (modelId) => void this.loadSelectedModel(modelId),
       onStartCamera: () => void this.startCamera(),
-      onCaptureImage: () => void this.captureImage(),
+      onCaptureImage: (route) => void this.captureImage(route),
       onUploadImage: (file) => void this.uploadImage(file),
       onUploadModel: (file) => void this.uploadModel(file),
       onSubmitTarget: (targetObject) => void this.submitCapturedImageToGpt(targetObject),
@@ -516,6 +527,8 @@ export class WebARApp {
   }
 
   private async startCamera(): Promise<void> {
+    this.cancelObjectSegmentation();
+    this.hud?.clearObjectReconstruction();
     const preview = this.hud?.cameraPreviewVideo;
     if (!preview) {
       return;
@@ -532,22 +545,100 @@ export class WebARApp {
     }
   }
 
-  private async captureImage(): Promise<void> {
+  private async captureImage(route: CameraCaptureRoute): Promise<void> {
+    this.cancelObjectSegmentation();
+    this.hud?.clearObjectReconstruction();
     const preview = this.hud?.cameraPreviewVideo;
     if (!preview) {
       return;
     }
 
     try {
-      this.capturedImage = await captureVideoFrame(preview);
+      const capturedImage = await captureVideoFrame(preview);
+      this.capturedImage = capturedImage;
       this.capturedImageGenerationPipeline = 'openai-to-3d';
       stopCameraPreview(this.cameraStream);
       this.cameraStream = null;
-      this.setCapturedImagePreview(this.capturedImage.blob);
+      this.setCapturedImagePreview(capturedImage.blob);
+      if (
+        import.meta.env.VITE_OBJECT_SEGMENTATION_ENABLED === 'true'
+        && isPhotoToARRoute(route)
+      ) {
+        void this.segmentCapturedObject(capturedImage);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not capture image.';
       this.hud?.updateCameraStatus(`Capture failed: ${message}`, false);
     }
+  }
+
+  private async segmentCapturedObject(capturedImage: CapturedImage): Promise<void> {
+    this.cancelObjectSegmentation();
+    const controller = new AbortController();
+    const token = this.objectSegmentationToken;
+    this.objectSegmentationController = controller;
+    this.hud?.showObjectSegmentationPending();
+
+    try {
+      const preparedImage = await prepareSegmentationImage(capturedImage.blob);
+      if (!this.isCurrentObjectSegmentation(token, controller, capturedImage)) {
+        return;
+      }
+
+      const result = await segmentObject({
+        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        imageBase64: preparedImage.imageBase64,
+        imageMimeType: preparedImage.imageMimeType,
+        authToken: this.authToken,
+        signal: controller.signal,
+      });
+      if (!this.isCurrentObjectSegmentation(token, controller, capturedImage)) {
+        return;
+      }
+
+      if (
+        result.detected !== true
+        || !Number.isFinite(result.confidence)
+        || result.confidence < OBJECT_SEGMENTATION_CONFIDENCE_THRESHOLD
+      ) {
+        this.hud?.showObjectSegmentationFallback();
+        this.objectSegmentationController = null;
+        return;
+      }
+
+      await this.hud?.playObjectReconstruction(
+        `data:image/png;base64,${result.maskBase64}`,
+        result.bounds,
+      );
+      if (!this.isCurrentObjectSegmentation(token, controller, capturedImage)) {
+        return;
+      }
+      this.objectSegmentationController = null;
+    } catch (error) {
+      if (isAbortError(error) || !this.isCurrentObjectSegmentation(token, controller, capturedImage)) {
+        return;
+      }
+      console.warn('Object segmentation failed; showing the original capture.');
+      this.hud?.showObjectSegmentationFallback();
+      this.objectSegmentationController = null;
+    }
+  }
+
+  private isCurrentObjectSegmentation(
+    token: number,
+    controller: AbortController,
+    capturedImage: CapturedImage,
+  ): boolean {
+    return this.objectSegmentationToken === token
+      && this.objectSegmentationController === controller
+      && this.capturedImage === capturedImage
+      && !controller.signal.aborted;
+  }
+
+  private cancelObjectSegmentation(): void {
+    this.objectSegmentationToken += 1;
+    this.objectSegmentationController?.abort();
+    this.objectSegmentationController = null;
   }
 
   private async generateModel(targetObject: string): Promise<void> {
@@ -561,6 +652,8 @@ export class WebARApp {
       return;
     }
 
+    this.cancelObjectSegmentation();
+    this.hud?.clearObjectReconstruction();
     this.hud?.updateCameraStatus('Starting background generation...', false);
 
     try {
@@ -598,6 +691,8 @@ export class WebARApp {
       return;
     }
 
+    this.cancelObjectSegmentation();
+    this.hud?.clearObjectReconstruction();
     this.hud?.updateCameraStatus('Submitting image to GPT for object extraction...', false);
 
     try {
@@ -633,6 +728,8 @@ export class WebARApp {
       return;
     }
 
+    this.cancelObjectSegmentation();
+    this.hud?.clearObjectReconstruction();
     try {
       const capturedImage = this.capturedImage;
       const generationPipeline = this.capturedImageGenerationPipeline;
@@ -679,6 +776,8 @@ export class WebARApp {
       return;
     }
 
+    this.cancelObjectSegmentation();
+    this.hud?.clearObjectReconstruction();
     try {
       const capturedImage = this.capturedImage;
       this.capturedImage = null;
@@ -767,6 +866,8 @@ export class WebARApp {
       return;
     }
 
+    this.cancelObjectSegmentation();
+    this.hud?.clearObjectReconstruction?.();
     const recordedAudio = this.speechAudio;
     this.hud?.showSpeechDetecting();
 
@@ -799,6 +900,8 @@ export class WebARApp {
       return;
     }
 
+    this.cancelObjectSegmentation();
+    this.hud?.clearObjectReconstruction?.();
     this.hud?.showSpeechDetecting(normalizedText);
 
     try {
@@ -906,6 +1009,8 @@ export class WebARApp {
   }
 
   private async resetTransientExperience(): Promise<void> {
+    this.cancelObjectSegmentation();
+    this.hud?.clearObjectReconstruction();
     stopCameraPreview(this.cameraStream);
     this.cameraStream = null;
     this.capturedImage = null;
@@ -1093,6 +1198,8 @@ export class WebARApp {
   }
 
   private async uploadImage(file: File): Promise<void> {
+    this.cancelObjectSegmentation();
+    this.hud?.clearObjectReconstruction();
     try {
       stopCameraPreview(this.cameraStream);
       this.cameraStream = null;
@@ -1210,6 +1317,8 @@ export class WebARApp {
   }
 
   private clearCapturedImagePreview(): void {
+    this.cancelObjectSegmentation();
+    this.hud?.clearObjectReconstruction();
     if (this.capturedImagePreviewUrl) {
       URL.revokeObjectURL(this.capturedImagePreviewUrl);
       this.capturedImagePreviewUrl = null;
@@ -1691,4 +1800,13 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
     bytes[index] = binary.charCodeAt(index);
   }
   return new Blob([bytes.buffer], { type: mimeType });
+}
+
+function isAbortError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && 'name' in error
+    && error.name === 'AbortError',
+  );
 }

@@ -1737,6 +1737,38 @@ describe('ARHud', () => {
     expect(root.querySelector('.status-panel')?.classList.contains('hidden')).toBe(true);
   });
 
+  it.each([
+    ['full-flow', 'onFullFlowCapture'],
+    ['dynamic', 'onDynamicFlowCapture'],
+  ] as const)('hands the captured image to the %s generation handler before route cleanup', (route, handlerName) => {
+    const root = document.createElement('div');
+    let capturedImage: { imageBase64: string } | null = { imageBase64: 'original-capture' };
+    const consumedImages: Array<string | undefined> = [];
+    const onFullFlowCapture = vi.fn(() => consumedImages.push(capturedImage?.imageBase64));
+    const onDynamicFlowCapture = vi.fn(() => consumedImages.push(capturedImage?.imageBase64));
+    const onRouteExit = vi.fn((_previousRoute: string, nextRoute: string) => {
+      if (nextRoute === 'ar') {
+        capturedImage = null;
+      }
+    });
+    const hud = new ARHud(root, modelOptions, createHandlers({
+      onDynamicFlowCapture,
+      onFullFlowCapture,
+      onRouteExit,
+    }));
+    hud.updateAuthState(activeUser);
+    root.querySelector<HTMLButtonElement>(`[data-nav-route="${route}"]`)?.click();
+    hud.showCapturedImagePreview('blob:captured-image');
+
+    [...root.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'Generate and place')
+      ?.click();
+
+    expect({ onDynamicFlowCapture, onFullFlowCapture }[handlerName]).toHaveBeenCalledOnce();
+    expect(consumedImages).toEqual(['original-capture']);
+    expect(onRouteExit).toHaveBeenCalledWith(route, 'ar');
+  });
+
   it('starts AR from the direct Full Flow generate tap after capture', () => {
     const root = document.createElement('div');
     const onCaptureImage = vi.fn();

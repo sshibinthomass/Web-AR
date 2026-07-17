@@ -1704,17 +1704,17 @@ export class ARHud {
     const targetObject = this.targetObjectInput.value.trim();
     if (isPhotoToARRoute(this.activeRoute)) {
       const isDynamicRoute = this.activeRoute === 'dynamic';
+      if (isDynamicRoute) {
+        this.handlers.onDynamicFlowCapture(targetObject);
+      } else {
+        this.handlers.onFullFlowCapture(targetObject);
+      }
       this.navigateTo('ar');
       this.statusMessage.textContent =
         isDynamicRoute
           ? 'Opening AR camera, generating a dynamic image, and building your 3D object...'
           : 'Opening AR camera and building your 3D object...';
       this.startAttachedARCamera();
-      if (isDynamicRoute) {
-        this.handlers.onDynamicFlowCapture(targetObject);
-        return;
-      }
-      this.handlers.onFullFlowCapture(targetObject);
       return;
     }
 
