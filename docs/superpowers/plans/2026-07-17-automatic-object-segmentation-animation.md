@@ -90,7 +90,7 @@ class ObjectSegmentationBiRefNetLiteTest(unittest.TestCase):
     def test_primary_component_prefers_centered_large_object(self):
         ns = load_pure_namespace()
         probabilities = np.zeros((100, 100), dtype=np.float32)
-        probabilities[10:40, 2:32] = 0.92
+        probabilities[10:40, 2:22] = 0.92
         probabilities[25:80, 30:80] = 0.84
         component = ns["select_primary_component"](probabilities)
         self.assertEqual(component[50, 50], 1)
