@@ -43,6 +43,35 @@ describe('application design system', () => {
     expect(styles).toContain('outline-offset: 3px;');
   });
 
+  it('keeps every active primary action override on canonical mint and spatial ink', () => {
+    const primaryRules = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((match) => {
+      const selector = match[1];
+      const declarations = match[2];
+      const selectorParts = selector.split(',').map((part) => part.trim());
+      return (
+        selectorParts.every((part) => (
+          /\.primary(?![-\w])|#ARButton|\.ar-model-place-button/.test(part)
+        ))
+        && !selector.includes(':disabled')
+        && !selector.includes('::before')
+        && /(?:^|\n)\s*(?:color|background):/.test(declarations)
+      );
+    });
+
+    expect(primaryRules.length).toBeGreaterThan(0);
+    for (const [, selector, declarations] of primaryRules) {
+      expect({
+        selector: selector.trim(),
+        text: declarations.includes('color: var(--color-spatial-ink);'),
+        background: declarations.includes('background: var(--color-signal-mint);'),
+      }).toEqual({
+        selector: selector.trim(),
+        text: true,
+        background: true,
+      });
+    }
+  });
+
   it('makes semantic hidden state and keyboard focus reliable', () => {
     expect(styles).toContain('[hidden] {\n  display: none !important;\n}');
     expect(styles).toContain(':focus-visible');

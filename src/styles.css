@@ -189,8 +189,9 @@ button.primary,
 
 button.primary:hover,
 .primary:hover {
-  border-color: var(--color-teal-deep);
-  background: var(--color-teal-deep);
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 button.secondary,
@@ -915,8 +916,9 @@ h3 {
 }
 
 .camera-actions button.primary {
-  color: #031b18;
-  background: #5eead4;
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 .camera-actions button:disabled {
@@ -1034,13 +1036,15 @@ h3 {
 }
 
 .hud-actions button.primary {
-  color: #102326;
-  background: rgba(255, 255, 255, 0.86);
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 #ARButton {
-  color: #031b18;
-  background: #5eead4;
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 .hud-actions button.primary:disabled {
@@ -1295,11 +1299,11 @@ h3 {
 .ar-model-place-button {
   width: min(360px, 100%);
   min-height: 52px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid var(--color-signal-mint);
   border-radius: 8px;
   padding: 12px 16px;
-  color: #031b18;
-  background: #5eead4;
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
   font: inherit;
   font-size: 15px;
   font-weight: 850;
@@ -1621,9 +1625,9 @@ h3 {
 }
 
 .mode-action button.primary {
-  color: #031b18;
-  background: #5eead4;
-  border-color: rgba(94, 234, 212, 0.92);
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 .mode-action button.primary::before {
@@ -1674,8 +1678,9 @@ h3 {
 .speech-actions button.primary,
 .admin-account-actions button.primary,
 .admin-job-actions button.primary {
-  color: #031b18;
-  background: #5eead4;
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 .admin-account-actions button.danger,
@@ -2471,9 +2476,9 @@ h3 {
 }
 
 .model-edit-actions button.primary {
-  border-color: rgba(15, 118, 110, 0.28);
-  color: #031b18;
-  background: #5eead4;
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
   box-shadow: 0 16px 42px rgba(15, 118, 110, 0.16);
 }
 
@@ -2862,17 +2867,17 @@ h3 {
 }
 
 .hud-actions button.primary {
-  border-color: rgba(15, 118, 110, 0.2);
-  color: #102326;
-  background: rgba(255, 255, 255, 0.86);
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
   box-shadow: 0 12px 32px rgba(15, 118, 110, 0.12);
 }
 
 #ARButton,
 .ar-model-place-button {
-  border-color: rgba(15, 118, 110, 0.28);
-  color: #031b18;
-  background: #5eead4;
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
   box-shadow: 0 16px 42px rgba(15, 118, 110, 0.2);
 }
 
@@ -3049,9 +3054,9 @@ h3 {
 .auth-form-actions button.primary,
 .admin-account-actions button.primary,
 .admin-job-actions button.primary {
-  border-color: rgba(15, 118, 110, 0.28);
-  color: #031b18;
-  background: #5eead4;
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 .camera-actions button:disabled,
@@ -3876,9 +3881,9 @@ h3 {
 }
 
 .creation-guidance .camera-actions button.primary {
-  border-color: var(--color-teal);
-  color: #ffffff;
-  background: var(--color-teal);
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 @media (max-width: 1023px) {
@@ -4060,10 +4065,10 @@ h3 {
 .ar-model-place-button {
   width: min(360px, calc(100vw - 48px));
   min-height: var(--control-height);
-  border-color: var(--color-teal);
+  border-color: var(--color-signal-mint);
   border-radius: var(--radius-control);
-  color: #ffffff;
-  background: var(--color-teal);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 @media (max-width: 1023px) {
@@ -4317,9 +4322,9 @@ h3 {
 }
 
 .immersive-actions button.hud-action-chip.primary {
-  border-color: var(--color-teal);
-  color: #ffffff;
-  background: var(--color-teal);
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 .immersive-actions button.hud-action-chip.danger {
