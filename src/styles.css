@@ -3386,6 +3386,70 @@ h3 {
   background: var(--color-reality-mist);
 }
 
+.shell-account .account-menu-trigger,
+.route-bar .route-back {
+  min-height: 44px;
+}
+
+.desktop-nav button:hover,
+.shell-account button:hover {
+  color: var(--color-spatial-ink);
+  background: var(--color-mint-wash);
+}
+
+.create-menu,
+.account-menu {
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+}
+
+.create-menu button,
+.account-menu button {
+  color: var(--color-spatial-ink);
+}
+
+.account-status-dot {
+  background: var(--color-signal-mint);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-signal-mint) 14%, transparent);
+}
+
+.account-menu-identity {
+  border-color: var(--color-border-light);
+}
+
+.account-menu-email {
+  color: var(--color-context-slate);
+}
+
+.account-menu button:hover {
+  color: var(--color-spatial-ink);
+  background: var(--color-mint-wash);
+}
+
+.account-menu-logout {
+  color: var(--color-error-dark);
+}
+
+.account-menu button.account-menu-logout {
+  color: var(--color-error-dark);
+}
+
+.account-menu button.account-menu-logout:hover {
+  color: var(--color-error-dark);
+  background: color-mix(in srgb, var(--color-error-light) 18%, var(--color-interface-white));
+}
+
+.session-notice {
+  border-color: color-mix(in srgb, var(--color-signal-mint) 42%, var(--color-border-light));
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+}
+
+.route-bar .calibration-label {
+  color: var(--color-context-slate);
+}
+
 @media (max-width: 767px) {
   .app-header,
   .route-bar {
@@ -3570,7 +3634,7 @@ h3 {
 
 .landing-copy > p:not(.landing-kicker) {
   max-width: 54ch;
-  color: var(--color-ink-muted);
+  color: var(--color-context-slate);
   font-size: clamp(17px, 2vw, 20px);
 }
 
@@ -3641,6 +3705,16 @@ h3 {
   color: var(--color-mist-slate);
 }
 
+.webxr-aperture-stage::before,
+.webxr-aperture-stage::after {
+  border-color: var(--color-signal-mint);
+}
+
+.webxr-aperture-stage .preview-object::before {
+  border-color: var(--color-border-dark);
+  background: color-mix(in srgb, var(--color-interface-white) 30%, transparent);
+}
+
 .home-route-groups {
   grid-column: 1 / -1;
   display: grid;
@@ -3661,12 +3735,42 @@ h3 {
   box-shadow: none;
 }
 
+.mode-group h2 {
+  color: var(--color-spatial-ink);
+}
+
+.mode-group p {
+  color: var(--color-context-slate);
+}
+
+.mode-action button {
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+}
+
+.mode-action button::before {
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
+}
+
+.mode-action button.primary::before {
+  color: var(--color-interface-white);
+  background: var(--color-spatial-ink);
+}
+
 .home-route-groups .mode-action button {
-  border-color: var(--color-border);
+  border-color: var(--color-border-light);
   border-radius: var(--radius-control);
-  color: var(--color-ink);
-  background: var(--color-surface);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
   box-shadow: none;
+}
+
+.home-route-groups .mode-action button.primary {
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 .home-route-groups .auth-actions {
@@ -3674,6 +3778,23 @@ h3 {
   max-width: none;
   margin-top: 0;
   padding: 10px 4px;
+}
+
+.auth-identity {
+  color: var(--color-context-slate);
+}
+
+.landing .auth-actions button {
+  min-height: 44px;
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+}
+
+.landing .auth-actions button.primary {
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 .brand-endorsement-panel {
@@ -3685,6 +3806,10 @@ h3 {
   border-top: 1px solid var(--color-border-light);
   margin-top: 32px;
   padding-top: 48px;
+}
+
+.brand-endorsement-panel > * {
+  min-width: 0;
 }
 
 .brand-endorsement-panel .utility-label {
@@ -3760,6 +3885,10 @@ h3 {
   line-height: 1.6;
 }
 
+.auth-endorsement {
+  color: var(--color-context-slate);
+}
+
 .auth-form {
   display: grid;
   gap: 18px;
@@ -3780,7 +3909,7 @@ h3 {
 .speech-panel-header h2,
 .admin-dashboard-header h2,
 .admin-dashboard-section-header h3 {
-  color: var(--color-ink);
+  color: var(--color-spatial-ink);
 }
 
 .auth-message,
@@ -3788,26 +3917,38 @@ h3 {
 .admin-dashboard-header p,
 .admin-dashboard-message,
 .admin-job-message {
-  color: var(--color-ink-muted);
+  color: var(--color-context-slate);
 }
 
 .auth-panel label {
-  color: var(--color-ink-muted);
+  color: var(--color-context-slate);
 }
 
 .auth-panel input {
   min-height: var(--control-height);
-  border-color: var(--color-border);
+  border-color: var(--color-border-light);
   border-radius: var(--radius-control);
-  color: var(--color-ink);
-  background: var(--color-surface);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+}
+
+.auth-form-actions button {
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+}
+
+.auth-form-actions button.primary {
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 .speech-text-field {
   display: grid;
   gap: 8px;
   width: 100%;
-  color: var(--color-ink);
+  color: var(--color-spatial-ink);
   font-weight: 700;
 }
 
@@ -3819,7 +3960,7 @@ h3 {
 
 .field-hint {
   margin: 0;
-  color: var(--color-ink-muted);
+  color: var(--color-context-slate);
   font-size: 14px;
 }
 
@@ -3843,6 +3984,19 @@ h3 {
 
 .speech-progress {
   align-content: start;
+}
+
+.speech-actions button {
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+  box-shadow: none;
+}
+
+.speech-actions button.primary {
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
 }
 
 .speech-actions {
@@ -3869,6 +4023,10 @@ h3 {
 
 .speech-visualizer span {
   background: var(--color-digital-violet);
+}
+
+.speech-stage-marker {
+  background: var(--color-mist-slate);
 }
 
 .speech-stage-list li.is-active {
@@ -3938,6 +4096,34 @@ h3 {
   margin: 0;
 }
 
+.admin-account-email,
+.admin-job-title {
+  color: var(--color-spatial-ink);
+}
+
+.admin-account-meta,
+.admin-job-meta {
+  color: var(--color-context-slate);
+}
+
+.admin-dashboard-section-header button,
+.admin-account-actions button,
+.admin-job-actions button,
+.admin-job-actions a {
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+  box-shadow: none;
+}
+
+.admin-dashboard-section-header button.primary,
+.admin-account-actions button.primary,
+.admin-job-actions button.primary {
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
+}
+
 .admin-account-row,
 .admin-job-row {
   border-color: var(--color-border-light);
@@ -3969,7 +4155,8 @@ h3 {
 }
 
 .admin-account-actions button.danger,
-.admin-job-actions button.danger {
+.admin-job-actions button.danger,
+.admin-dashboard-section-header button.danger {
   border-color: var(--color-error-dark);
   color: var(--color-error-dark);
   background: color-mix(in srgb, var(--color-error-light) 18%, var(--color-interface-white));
@@ -4032,6 +4219,16 @@ h3 {
 }
 
 @media (max-width: 767px) {
+  .brand-endorsement-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .arvenilo-lockup {
+    width: min(280px, 100%);
+    max-width: 100%;
+    justify-self: start;
+  }
+
   .admin-dashboard-section-header {
     align-items: flex-start;
     flex-wrap: wrap;
@@ -4114,7 +4311,7 @@ h3 {
 
 .creation-stage .camera-label {
   margin: 0;
-  color: var(--color-ink-muted);
+  color: var(--color-context-slate);
 }
 
 .creation-stage .camera-preview,
@@ -4125,6 +4322,10 @@ h3 {
   min-height: 0;
   max-height: none;
   border-radius: var(--radius-control);
+}
+
+.creation-stage .camera-preview {
+  border-color: var(--color-border-light);
 }
 
 .creation-guidance {
@@ -4156,16 +4357,21 @@ h3 {
 }
 
 .upload-drop-zone > small {
-  color: var(--color-ink-muted);
+  color: var(--color-context-slate);
   font-size: 14px;
 }
 
 .upload-drop-zone input {
   width: 100%;
   margin-top: 10px;
-  border-color: var(--color-border);
-  color: var(--color-ink);
-  background: var(--color-surface);
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+}
+
+.creation-workspace .upload-drop-zone input,
+.creation-workspace .target-object-field input {
+  min-height: var(--control-height);
 }
 
 .creation-step-list {
@@ -4202,18 +4408,22 @@ h3 {
 }
 
 .creation-guidance .target-object-field {
-  color: var(--color-ink-muted);
+  color: var(--color-context-slate);
 }
 
 .creation-guidance .target-object-field input {
-  border-color: var(--color-border);
-  color: var(--color-ink);
-  background: var(--color-surface);
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+}
+
+.creation-guidance .target-object-field input::placeholder {
+  color: var(--color-context-slate);
 }
 
 .creation-guidance .camera-status,
 .creation-guidance .generated-model-status {
-  color: var(--color-ink-muted);
+  color: var(--color-context-slate);
 }
 
 .creation-guidance .camera-actions {
@@ -4232,10 +4442,76 @@ h3 {
   border-radius: var(--radius-control);
 }
 
+.creation-guidance .camera-actions button {
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+  box-shadow: none;
+}
+
 .creation-guidance .camera-actions button.primary {
   border-color: var(--color-signal-mint);
   color: var(--color-spatial-ink);
   background: var(--color-signal-mint);
+}
+
+.creation-guidance .camera-actions button:disabled {
+  border-color: var(--color-border-light);
+  color: var(--color-context-slate);
+  background: var(--color-reality-mist);
+}
+
+.creation-workspace.fullscreen .upload-drop-zone {
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-reality-mist);
+  box-shadow: none;
+}
+
+.creation-workspace.fullscreen .upload-drop-zone input,
+.creation-workspace.fullscreen .target-object-field input {
+  min-height: var(--control-height);
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+}
+
+.creation-workspace.fullscreen .target-object-field {
+  color: var(--color-context-slate);
+}
+
+.creation-workspace.fullscreen .creation-stage .camera-preview {
+  border-color: var(--color-border-light);
+  background: var(--color-reality-mist);
+  box-shadow: none;
+}
+
+.creation-workspace.fullscreen .creation-stage video.camera-preview {
+  background: var(--color-spatial-void);
+}
+
+.creation-workspace.fullscreen .creation-guidance .camera-status,
+.creation-workspace.fullscreen .creation-guidance .generated-model-status {
+  color: var(--color-context-slate);
+}
+
+.creation-workspace.fullscreen .creation-guidance .camera-actions button {
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+  box-shadow: none;
+}
+
+.creation-workspace.fullscreen .creation-guidance .camera-actions button.primary {
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
+}
+
+.creation-workspace.fullscreen .creation-guidance .camera-actions button:disabled {
+  border-color: var(--color-border-light);
+  color: var(--color-context-slate);
+  background: var(--color-reality-mist);
 }
 
 @media (max-width: 1023px) {
@@ -4323,6 +4599,17 @@ h3 {
   gap: 16px;
 }
 
+.model-manager-header h2,
+.ar-picker-heading h2 {
+  color: var(--color-spatial-ink);
+}
+
+.model-manager-header p,
+.model-manager-message,
+.ar-picker-heading p {
+  color: var(--color-context-slate);
+}
+
 .ar-model-picker-inner {
   display: grid;
   gap: 18px;
@@ -4334,7 +4621,7 @@ h3 {
 }
 
 .ar-picker-heading .calibration-label {
-  color: var(--color-teal-deep);
+  color: var(--color-context-slate);
 }
 
 .ar-picker-heading h2,
@@ -4343,23 +4630,55 @@ h3 {
 }
 
 .ar-picker-heading h2 {
-  color: var(--color-ink);
+  color: var(--color-spatial-ink);
   font-size: clamp(28px, 4vw, 46px);
   line-height: 1;
   letter-spacing: -0.035em;
 }
 
 .ar-picker-heading p {
-  color: var(--color-ink-muted);
+  color: var(--color-context-slate);
   font-size: 16px;
 }
 
+.model-manager .model-library-controls,
 .ar-model-picker .model-library-controls {
   margin: 0;
   border-color: var(--color-border-light);
   border-radius: var(--radius-card);
   background: var(--color-interface-white);
   box-shadow: none;
+}
+
+.model-library-search,
+.model-library-filter {
+  color: var(--color-context-slate);
+}
+
+.model-library-search input,
+.model-library-filter select,
+.model-manager-details input {
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+}
+
+.model-library-search input::placeholder {
+  color: var(--color-context-slate);
+}
+
+.model-manager .model-library-search input,
+.model-manager .model-library-filter select,
+.ar-model-picker .model-library-search input,
+.ar-model-picker .model-library-filter select {
+  min-height: var(--control-height);
+}
+
+.model-manager-empty,
+.ar-model-empty {
+  border-color: var(--color-border-light);
+  color: var(--color-context-slate);
+  background: var(--color-interface-white);
 }
 
 .ar-model-grid {
@@ -4419,6 +4738,22 @@ h3 {
 
 .ar-model-card-thumb,
 .model-manager-thumbnail {
+  border-color: var(--color-border-light);
+  color: var(--color-context-slate);
+  background: var(--color-reality-mist);
+}
+
+.ar-model-card-label,
+.model-manager-name {
+  color: var(--color-spatial-ink);
+}
+
+.ar-model-card-meta,
+.model-manager-owner {
+  color: var(--color-context-slate);
+}
+
+.model-manager-badge {
   border-color: var(--color-border-light);
   color: var(--color-context-slate);
   background: var(--color-reality-mist);
@@ -4508,6 +4843,13 @@ h3 {
   border-color: var(--color-digital-violet);
   color: var(--color-spatial-ink);
   background: var(--color-violet-wash);
+}
+
+.model-manager-actions button {
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+  box-shadow: none;
 }
 
 .model-manager-actions button.danger {
@@ -4619,6 +4961,93 @@ h3 {
   color: var(--color-spatial-ink);
   background: var(--color-interface-white);
   box-shadow: none;
+}
+
+.model-edit-panel h3 {
+  color: var(--color-spatial-ink);
+}
+
+.model-edit-field {
+  color: var(--color-context-slate);
+}
+
+.model-edit-field input {
+  min-height: var(--control-height);
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+}
+
+.model-edit-status {
+  color: var(--color-context-slate);
+}
+
+.model-edit-actions button {
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+  box-shadow: none;
+}
+
+.model-edit-actions button.primary {
+  border-color: var(--color-signal-mint);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
+}
+
+.ar-model-place-button:disabled {
+  border-color: var(--color-border-light);
+  color: var(--color-context-slate);
+  background: var(--color-reality-mist);
+}
+
+.model-preview-bar {
+  border-color: var(--color-border-light);
+}
+
+.model-preview-control {
+  color: var(--color-context-slate);
+}
+
+.model-preview-control input {
+  accent-color: var(--color-signal-mint);
+}
+
+.model-preview-control select {
+  min-height: 44px;
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+}
+
+.model-preview-lighting-value,
+.model-preview-direction-value,
+.model-preview-title {
+  color: var(--color-spatial-ink);
+}
+
+.model-preview-kicker {
+  color: var(--color-context-slate);
+}
+
+.model-preview-close {
+  border-color: var(--color-border-light);
+  color: var(--color-spatial-ink);
+  background: var(--color-interface-white);
+  box-shadow: none;
+}
+
+.model-preview-viewport {
+  background:
+    linear-gradient(var(--color-border-light) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-border-light) 1px, transparent 1px),
+    var(--color-interface-white);
+  background-size: 48px 48px;
+}
+
+.model-preview-status {
+  border-color: var(--color-border-light);
+  color: var(--color-context-slate);
 }
 
 .model-preview-panel {

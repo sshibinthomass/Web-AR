@@ -91,6 +91,111 @@ describe('application design system', () => {
     }
   });
 
+  it('keeps every standard-workspace control family at least 44px tall', () => {
+    const contracts = [
+      ['.shell-account .account-menu-trigger', 'min-height: 44px;'],
+      ['.route-bar .route-back', 'min-height: 44px;'],
+      ['.landing .auth-actions button', 'min-height: 44px;'],
+      ['.model-manager .model-library-search input', 'min-height: var(--control-height);'],
+      ['.model-manager .model-library-filter select', 'min-height: var(--control-height);'],
+      ['.ar-model-picker .model-library-search input', 'min-height: var(--control-height);'],
+      ['.ar-model-picker .model-library-filter select', 'min-height: var(--control-height);'],
+      ['.creation-workspace .upload-drop-zone input', 'min-height: var(--control-height);'],
+      ['.creation-workspace .target-object-field input', 'min-height: var(--control-height);'],
+      ['.model-edit-field input', 'min-height: var(--control-height);'],
+    ] as const;
+
+    for (const [selector, declaration] of contracts) {
+      const declarations = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+        .filter((match) => match[1].split(',').some((part) => part.trim() === selector))
+        .map((match) => match[2])
+        .join('\n');
+      expect({ selector, declaration, declarations }).toMatchObject({
+        selector,
+        declaration,
+        declarations: expect.stringContaining(declaration),
+      });
+    }
+  });
+
+  it('uses canonical palette tokens for visible standard-workspace descendants', () => {
+    const contracts = [
+      ['.account-menu-email', 'color: var(--color-context-slate);'],
+      ['.account-menu button.account-menu-logout', 'color: var(--color-error-dark);'],
+      ['.landing-copy > p:not(.landing-kicker)', 'color: var(--color-context-slate);'],
+      ['.mode-group h2', 'color: var(--color-spatial-ink);'],
+      ['.mode-group p', 'color: var(--color-context-slate);'],
+      ['.mode-action button', 'border-color: var(--color-border-light);'],
+      ['.home-route-groups .mode-action button.primary', 'background: var(--color-signal-mint);'],
+      ['.auth-identity', 'color: var(--color-context-slate);'],
+      ['.auth-panel-header h2', 'color: var(--color-spatial-ink);'],
+      ['.auth-message', 'color: var(--color-context-slate);'],
+      ['.auth-panel input', 'border-color: var(--color-border-light);'],
+      ['.speech-text-field', 'color: var(--color-spatial-ink);'],
+      ['.field-hint', 'color: var(--color-context-slate);'],
+      ['.speech-actions button', 'border-color: var(--color-border-light);'],
+      ['.admin-dashboard-header h2', 'color: var(--color-spatial-ink);'],
+      ['.admin-account-email', 'color: var(--color-spatial-ink);'],
+      ['.admin-account-meta', 'color: var(--color-context-slate);'],
+      ['.admin-job-actions a', 'border-color: var(--color-border-light);'],
+      ['.model-manager-header h2', 'color: var(--color-spatial-ink);'],
+      ['.ar-picker-heading h2', 'color: var(--color-spatial-ink);'],
+      ['.model-library-search', 'color: var(--color-context-slate);'],
+      ['.model-library-search input', 'border-color: var(--color-border-light);'],
+      ['.model-manager-name', 'color: var(--color-spatial-ink);'],
+      ['.ar-model-card-label', 'color: var(--color-spatial-ink);'],
+      ['.ar-model-card-meta', 'color: var(--color-context-slate);'],
+      ['.model-manager-owner', 'color: var(--color-context-slate);'],
+      ['.model-edit-field', 'color: var(--color-context-slate);'],
+      ['.model-edit-field input', 'border-color: var(--color-border-light);'],
+      ['.model-edit-status', 'color: var(--color-context-slate);'],
+      ['.model-preview-control', 'color: var(--color-context-slate);'],
+      ['.model-preview-control select', 'border-color: var(--color-border-light);'],
+      ['.model-preview-title', 'color: var(--color-spatial-ink);'],
+      ['.model-preview-status', 'color: var(--color-context-slate);'],
+      ['.creation-stage .camera-label', 'color: var(--color-context-slate);'],
+      ['.upload-drop-zone > small', 'color: var(--color-context-slate);'],
+      ['.creation-guidance .camera-status', 'color: var(--color-context-slate);'],
+      ['.creation-workspace.fullscreen .upload-drop-zone', 'border-color: var(--color-border-light);'],
+      ['.creation-workspace.fullscreen .upload-drop-zone input', 'border-color: var(--color-border-light);'],
+      ['.creation-workspace.fullscreen .target-object-field', 'color: var(--color-context-slate);'],
+      ['.creation-workspace.fullscreen .target-object-field input', 'border-color: var(--color-border-light);'],
+      ['.creation-workspace.fullscreen .creation-stage .camera-preview', 'border-color: var(--color-border-light);'],
+      ['.creation-workspace.fullscreen .creation-stage video.camera-preview', 'background: var(--color-spatial-void);'],
+      ['.creation-workspace.fullscreen .creation-guidance .camera-status', 'color: var(--color-context-slate);'],
+      ['.creation-workspace.fullscreen .creation-guidance .camera-actions button', 'border-color: var(--color-border-light);'],
+      ['.creation-workspace.fullscreen .creation-guidance .camera-actions button.primary', 'background: var(--color-signal-mint);'],
+    ] as const;
+
+    for (const [selector, declaration] of contracts) {
+      const declarations = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+        .filter((match) => match[1].split(',').some((part) => part.trim() === selector))
+        .map((match) => match[2])
+        .join('\n');
+      expect({ selector, declaration, declarations }).toMatchObject({
+        selector,
+        declaration,
+        declarations: expect.stringContaining(declaration),
+      });
+    }
+  });
+
+  it('stacks and constrains the Arvenilo endorsement at the 320px layout', () => {
+    const workspaceStart = styles.indexOf('/* Core responsive workspaces */');
+    const creationStart = styles.indexOf('/* Camera, upload, and photo-to-AR workspaces */');
+    const workspaceStyles = styles.slice(workspaceStart, creationStart);
+    const mobileStyles = workspaceStyles.slice(
+      workspaceStyles.lastIndexOf('@media (max-width: 767px)'),
+    );
+
+    expect(mobileStyles).toContain(
+      '.brand-endorsement-panel {\n    grid-template-columns: minmax(0, 1fr);',
+    );
+    expect(mobileStyles).toContain(
+      '.arvenilo-lockup {\n    width: min(280px, 100%);\n    max-width: 100%;\n    justify-self: start;',
+    );
+  });
+
   it('makes semantic hidden state and keyboard focus reliable', () => {
     expect(styles).toContain('[hidden] {\n  display: none !important;\n}');
     expect(styles).toContain(':focus-visible');
