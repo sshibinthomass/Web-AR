@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { ROUTES, parseRouteHash, routeCanOpen, routeHash } from '../../src/ui/routes';
+import {
+  ROUTES,
+  isCameraCaptureRoute,
+  isPhotoToARRoute,
+  parseRouteHash,
+  routeCanOpen,
+  routeHash,
+  type CameraCaptureRoute,
+  type HudRoute,
+  type PhotoToARRoute,
+} from '../../src/ui/routes';
 
 describe('route metadata', () => {
   it('maps every supported hash and falls back to home', () => {
@@ -36,5 +46,23 @@ describe('route metadata', () => {
     expect(ROUTES.dynamic.title).toBe('AI photo to AR');
     expect(ROUTES.speech.parent).toBe('home');
     expect(ROUTES.camera.initialStatus).toBe('Frame one object, then capture an image.');
+  });
+
+  it('identifies every camera-capture route and excludes non-camera routes', () => {
+    const expectedCameraRoutes: CameraCaptureRoute[] = ['camera', 'full-flow', 'dynamic'];
+    const routes = Object.keys(ROUTES) as HudRoute[];
+
+    expect(routes.filter(isCameraCaptureRoute)).toEqual(expectedCameraRoutes);
+    expect(isCameraCaptureRoute('upload')).toBe(false);
+    expect(isCameraCaptureRoute('ar')).toBe(false);
+  });
+
+  it('identifies only Photo-to-AR routes from the full route matrix', () => {
+    const expectedPhotoToARRoutes: PhotoToARRoute[] = ['full-flow', 'dynamic'];
+    const routes = Object.keys(ROUTES) as HudRoute[];
+
+    expect(routes.filter(isPhotoToARRoute)).toEqual(expectedPhotoToARRoutes);
+    expect(isPhotoToARRoute('camera')).toBe(false);
+    expect(isPhotoToARRoute('upload')).toBe(false);
   });
 });

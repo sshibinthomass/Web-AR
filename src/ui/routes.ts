@@ -14,6 +14,9 @@ export type HudRoute =
   | 'login'
   | 'admin';
 
+export type CameraCaptureRoute = 'camera' | 'full-flow' | 'dynamic';
+export type PhotoToARRoute = 'full-flow' | 'dynamic';
+
 export type NavigationSection = 'home' | 'create' | 'models' | 'ar' | 'account';
 export type RouteShell = 'standard' | 'immersive';
 
@@ -174,6 +177,18 @@ export function parseRouteHash(hash: string): HudRoute {
 
 export function routeHash(route: HudRoute): string {
   return ROUTES[route].hash;
+}
+
+export function isCameraCaptureRoute(
+  route: HudRoute | null | undefined,
+): route is CameraCaptureRoute {
+  return route === 'camera' || route === 'full-flow' || route === 'dynamic';
+}
+
+export function isPhotoToARRoute(
+  route: HudRoute | null | undefined,
+): route is PhotoToARRoute {
+  return route === 'full-flow' || route === 'dynamic';
 }
 
 export function routeCanOpen(route: HudRoute, user: AuthUser | null): boolean {

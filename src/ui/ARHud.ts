@@ -6,7 +6,19 @@ import { ApplicationShell } from './ApplicationShell';
 import { openDialog } from './dialog';
 import { HashRouter } from './HashRouter';
 import { modelCollectionsEqual } from './modelCollections';
-import { parseRouteHash, ROUTES, routeCanOpen, type HudRoute } from './routes';
+import {
+  isCameraCaptureRoute,
+  isPhotoToARRoute,
+  parseRouteHash,
+  ROUTES,
+  routeCanOpen,
+  type CameraCaptureRoute,
+  type HudRoute,
+} from './routes';
+import {
+  ObjectReconstructionOverlay,
+  type ObjectBounds,
+} from './ObjectReconstructionOverlay';
 
 interface HUDHandlers {
   onPlace(): void;
@@ -16,7 +28,7 @@ interface HUDHandlers {
   onRotate(deltaRadians: number): void;
   onModelSelect(modelId: string): void;
   onStartCamera(): void;
-  onCaptureImage(): void;
+  onCaptureImage(route: CameraCaptureRoute): void;
   onUploadImage(file: File): void;
   onUploadModel(file: File): void;
   onSubmitTarget(targetObject: string): void;
@@ -127,6 +139,8 @@ export class ARHud {
   private readonly statusMessage: HTMLElement;
   private readonly sourceMessage: HTMLElement;
   private readonly cameraPanel: HTMLElement;
+  private readonly cameraMediaLayer: HTMLElement;
+  private readonly objectReconstructionOverlay: ObjectReconstructionOverlay;
   private readonly fullFlowLoading: HTMLElement;
   private readonly modelManager: HTMLElement;
   private readonly modelSearchInput: HTMLInputElement;
@@ -569,8 +583,10 @@ export class ARHud {
     cameraPanel.innerHTML = `
       <div class="creation-stage calibration-frame">
         <p class="camera-label utility-label"></p>
-        <video class="camera-preview" muted playsinline></video>
-        <img class="camera-preview hidden" alt="Selected object preview">
+        <div class="camera-media-layer">
+          <video class="camera-preview" muted playsinline></video>
+          <img class="camera-preview hidden" alt="Selected object preview">
+        </div>
         <label class="upload-image-field upload-drop-zone hidden">
           <span>Choose an image</span>
           <small id="imageUploadHint">PNG, JPG, or WebP with one clearly visible object.</small>
@@ -600,6 +616,11 @@ export class ARHud {
     this.cameraPreviewVideo = cameraPanel.querySelector<HTMLVideoElement>('.camera-preview')!;
     this.cameraPreviewImage = cameraPanel.querySelector<HTMLImageElement>('img.camera-preview')!;
     this.cameraPanel = cameraPanel;
+    this.cameraMediaLayer = cameraPanel.querySelector<HTMLElement>('.camera-media-layer')!;
+    this.objectReconstructionOverlay = new ObjectReconstructionOverlay(
+      this.cameraMediaLayer,
+      this.cameraPreviewImage,
+    );
     this.cameraLabel = cameraPanel.querySelector<HTMLElement>('.camera-label')!;
     this.cameraStatusMessage = cameraPanel.querySelector<HTMLElement>('.camera-status')!;
     this.generatedModelMessage = cameraPanel.querySelector<HTMLElement>('.generated-model-status')!;
@@ -1009,7 +1030,8 @@ export class ARHud {
     this.speechGenerateButton.disabled = this.speechTranscriptMessage.textContent === 'No speech recorded yet.';
   }
 
-  showLiveCameraPreview(route: 'camera' | 'full-flow' | 'dynamic' = 'camera'): void {
+  showLiveCameraPreview(route: CameraCaptureRoute = 'camera'): void {
+    this.clearObjectReconstruction();
     const meta = ROUTES[route];
     this.cameraLabel.textContent = meta.title;
     this.cameraStatusMessage.textContent = meta.initialStatus;
@@ -1097,6 +1119,7 @@ export class ARHud {
   }
 
   showCapturedImagePreview(imageUrl: string): void {
+    this.clearObjectReconstruction();
     this.uploadImageField.classList.add('hidden');
     this.uploadModelField.classList.add('hidden');
     this.cameraActions.classList.remove('hidden');
@@ -1108,22 +1131,47 @@ export class ARHud {
     this.targetObjectLabel.classList.remove('hidden');
     this.captureButton.classList.add('hidden');
     this.captureButton.disabled = true;
-    this.submitButton.classList.toggle('hidden', this.activeRoute === 'dynamic');
-    this.submitButton.disabled = this.activeRoute === 'dynamic';
+    const isDynamicRoute = this.activeRoute === 'dynamic';
+    this.submitButton.classList.toggle('hidden', isDynamicRoute);
+    this.submitButton.disabled = isDynamicRoute;
     this.generateButton.classList.remove('hidden');
     this.generateButton.textContent = this.generationButtonLabel();
     this.storeModelButton.classList.add('hidden');
     this.storeModelButton.disabled = true;
-    this.updateCameraStatus(
-      this.activeRoute === 'dynamic'
-        ? 'Image captured. Generate a dynamic image, then place the 3D model.'
-        : 'Image captured. Submit to GPT or generate a 3D model directly.',
-      true,
-    );
+    this.updateCameraStatus(this.capturedImageReadyMessage(), true);
     this.setCreationStage('generate');
   }
 
+  showObjectSegmentationPending(): void {
+    this.clearObjectReconstruction();
+    this.cameraMediaLayer.classList.add('is-object-segmentation-pending');
+    this.updateCameraStatus('Finding the main object…', true);
+  }
+
+  playObjectReconstruction(maskUrl: string, bounds: ObjectBounds): Promise<void> {
+    this.cameraMediaLayer.classList.remove('is-object-segmentation-pending');
+    this.updateCameraStatus(this.capturedImageReadyMessage(), true);
+    return this.objectReconstructionOverlay.play({ maskUrl, bounds, durationMs: 2500 });
+  }
+
+  showObjectSegmentationFallback(): void {
+    this.clearObjectReconstruction();
+    this.updateCameraStatus(this.capturedImageReadyMessage(), true);
+  }
+
+  clearObjectReconstruction(): void {
+    this.cameraMediaLayer.classList.remove('is-object-segmentation-pending');
+    this.objectReconstructionOverlay.cancel();
+  }
+
+  dispose(): void {
+    this.cameraMediaLayer.classList.remove('is-object-segmentation-pending');
+    this.objectReconstructionOverlay.dispose();
+    this.router.dispose();
+  }
+
   showUploadedImagePreview(imageUrl: string): void {
+    this.clearObjectReconstruction();
     this.uploadImageField.classList.add('hidden');
     this.uploadModelField.classList.add('hidden');
     this.cameraActions.classList.remove('hidden');
@@ -1145,6 +1193,7 @@ export class ARHud {
   }
 
   showExtractedImageReady(imageUrl: string): void {
+    this.clearObjectReconstruction();
     this.uploadImageField.classList.add('hidden');
     this.uploadModelField.classList.add('hidden');
     this.cameraActions.classList.remove('hidden');
@@ -1290,6 +1339,7 @@ export class ARHud {
   }
 
   showFullFlowLoading(message: string): void {
+    this.clearObjectReconstruction();
     this.setCreationStage('generate');
     this.landing.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -1496,6 +1546,9 @@ export class ARHud {
   }
 
   private prepareRoute(route: HudRoute, previousRoute: HudRoute | null): void {
+    if (previousRoute && previousRoute !== route && isCameraCaptureRoute(previousRoute)) {
+      this.clearObjectReconstruction();
+    }
     if (previousRoute && previousRoute !== 'home' && previousRoute !== route) {
       this.handlers.onRouteExit(previousRoute, route);
     }
@@ -1596,7 +1649,8 @@ export class ARHud {
   }
 
   private handleCaptureClick(): void {
-    this.handlers.onCaptureImage();
+    const route = isCameraCaptureRoute(this.activeRoute) ? this.activeRoute : 'camera';
+    this.handlers.onCaptureImage(route);
   }
 
   private handleLoginClick(): void {
@@ -1648,7 +1702,7 @@ export class ARHud {
 
   private handleGenerateClick(): void {
     const targetObject = this.targetObjectInput.value.trim();
-    if (this.activeRoute === 'full-flow' || this.activeRoute === 'dynamic') {
+    if (isPhotoToARRoute(this.activeRoute)) {
       const isDynamicRoute = this.activeRoute === 'dynamic';
       this.navigateTo('ar');
       this.statusMessage.textContent =
@@ -2650,9 +2704,15 @@ export class ARHud {
   }
 
   private generationButtonLabel(): string {
-    return this.activeRoute === 'full-flow' || this.activeRoute === 'dynamic'
+    return isPhotoToARRoute(this.activeRoute)
       ? 'Generate and place'
       : 'Generate model';
+  }
+
+  private capturedImageReadyMessage(): string {
+    return this.activeRoute === 'dynamic'
+      ? 'Image captured. Generate a dynamic image, then place the 3D model.'
+      : 'Image captured. Submit to GPT or generate a 3D model directly.';
   }
 
   private syncCameraActionLayout(): void {
@@ -2662,7 +2722,7 @@ export class ARHud {
   }
 
   private setCreationStage(stage: 'capture' | 'generate' | 'place' | null): void {
-    const showSteps = this.activeRoute === 'full-flow' || this.activeRoute === 'dynamic';
+    const showSteps = isPhotoToARRoute(this.activeRoute);
     const list = this.cameraPanel.querySelector<HTMLElement>('.creation-step-list')!;
     list.classList.toggle('hidden', !showSteps);
     for (const item of list.querySelectorAll<HTMLElement>('[data-creation-stage]')) {

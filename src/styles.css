@@ -3680,14 +3680,60 @@ h3 {
   color: var(--color-ink-muted);
 }
 
-.creation-stage .camera-preview,
-.creation-stage .upload-drop-zone {
+.camera-media-layer {
+  position: relative;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: var(--radius-control);
+}
+
+.camera-media-layer > .camera-preview,
+.object-reconstruction-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.camera-media-layer > .camera-preview {
+  min-height: 0;
+  max-height: none;
+  border-radius: var(--radius-control);
+}
+
+.object-reconstruction-overlay {
+  z-index: 2;
+  pointer-events: none;
+}
+
+.creation-stage > .upload-drop-zone {
   grid-row: 2;
   width: 100%;
   height: 100%;
   min-height: 0;
   max-height: none;
   border-radius: var(--radius-control);
+}
+
+.camera-media-layer.is-object-segmentation-pending {
+  outline: 1px solid color-mix(in srgb, var(--color-teal) 76%, #55f3e3);
+  outline-offset: -1px;
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--color-teal) 28%, transparent),
+    inset 0 -2px 0 color-mix(in srgb, var(--color-amber) 72%, transparent);
+  animation: object-segmentation-pending 1.8s ease-in-out infinite;
+}
+
+@keyframes object-segmentation-pending {
+  50% {
+    outline-color: color-mix(in srgb, #55f3e3 88%, var(--color-teal));
+    box-shadow:
+      inset 0 0 0 2px color-mix(in srgb, #55f3e3 42%, transparent),
+      inset 0 -2px 0 color-mix(in srgb, var(--color-amber) 88%, transparent);
+  }
 }
 
 .creation-guidance {
@@ -3852,6 +3898,12 @@ h3 {
     z-index: 4;
     padding-top: 10px;
     background: var(--color-surface);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .camera-media-layer.is-object-segmentation-pending {
+    animation: none;
   }
 }
 

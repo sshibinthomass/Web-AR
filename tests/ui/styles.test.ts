@@ -41,6 +41,45 @@ describe('application design system', () => {
     expect(styles).toContain('env(safe-area-inset-bottom)');
   });
 
+  it('layers the reconstruction canvas exactly over the cover-cropped camera preview', () => {
+    expect(styles).toContain(
+      '.camera-media-layer {\n' +
+      '  position: relative;\n' +
+      '  grid-row: 2;\n' +
+      '  min-width: 0;\n' +
+      '  min-height: 0;\n' +
+      '  pointer-events: none;\n' +
+      '  overflow: hidden;\n' +
+      '  border-radius: var(--radius-control);',
+    );
+    expect(styles).toContain(
+      '.camera-media-layer > .camera-preview,\n' +
+      '.object-reconstruction-overlay {\n' +
+      '  position: absolute;\n' +
+      '  inset: 0;\n' +
+      '  width: 100%;\n' +
+      '  height: 100%;',
+    );
+    expect(styles).toContain(
+      '.object-reconstruction-overlay {\n' +
+      '  z-index: 2;\n' +
+      '  pointer-events: none;',
+    );
+    expect(styles).toContain('.creation-stage > .upload-drop-zone {');
+  });
+
+  it('uses a restrained segmentation pulse and removes it for reduced motion', () => {
+    expect(styles).toContain('.camera-media-layer.is-object-segmentation-pending {');
+    expect(styles).toContain('animation: object-segmentation-pending 1.8s ease-in-out infinite;');
+    expect(styles).toContain('@keyframes object-segmentation-pending');
+    expect(styles).toContain(
+      '@media (prefers-reduced-motion: reduce) {\n' +
+      '  .camera-media-layer.is-object-segmentation-pending {\n' +
+      '    animation: none;',
+    );
+    expect(styles).not.toContain('.object-segmentation-spinner');
+  });
+
   it('defines explicit selection and mobile layouts for model collections', () => {
     expect(styles).toContain(
       '.ar-model-card[aria-pressed="true"],\n.model-manager-row.is-selected {',

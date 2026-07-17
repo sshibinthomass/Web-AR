@@ -1,6 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ARHud } from '../../src/ui/ARHud';
 
+const reconstructionOverlay = vi.hoisted(() => ({
+  cancel: vi.fn((..._args: unknown[]) => undefined),
+  construct: vi.fn((..._args: unknown[]) => undefined),
+  dispose: vi.fn((..._args: unknown[]) => undefined),
+  play: vi.fn((..._args: unknown[]) => Promise.resolve()),
+}));
+
+vi.mock('../../src/ui/ObjectReconstructionOverlay', () => ({
+  ObjectReconstructionOverlay: class {
+    constructor(...args: unknown[]) {
+      reconstructionOverlay.construct(...args);
+    }
+
+    play(...args: unknown[]) {
+      return reconstructionOverlay.play(...args);
+    }
+
+    cancel(...args: unknown[]) {
+      return reconstructionOverlay.cancel(...args);
+    }
+
+    dispose(...args: unknown[]) {
+      return reconstructionOverlay.dispose(...args);
+    }
+  },
+}));
+
 const modelOptions = [
   {
     id: 'built-in-alpha',
@@ -81,6 +108,156 @@ describe('ARHud', () => {
     window.history.replaceState(null, '', '/');
     window.localStorage.clear();
     document.body.replaceChildren();
+    reconstructionOverlay.cancel.mockClear();
+    reconstructionOverlay.construct.mockClear();
+    reconstructionOverlay.dispose.mockClear();
+    reconstructionOverlay.play.mockReset();
+    reconstructionOverlay.play.mockResolvedValue(undefined);
+  });
+
+  it('passes the active capture route and defaults defensively to camera', () => {
+    const root = document.createElement('div');
+    const onCaptureImage = vi.fn();
+    const hud = new ARHud(root, modelOptions, createHandlers({ onCaptureImage }));
+
+    root.querySelector<HTMLButtonElement>('.camera-actions button')?.click();
+    hud.updateAuthState(activeUser);
+    for (const route of ['camera', 'full-flow', 'dynamic'] as const) {
+      root.querySelector<HTMLButtonElement>(`[data-nav-route="${route}"]`)?.click();
+      [...root.querySelectorAll<HTMLButtonElement>('.camera-actions button')]
+        .find((button) => button.textContent === 'Capture')
+        ?.click();
+    }
+
+    expect(onCaptureImage.mock.calls.map(([route]) => route)).toEqual([
+      'camera',
+      'camera',
+      'full-flow',
+      'dynamic',
+    ]);
+  });
+
+  it('owns one reconstruction overlay in a media layer shared by both camera previews', () => {
+    const root = document.createElement('div');
+    new ARHud(root, modelOptions, createHandlers());
+
+    const stage = root.querySelector<HTMLElement>('.creation-stage')!;
+    const mediaLayer = stage.querySelector<HTMLElement>(':scope > .camera-media-layer')!;
+    const previewImage = mediaLayer.querySelector<HTMLImageElement>('img.camera-preview')!;
+
+    expect(mediaLayer).not.toBeNull();
+    expect(mediaLayer.querySelector('video.camera-preview')).not.toBeNull();
+    expect(previewImage).not.toBeNull();
+    expect(stage.querySelector('.upload-image-field')?.parentElement).toBe(stage);
+    expect(stage.querySelector('.upload-model-field')?.parentElement).toBe(stage);
+    expect(reconstructionOverlay.construct).toHaveBeenCalledOnce();
+    expect(reconstructionOverlay.construct).toHaveBeenCalledWith(mediaLayer, previewImage);
+  });
+
+  it('shows non-blocking object segmentation and restores ready copy when playback starts', async () => {
+    let finishPlayback: (() => void) | undefined;
+    reconstructionOverlay.play.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishPlayback = resolve;
+    }));
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="full-flow"]')?.click();
+    hud.showCapturedImagePreview('blob:captured-image');
+
+    hud.showObjectSegmentationPending();
+
+    const generateButton = [...root.querySelectorAll<HTMLButtonElement>('.camera-actions button')]
+      .find((button) => button.textContent === 'Generate and place')!;
+    const mediaLayer = root.querySelector<HTMLElement>('.camera-media-layer')!;
+    expect(root.querySelector('.camera-status')?.textContent).toBe('Finding the main object…');
+    expect(mediaLayer.classList.contains('is-object-segmentation-pending')).toBe(true);
+    expect(generateButton.disabled).toBe(false);
+
+    const playback = hud.playObjectReconstruction('data:image/png;base64,bWFzaw==', {
+      x: 0.1,
+      y: 0.2,
+      width: 0.5,
+      height: 0.6,
+    });
+
+    expect(reconstructionOverlay.play).toHaveBeenCalledWith({
+      maskUrl: 'data:image/png;base64,bWFzaw==',
+      bounds: { x: 0.1, y: 0.2, width: 0.5, height: 0.6 },
+      durationMs: 2500,
+    });
+    expect(root.querySelector('.camera-status')?.textContent).toBe(
+      'Image captured. Submit to GPT or generate a 3D model directly.',
+    );
+    expect(mediaLayer.classList.contains('is-object-segmentation-pending')).toBe(false);
+    expect(generateButton.disabled).toBe(false);
+
+    finishPlayback?.();
+    await playback;
+  });
+
+  it('keeps captured-ready copy after rejected playback so orchestration can fall back', async () => {
+    reconstructionOverlay.play.mockRejectedValueOnce(new Error('canvas failed'));
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.showCapturedImagePreview('blob:captured-image');
+    hud.showObjectSegmentationPending();
+
+    await expect(hud.playObjectReconstruction('data:image/png;base64,bWFzaw==', {
+      x: 0.1,
+      y: 0.2,
+      width: 0.5,
+      height: 0.6,
+    })).rejects.toThrow('canvas failed');
+
+    expect(root.querySelector('.camera-status')?.textContent).toBe(
+      'Image captured. Submit to GPT or generate a 3D model directly.',
+    );
+  });
+
+  it('falls back to dynamic captured-ready state without animating', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="dynamic"]')?.click();
+    hud.showCapturedImagePreview('blob:dynamic-image');
+    reconstructionOverlay.cancel.mockClear();
+    reconstructionOverlay.play.mockClear();
+
+    hud.showObjectSegmentationPending();
+    reconstructionOverlay.cancel.mockClear();
+    hud.showObjectSegmentationFallback();
+
+    expect(root.querySelector('.camera-status')?.textContent).toBe(
+      'Image captured. Generate a dynamic image, then place the 3D model.',
+    );
+    expect(root.querySelector('.camera-media-layer')?.classList.contains('is-object-segmentation-pending')).toBe(false);
+    expect(reconstructionOverlay.cancel).toHaveBeenCalledOnce();
+    expect(reconstructionOverlay.play).not.toHaveBeenCalled();
+  });
+
+  it('clears reconstruction on preview replacement, extraction, loading, route exit, and disposal', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+    root.querySelector<HTMLButtonElement>('[data-nav-route="full-flow"]')?.click();
+    reconstructionOverlay.cancel.mockClear();
+
+    const expectCancellation = (action: () => void) => {
+      const before = reconstructionOverlay.cancel.mock.calls.length;
+      action();
+      expect(reconstructionOverlay.cancel).toHaveBeenCalledTimes(before + 1);
+    };
+
+    expectCancellation(() => hud.showLiveCameraPreview('full-flow'));
+    expectCancellation(() => hud.showCapturedImagePreview('blob:first-capture'));
+    expectCancellation(() => hud.showCapturedImagePreview('blob:replacement-capture'));
+    expectCancellation(() => hud.showExtractedImageReady('blob:extracted-image'));
+    expectCancellation(() => hud.showFullFlowLoading('Building your 3D object in Modal...'));
+    expectCancellation(() => root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click());
+
+    hud.dispose();
+    expect(reconstructionOverlay.dispose).toHaveBeenCalledOnce();
   });
 
   it('starts on a branded first screen with public and login-required actions grouped', () => {
