@@ -11,14 +11,22 @@ export interface ReconstructionPlayback {
 
 export interface OverlayDependencies {
   cancelAnimationFrame?: (frameId: number) => void;
+  clearInterval?: (intervalId: number) => void;
   clearTimeout?: (timerId: number) => void;
   createCanvas?: () => HTMLCanvasElement;
   devicePixelRatio?: () => number;
-  loadImage?: (url: string) => Promise<CanvasImageSource>;
+  loadImage?: (url: string) => Promise<CanvasImageSource> | OverlayImageLoad;
   matchMedia?: (query: string) => Pick<MediaQueryList, 'matches'>;
   now?: () => number;
+  observeResize?: (elements: readonly Element[], callback: () => void) => () => void;
   requestAnimationFrame?: (callback: FrameRequestCallback) => number;
+  setInterval?: (callback: () => void, delayMs: number) => number;
   setTimeout?: (callback: () => void, delayMs: number) => number;
+}
+
+export interface OverlayImageLoad {
+  cancel?: () => void;
+  promise: Promise<CanvasImageSource>;
 }
 
 export interface CoverRect {
@@ -48,8 +56,13 @@ interface PreparedPlayback {
 }
 
 interface ActivePlayback {
+  cancelLoad: (() => void) | null;
+  cancelLoadWait: (() => void) | null;
   disconnectRemoval: (() => void) | null;
+  disconnectResize: (() => void) | null;
+  expectedGeometry: OverlayGeometry | null;
   frameId: number | null;
+  guardIntervalId: number | null;
   node: HTMLCanvasElement | null;
   orientationListener: (() => void) | null;
   reject: (reason?: unknown) => void;
@@ -69,10 +82,17 @@ interface OverlayGeometry {
   width: number;
 }
 
+type ImageLoadOutcome =
+  | { image: CanvasImageSource; type: 'loaded' }
+  | { error: unknown; type: 'error' }
+  | { type: 'cancelled' };
+
 const DEFAULT_DURATION_MS = 2500;
 const REDUCED_MOTION_DISPLAY_MS = 360;
 const MAX_DEVICE_PIXEL_RATIO = 2;
 const MAX_PARTICLES = 18;
+const MASK_ASPECT_RATIO_TOLERANCE = 0.01;
+const CONNECTION_GUARD_INTERVAL_MS = 50;
 
 const colors = {
   cyan: '#55f3e3',
@@ -110,13 +130,16 @@ export function computeCoverRect(
 
 export class ObjectReconstructionOverlay {
   private readonly cancelFrame: (frameId: number) => void;
+  private readonly clearInterval: (intervalId: number) => void;
   private readonly clearTimer: (timerId: number) => void;
   private readonly createCanvas: () => HTMLCanvasElement;
   private readonly getDevicePixelRatio: () => number;
-  private readonly loadImage: (url: string) => Promise<CanvasImageSource>;
+  private readonly loadImage: (url: string) => Promise<CanvasImageSource> | OverlayImageLoad;
   private readonly matchMedia: (query: string) => Pick<MediaQueryList, 'matches'>;
   private readonly now: () => number;
+  private readonly observeResize: (elements: readonly Element[], callback: () => void) => () => void;
   private readonly requestFrame: (callback: FrameRequestCallback) => number;
+  private readonly setInterval: (callback: () => void, delayMs: number) => number;
   private readonly setTimer: (callback: () => void, delayMs: number) => number;
 
   private active: ActivePlayback | null = null;
@@ -128,13 +151,16 @@ export class ObjectReconstructionOverlay {
     dependencies: OverlayDependencies = {},
   ) {
     this.cancelFrame = dependencies.cancelAnimationFrame ?? ((frameId) => window.cancelAnimationFrame(frameId));
+    this.clearInterval = dependencies.clearInterval ?? ((intervalId) => window.clearInterval(intervalId));
     this.clearTimer = dependencies.clearTimeout ?? ((timerId) => window.clearTimeout(timerId));
     this.createCanvas = dependencies.createCanvas ?? (() => document.createElement('canvas'));
     this.getDevicePixelRatio = dependencies.devicePixelRatio ?? (() => window.devicePixelRatio || 1);
     this.loadImage = dependencies.loadImage ?? loadCanvasImage;
     this.matchMedia = dependencies.matchMedia ?? ((query) => window.matchMedia(query));
     this.now = dependencies.now ?? (() => performance.now());
+    this.observeResize = dependencies.observeResize ?? observeElementResize;
     this.requestFrame = dependencies.requestAnimationFrame ?? ((callback) => window.requestAnimationFrame(callback));
+    this.setInterval = dependencies.setInterval ?? ((callback, delayMs) => window.setInterval(callback, delayMs));
     this.setTimer = dependencies.setTimeout ?? ((callback, delayMs) => window.setTimeout(callback, delayMs));
   }
 
@@ -146,8 +172,13 @@ export class ObjectReconstructionOverlay {
     this.cancel();
     return new Promise<void>((resolve, reject) => {
       const active: ActivePlayback = {
+        cancelLoad: null,
+        cancelLoadWait: null,
         disconnectRemoval: null,
+        disconnectResize: null,
+        expectedGeometry: null,
         frameId: null,
+        guardIntervalId: null,
         node: null,
         orientationListener: null,
         reject,
@@ -186,8 +217,31 @@ export class ObjectReconstructionOverlay {
   private async start(active: ActivePlayback, options: ReconstructionPlayback): Promise<void> {
     try {
       validatePlayback(options);
-      this.readGeometry();
-      const maskImage = await this.loadImage(options.maskUrl);
+      active.expectedGeometry = this.readGeometry();
+      this.installPlaybackGuards(active);
+      if (!this.isActive(active)) {
+        return;
+      }
+      const imageLoad = normalizeImageLoad(this.loadImage(options.maskUrl));
+      active.cancelLoad = imageLoad.cancel ?? null;
+      const loadOutcome = await Promise.race([
+        imageLoad.promise.then<ImageLoadOutcome, ImageLoadOutcome>(
+          (image) => ({ image, type: 'loaded' }),
+          (error: unknown) => ({ error, type: 'error' }),
+        ),
+        new Promise<ImageLoadOutcome>((resolve) => {
+          active.cancelLoadWait = () => resolve({ type: 'cancelled' });
+        }),
+      ]);
+      active.cancelLoad = null;
+      active.cancelLoadWait = null;
+      if (loadOutcome.type === 'cancelled') {
+        return;
+      }
+      if (loadOutcome.type === 'error') {
+        throw loadOutcome.error;
+      }
+      const maskImage = loadOutcome.image;
       if (!this.isActive(active)) {
         return;
       }
@@ -197,6 +251,8 @@ export class ObjectReconstructionOverlay {
       }
       const maskDimensions = validateImageDimensions(maskImage);
       const geometry = this.readGeometry();
+      validateMaskAspectRatio(maskDimensions, geometry);
+      active.expectedGeometry = geometry;
       const prepared = this.prepareCanvas(active, maskImage, maskDimensions, options.bounds, geometry);
       if (!this.isActive(active)) {
         return;
@@ -341,7 +397,6 @@ export class ObjectReconstructionOverlay {
 
     this.host.append(displayCanvas);
     active.node = displayCanvas;
-    this.installPlaybackGuards(active, geometry);
     return {
       boundsRect,
       displayCanvas,
@@ -437,17 +492,17 @@ export class ObjectReconstructionOverlay {
     onVisibilityChange();
   }
 
-  private installPlaybackGuards(active: ActivePlayback, geometry: OverlayGeometry): void {
+  private installPlaybackGuards(active: ActivePlayback): void {
     const cancelIfInvalidated = () => {
       if (!this.isActive(active)) {
         return;
       }
-      if (!this.host.isConnected || active.node?.parentElement !== this.host) {
+      if (!this.host.isConnected || (active.node !== null && active.node.parentElement !== this.host)) {
         this.finish(active);
         return;
       }
       try {
-        if (!sameGeometry(geometry, this.readGeometry())) {
+        if (active.expectedGeometry && !sameGeometry(active.expectedGeometry, this.readGeometry())) {
           this.finish(active);
         }
       } catch {
@@ -458,11 +513,14 @@ export class ObjectReconstructionOverlay {
     active.orientationListener = cancelIfInvalidated;
     window.addEventListener('resize', cancelIfInvalidated);
     window.addEventListener('orientationchange', cancelIfInvalidated);
+    active.disconnectResize = this.observeResize([this.host, this.preview], cancelIfInvalidated);
 
     if (typeof MutationObserver !== 'undefined') {
       const observer = new MutationObserver(cancelIfInvalidated);
       observer.observe(document.documentElement, { childList: true, subtree: true });
       active.disconnectRemoval = () => observer.disconnect();
+    } else {
+      active.guardIntervalId = this.setInterval(cancelIfInvalidated, CONNECTION_GUARD_INTERVAL_MS);
     }
     cancelIfInvalidated();
   }
@@ -481,6 +539,10 @@ export class ObjectReconstructionOverlay {
   }
 
   private cleanup(active: ActivePlayback): void {
+    active.cancelLoadWait?.();
+    active.cancelLoadWait = null;
+    active.cancelLoad?.();
+    active.cancelLoad = null;
     if (active.frameId !== null) {
       this.cancelFrame(active.frameId);
       active.frameId = null;
@@ -491,6 +553,12 @@ export class ObjectReconstructionOverlay {
     }
     active.disconnectRemoval?.();
     active.disconnectRemoval = null;
+    active.disconnectResize?.();
+    active.disconnectResize = null;
+    if (active.guardIntervalId !== null) {
+      this.clearInterval(active.guardIntervalId);
+      active.guardIntervalId = null;
+    }
     if (active.resizeListener) {
       window.removeEventListener('resize', active.resizeListener);
       active.resizeListener = null;
@@ -578,10 +646,15 @@ function buildEdgeLayer(
 ): Point[] {
   const maskData = maskContext.getImageData(0, 0, backingWidth, backingHeight);
   const edgeData = edgeContext.createImageData(backingWidth, backingHeight);
-  const alphaAt = (x: number, y: number) => maskData.data[(y * backingWidth + x) * 4 + 3] ?? 0;
+  const alphaAt = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= backingWidth || y >= backingHeight) {
+      return 0;
+    }
+    return maskData.data[(y * backingWidth + x) * 4 + 3] ?? 0;
+  };
   const candidates: Point[] = [];
-  for (let y = 1; y < backingHeight - 1; y += 1) {
-    for (let x = 1; x < backingWidth - 1; x += 1) {
+  for (let y = 0; y < backingHeight; y += 1) {
+    for (let x = 0; x < backingWidth; x += 1) {
       if (alphaAt(x, y) < 96) {
         continue;
       }
@@ -724,6 +797,18 @@ function validateImageDimensions(image: CanvasImageSource): { height: number; wi
   return { height: height as number, width: width as number };
 }
 
+function validateMaskAspectRatio(
+  maskDimensions: { height: number; width: number },
+  geometry: OverlayGeometry,
+): void {
+  const maskAspectRatio = maskDimensions.width / maskDimensions.height;
+  const sourceAspectRatio = geometry.sourceWidth / geometry.sourceHeight;
+  const relativeDifference = Math.abs(maskAspectRatio - sourceAspectRatio) / sourceAspectRatio;
+  if (relativeDifference > MASK_ASPECT_RATIO_TOLERANCE) {
+    throw new Error('Object reconstruction mask aspect ratio does not match the preview source.');
+  }
+}
+
 function withContextState(context: CanvasRenderingContext2D, draw: () => void): void {
   context.save();
   try {
@@ -737,19 +822,52 @@ function isPositiveFiniteNumber(value: number): boolean {
   return Number.isFinite(value) && value > 0;
 }
 
-function loadCanvasImage(url: string): Promise<CanvasImageSource> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
+function normalizeImageLoad(load: Promise<CanvasImageSource> | OverlayImageLoad): OverlayImageLoad {
+  if (typeof load === 'object' && load !== null && 'promise' in load) {
+    return load;
+  }
+  return { promise: load };
+}
+
+function observeElementResize(elements: readonly Element[], callback: () => void): () => void {
+  if (typeof ResizeObserver === 'undefined') {
+    return () => undefined;
+  }
+  const observer = new ResizeObserver(callback);
+  for (const element of elements) {
+    observer.observe(element);
+  }
+  return () => observer.disconnect();
+}
+
+function loadCanvasImage(url: string): OverlayImageLoad {
+  const image = new Image();
+  let settled = false;
+  const promise = new Promise<CanvasImageSource>((resolve, reject) => {
     image.onload = () => {
+      settled = true;
       image.onload = null;
       image.onerror = null;
       resolve(image);
     };
     image.onerror = () => {
+      settled = true;
       image.onload = null;
       image.onerror = null;
       reject(new Error('Could not load the object reconstruction mask.'));
     };
     image.src = url;
   });
+  return {
+    cancel: () => {
+      if (settled) {
+        return;
+      }
+      image.onload = null;
+      image.onerror = null;
+      image.src = '';
+      settled = true;
+    },
+    promise,
+  };
 }

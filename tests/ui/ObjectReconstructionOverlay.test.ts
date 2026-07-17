@@ -26,6 +26,7 @@ interface Harness {
   cancelAnimationFrame: ReturnType<typeof vi.fn>;
   canvases: HTMLCanvasElement[];
   clearTimeout: ReturnType<typeof vi.fn>;
+  clearInterval: ReturnType<typeof vi.fn>;
   contexts: ContextRecord[];
   dependencies: OverlayDependencies;
   host: HTMLElement;
@@ -33,12 +34,15 @@ interface Harness {
   requestAnimationFrame: ReturnType<typeof vi.fn>;
   resizeHost(width: number, height: number): void;
   runTimer(): void;
+  runInterval(): void;
   setNow(time: number): void;
+  triggerObservedResize(): void;
 }
 
 afterEach(() => {
   document.body.replaceChildren();
   delete (document as unknown as { visibilityState?: DocumentVisibilityState }).visibilityState;
+  vi.unstubAllGlobals();
 });
 
 describe('computeCoverRect', () => {
@@ -188,6 +192,32 @@ describe('ObjectReconstructionOverlay', () => {
     await playback;
   });
 
+  it('rejects a mask whose aspect ratio does not match the preview source', async () => {
+    const harness = createHarness({
+      loadImage: vi.fn().mockResolvedValue(maskSource(900, 900)),
+    });
+    const overlay = new ObjectReconstructionOverlay(harness.host, harness.preview, harness.dependencies);
+
+    await expect(overlay.play(validPlayback())).rejects.toThrow('aspect ratio');
+    expect(harness.host.querySelector('canvas')).toBeNull();
+    expect(harness.requestAnimationFrame).not.toHaveBeenCalled();
+  });
+
+  it('accepts a near-equivalent corrected-source mask aspect ratio', async () => {
+    const harness = createHarness({
+      loadImage: vi.fn().mockResolvedValue(maskSource(1600, 901)),
+    });
+    const overlay = new ObjectReconstructionOverlay(harness.host, harness.preview, harness.dependencies);
+    const playback = overlay.play(validPlayback());
+    await flushSetup();
+
+    expect(harness.host.querySelector('canvas')).not.toBeNull();
+    expect(harness.requestAnimationFrame).toHaveBeenCalledTimes(1);
+
+    overlay.cancel();
+    await playback;
+  });
+
   it('keeps particles deterministic across frames and fades during the final 20 percent', async () => {
     const harness = createHarness();
     const overlay = new ObjectReconstructionOverlay(harness.host, harness.preview, harness.dependencies);
@@ -301,6 +331,48 @@ describe('ObjectReconstructionOverlay', () => {
     expect(harness.host.querySelector('canvas')).toBeNull();
   });
 
+  it('promptly cancels a never-settling image load when the host is detached before decode', async () => {
+    let rejectMask!: (reason: unknown) => void;
+    const cancelLoad = vi.fn();
+    const maskPromise = new Promise<CanvasImageSource>((_resolve, reject) => {
+      rejectMask = reject;
+    });
+    const harness = createHarness({
+      loadImage: vi.fn(() => ({ cancel: cancelLoad, promise: maskPromise })),
+    });
+    const overlay = new ObjectReconstructionOverlay(harness.host, harness.preview, harness.dependencies);
+    const playback = overlay.play(validPlayback());
+    await flushSetup();
+
+    harness.host.remove();
+    await flushSetup();
+
+    await expect(playback).resolves.toBeUndefined();
+    expect(cancelLoad).toHaveBeenCalledTimes(1);
+    expect(harness.requestAnimationFrame).not.toHaveBeenCalled();
+    rejectMask(new Error('late decoder rejection'));
+    await flushSetup();
+  });
+
+  it('polls for detachment when MutationObserver is unavailable and clears the guard', async () => {
+    vi.stubGlobal('MutationObserver', undefined);
+    const cancelLoad = vi.fn();
+    const harness = createHarness({
+      loadImage: vi.fn(() => ({ cancel: cancelLoad, promise: new Promise<CanvasImageSource>(() => undefined) })),
+    });
+    const overlay = new ObjectReconstructionOverlay(harness.host, harness.preview, harness.dependencies);
+    const playback = overlay.play(validPlayback());
+    await flushSetup();
+
+    harness.host.remove();
+    harness.runInterval();
+
+    await expect(playback).resolves.toBeUndefined();
+    expect(cancelLoad).toHaveBeenCalledTimes(1);
+    expect(harness.clearInterval).toHaveBeenCalledTimes(1);
+    expect(harness.host.querySelector('canvas')).toBeNull();
+  });
+
   it('remeasures a resized host after deferred mask decoding before creating canvases', async () => {
     let resolveMask!: (image: CanvasImageSource) => void;
     const harness = createHarness({
@@ -319,6 +391,48 @@ describe('ObjectReconstructionOverlay', () => {
     const displayCanvas = harness.host.querySelector('canvas') as HTMLCanvasElement;
     expect(displayCanvas.width).toBe(420);
     expect(displayCanvas.style.width).toBe('420px');
+
+    overlay.cancel();
+    await playback;
+  });
+
+  it('cancels on an element-only ResizeObserver change and disconnects observation', async () => {
+    const harness = createHarness();
+    const overlay = new ObjectReconstructionOverlay(harness.host, harness.preview, harness.dependencies);
+    const playback = overlay.play(validPlayback());
+    await flushSetup();
+
+    harness.resizeHost(440, 300);
+    harness.triggerObservedResize();
+
+    await expect(playback).resolves.toBeUndefined();
+    expect(harness.host.querySelector('canvas')).toBeNull();
+  });
+
+  it('extracts a continuous edge when the visible mask touches the bitmap boundary', async () => {
+    const harness = createHarness({ maskPattern: 'touch-left' });
+    const overlay = new ObjectReconstructionOverlay(harness.host, harness.preview, harness.dependencies);
+    const playback = overlay.play(validPlayback());
+    await flushSetup();
+
+    const edgeData = harness.contexts[3].putImageDataCalls[0][0] as ImageData;
+    expect(edgeData.data[(150 * edgeData.width) * 4 + 3]).toBeGreaterThan(0);
+    expect(edgeData.data[(60 * edgeData.width) * 4 + 3]).toBeGreaterThan(0);
+
+    overlay.cancel();
+    await playback;
+  });
+
+  it('extracts the outer perimeter edge from a full visible bitmap', async () => {
+    const harness = createHarness({ maskPattern: 'full' });
+    const overlay = new ObjectReconstructionOverlay(harness.host, harness.preview, harness.dependencies);
+    const playback = overlay.play(validPlayback());
+    await flushSetup();
+
+    const edgeData = harness.contexts[3].putImageDataCalls[0][0] as ImageData;
+    expect(edgeData.data[3]).toBeGreaterThan(0);
+    expect(edgeData.data[(150 * edgeData.width + 150) * 4 + 3]).toBe(0);
+    expect(edgeData.data[((edgeData.height - 1) * edgeData.width + edgeData.width - 1) * 4 + 3]).toBeGreaterThan(0);
 
     overlay.cancel();
     await playback;
@@ -453,6 +567,7 @@ function createHarness(options: {
   hostSize?: [number, number];
   hostRect?: [number, number, number, number];
   loadImage?: OverlayDependencies['loadImage'];
+  maskPattern?: 'center' | 'full' | 'touch-left';
   nullContextAt?: number;
   previewSize?: [number, number];
   previewBox?: {
@@ -501,8 +616,10 @@ function createHarness(options: {
 
   let now = 0;
   let nextFrameId = 1;
+  let nextIntervalId = 50;
   let nextTimerId = 100;
   const frames = new Map<number, FrameCallback>();
+  const intervals = new Map<number, () => void>();
   const timers = new Map<number, () => void>();
   const canvases: HTMLCanvasElement[] = [];
   const contexts: ContextRecord[] = [];
@@ -513,11 +630,19 @@ function createHarness(options: {
     return id;
   });
   const clearTimeout = vi.fn((id: number) => timers.delete(id));
+  const clearInterval = vi.fn((id: number) => intervals.delete(id));
   const setTimeout = vi.fn((callback: () => void) => {
     const id = nextTimerId++;
     timers.set(id, callback);
     return id;
   });
+  const setInterval = vi.fn((callback: () => void) => {
+    const id = nextIntervalId++;
+    intervals.set(id, callback);
+    return id;
+  });
+  let observedResize: (() => void) | null = null;
+  const disconnectResize = vi.fn();
   const createCanvas = vi.fn(() => {
     const canvas = document.createElement('canvas');
     const index = canvases.length;
@@ -525,6 +650,7 @@ function createHarness(options: {
       canvas,
       index === 2 && options.throwOnEffectFill === true,
       index === 4,
+      index === 1 ? options.maskPattern ?? 'center' : 'center',
     );
     canvases.push(canvas);
     contexts.push(record);
@@ -533,13 +659,19 @@ function createHarness(options: {
   });
   const dependencies: OverlayDependencies = {
     cancelAnimationFrame,
+    clearInterval: clearInterval as OverlayDependencies['clearInterval'],
     clearTimeout: clearTimeout as OverlayDependencies['clearTimeout'],
     createCanvas,
     devicePixelRatio: () => options.devicePixelRatio ?? 1,
     loadImage: options.loadImage ?? vi.fn().mockResolvedValue(maskSource()),
     matchMedia: vi.fn(() => ({ matches: options.reducedMotion ?? false } as MediaQueryList)),
     now: () => now,
+    observeResize: vi.fn((_elements, callback) => {
+      observedResize = callback;
+      return disconnectResize;
+    }),
     requestAnimationFrame,
+    setInterval: setInterval as OverlayDependencies['setInterval'],
     setTimeout: setTimeout as OverlayDependencies['setTimeout'],
   };
 
@@ -553,6 +685,7 @@ function createHarness(options: {
     },
     cancelAnimationFrame,
     canvases,
+    clearInterval,
     clearTimeout,
     contexts,
     dependencies,
@@ -570,18 +703,28 @@ function createHarness(options: {
       timers.delete(id);
       callback();
     },
+    runInterval() {
+      const pending = [...intervals.values()];
+      expect(pending.length).toBeGreaterThan(0);
+      pending[0]();
+    },
     setNow(time: number) {
       now = time;
+    },
+    triggerObservedResize() {
+      expect(observedResize).not.toBeNull();
+      observedResize?.();
+      expect(disconnectResize).toHaveBeenCalledTimes(1);
     },
   };
 }
 
-function maskSource(): CanvasImageSource {
+function maskSource(width = 1600, height = 900): CanvasImageSource {
   return {
-    naturalHeight: 900,
-    naturalWidth: 1600,
-    height: 900,
-    width: 1600,
+    naturalHeight: height,
+    naturalWidth: width,
+    height,
+    width,
   } as unknown as CanvasImageSource;
 }
 
@@ -589,6 +732,7 @@ function createContextRecord(
   canvas: HTMLCanvasElement,
   throwOnFill: boolean,
   simulateOpaqueLumaMask: boolean,
+  maskPattern: 'center' | 'full' | 'touch-left',
 ): ContextRecord {
   let composite = 'source-over';
   let alpha = 1;
@@ -640,8 +784,12 @@ function createContextRecord(
           data[index] = 255;
         }
       }
-      for (let y = Math.floor(height * 0.2); y < Math.ceil(height * 0.8); y += 1) {
-        for (let x = Math.floor(width * 0.25); x < Math.ceil(width * 0.75); x += 1) {
+      const startX = maskPattern === 'touch-left' || maskPattern === 'full' ? 0 : Math.floor(width * 0.25);
+      const endX = maskPattern === 'full' ? width : Math.ceil(width * 0.75);
+      const startY = maskPattern === 'full' ? 0 : Math.floor(height * 0.2);
+      const endY = maskPattern === 'full' ? height : Math.ceil(height * 0.8);
+      for (let y = startY; y < endY; y += 1) {
+        for (let x = startX; x < endX; x += 1) {
           const offset = (y * width + x) * 4;
           if (simulateOpaqueLumaMask) {
             data[offset] = 255;
