@@ -40,6 +40,7 @@ export interface WorkerEnv {
   MODAL_OPENAI_TO_3D_START_URL: string;
   MODAL_OPENAI_TO_3D_RESULT_URL: string;
   MODAL_OBJECT_PREPROCESS_QUALITY_URL?: string;
+  MODAL_OBJECT_SEGMENTATION_URL?: string;
   OPENAI_API_KEY: string;
   OPENAI_TRANSCRIPTION_MODEL?: string;
   OPENAI_PROMPT_MODEL?: string;
@@ -150,6 +151,19 @@ interface GenerateModelRequestBody {
   image_base64?: unknown;
   image_mime_type?: unknown;
   target_object?: unknown;
+}
+
+interface SegmentationRequestBody {
+  image_base64?: unknown;
+  image_mime_type?: unknown;
+}
+
+interface SegmentationResponseBody {
+  detected?: unknown;
+  mask_base64?: unknown;
+  mask_mime_type?: unknown;
+  bounds?: unknown;
+  confidence?: unknown;
 }
 
 interface GenerateSpeechRequestBody {
@@ -450,6 +464,9 @@ const imageTargetsIndexKey = 'image-targets/index.json';
 const imageTargetRecordPrefix = 'image-targets/records/';
 const imageTargetImagePrefix = 'image-targets/images/';
 const maxImageTargetBytes = 5 * 1024 * 1024;
+const maxSegmentationImageBytes = 5 * 1024 * 1024;
+const segmentationTimeoutMs = 60_000;
+const allowedSegmentationMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const allowedImageTargetMimeTypes = ['image/png', 'image/jpeg', 'image/webp'] as const;
 const imageTargetTextLanguages = new Set(['english', 'german', 'tamil']);
 const imageTargetTextFonts = new Set([
@@ -686,6 +703,7 @@ async function routeGenerateModelRequest(
     url.pathname !== '/generate-3d/dynamic' &&
     url.pathname !== '/generate-3d/speech' &&
     url.pathname !== '/generate-3d/text' &&
+    url.pathname !== '/segment-image' &&
     url.pathname !== '/extract-image'
   ) {
     return jsonResponse({ error: 'Not found.' }, 404);
@@ -694,6 +712,10 @@ async function routeGenerateModelRequest(
   const auth = await requireApprovedUser(request, env, deps);
   if (auth instanceof Response) {
     return auth;
+  }
+
+  if (url.pathname === '/segment-image') {
+    return handleObjectSegmentationRequest(request, env, deps);
   }
 
   if (url.pathname === '/generate-3d/speech') {
@@ -755,6 +777,172 @@ async function routeGenerateModelRequest(
       targetObject,
       pipeline,
     },
+  );
+}
+
+async function handleObjectSegmentationRequest(
+  request: Request,
+  env: WorkerEnv,
+  deps: GenerateModelDeps,
+): Promise<Response> {
+  const endpointUrl = env.MODAL_OBJECT_SEGMENTATION_URL?.trim();
+  if (!endpointUrl) {
+    return jsonResponse({ error: 'Object segmentation service is unavailable.' }, 503);
+  }
+
+  const body = await readJsonBody<SegmentationRequestBody>(request);
+  if (
+    !body.ok ||
+    !body.value ||
+    typeof body.value !== 'object' ||
+    Array.isArray(body.value) ||
+    typeof body.value.image_base64 !== 'string' ||
+    typeof body.value.image_mime_type !== 'string' ||
+    !allowedSegmentationMimeTypes.has(body.value.image_mime_type)
+  ) {
+    return jsonResponse({ error: 'Invalid segmentation image payload.' }, 400);
+  }
+
+  const decodedByteLength = canonicalBase64DecodedByteLength(body.value.image_base64);
+  if (decodedByteLength === null || decodedByteLength === 0 || decodedByteLength > maxSegmentationImageBytes) {
+    return jsonResponse({ error: 'Invalid segmentation image payload.' }, 400);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), segmentationTimeoutMs);
+  try {
+    let modalResponse: Response;
+    try {
+      modalResponse = await deps.fetch(endpointUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Modal-Key': env.MODAL_KEY,
+          'Modal-Secret': env.MODAL_SECRET,
+        },
+        body: JSON.stringify({
+          image_base64: body.value.image_base64,
+          image_mime_type: body.value.image_mime_type,
+        }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        return jsonResponse({ error: 'Object segmentation service timed out.' }, 504);
+      }
+      return jsonResponse({ error: 'Object segmentation service request failed.' }, 502);
+    }
+
+    if (!modalResponse.ok) {
+      return jsonResponse({ error: 'Object segmentation service request failed.' }, 502);
+    }
+
+    let modalBody: SegmentationResponseBody;
+    try {
+      modalBody = (await modalResponse.json()) as SegmentationResponseBody;
+    } catch (error) {
+      if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        return jsonResponse({ error: 'Object segmentation service timed out.' }, 504);
+      }
+      return jsonResponse({ error: 'Object segmentation service returned an invalid response.' }, 502);
+    }
+
+    if (!modalBody || typeof modalBody !== 'object' || Array.isArray(modalBody) || !isNormalizedConfidence(modalBody.confidence)) {
+      return jsonResponse({ error: 'Object segmentation service returned an invalid response.' }, 502);
+    }
+
+    if (modalBody.detected === false) {
+      return jsonResponse({ detected: false, confidence: modalBody.confidence });
+    }
+
+    if (
+      modalBody.detected !== true ||
+      modalBody.mask_mime_type !== 'image/png' ||
+      typeof modalBody.mask_base64 !== 'string' ||
+      canonicalBase64DecodedByteLength(modalBody.mask_base64) === null ||
+      !hasPngSignature(modalBody.mask_base64) ||
+      !isNormalizedSegmentationBounds(modalBody.bounds)
+    ) {
+      return jsonResponse({ error: 'Object segmentation service returned an invalid response.' }, 502);
+    }
+
+    return jsonResponse({
+      detected: true,
+      mask_base64: modalBody.mask_base64,
+      mask_mime_type: 'image/png',
+      bounds: {
+        x: modalBody.bounds.x,
+        y: modalBody.bounds.y,
+        width: modalBody.bounds.width,
+        height: modalBody.bounds.height,
+      },
+      confidence: modalBody.confidence,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function canonicalBase64DecodedByteLength(value: string): number | null {
+  if (value.length === 0 || value.length % 4 !== 0) {
+    return null;
+  }
+
+  const paddingLength = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+  const contentLength = value.length - paddingLength;
+  for (let index = 0; index < contentLength; index += 1) {
+    const code = value.charCodeAt(index);
+    const isBase64Character =
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122) ||
+      (code >= 48 && code <= 57) ||
+      code === 43 ||
+      code === 47;
+    if (!isBase64Character) {
+      return null;
+    }
+  }
+
+  if (paddingLength > 0) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const finalSextet = alphabet.indexOf(value[value.length - paddingLength - 1] ?? '');
+    if ((paddingLength === 2 && (finalSextet & 15) !== 0) || (paddingLength === 1 && (finalSextet & 3) !== 0)) {
+      return null;
+    }
+  }
+
+  return (value.length / 4) * 3 - paddingLength;
+}
+
+function hasPngSignature(value: string): boolean {
+  const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+  try {
+    const prefix = atob(value.slice(0, 12));
+    return pngSignature.every((byte, index) => prefix.charCodeAt(index) === byte);
+  } catch {
+    return false;
+  }
+}
+
+function isNormalizedConfidence(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+function isNormalizedSegmentationBounds(
+  value: unknown,
+): value is { x: number; y: number; width: number; height: number } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const bounds = value as Record<string, unknown>;
+  return (
+    typeof bounds.x === 'number' && Number.isFinite(bounds.x) && bounds.x >= 0 && bounds.x <= 1 &&
+    typeof bounds.y === 'number' && Number.isFinite(bounds.y) && bounds.y >= 0 && bounds.y <= 1 &&
+    typeof bounds.width === 'number' && Number.isFinite(bounds.width) && bounds.width > 0 &&
+    typeof bounds.height === 'number' && Number.isFinite(bounds.height) && bounds.height > 0 &&
+    bounds.x + bounds.width <= 1 &&
+    bounds.y + bounds.height <= 1
   );
 }
 

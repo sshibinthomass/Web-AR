@@ -20,6 +20,7 @@ function createEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
     MODAL_OPENAI_TO_3D_START_URL: 'https://modal.example/openai-start',
     MODAL_OPENAI_TO_3D_RESULT_URL: 'https://modal.example/openai-result',
     MODAL_OBJECT_PREPROCESS_QUALITY_URL: 'https://modal.example/quality-preprocess',
+    MODAL_OBJECT_SEGMENTATION_URL: 'https://modal.example/segment',
     OPENAI_API_KEY: 'openai-key',
     PUBLIC_MODEL_ORIGIN: 'https://web-ar-model-assets.pages.dev',
     MODEL_BUCKET: createMemoryBucket().bucket,
@@ -306,6 +307,362 @@ describe('handleGenerateModelRequest', () => {
     expect(loginResponse.status).toBe(200);
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: 'Admin access required.' });
+  });
+
+  describe('segment-image', () => {
+    const now = () => new Date('2026-07-17T12:00:00Z');
+    const validMaskBase64 = 'iVBORw0KGgo=';
+
+    async function createSegmentationToken(env: WorkerEnv, modalFetch: typeof fetch): Promise<string> {
+      const deps = { fetch: modalFetch, now };
+      const adminToken = await createAdminToken(env, deps);
+      const token = await createApprovedUserToken(env, deps, adminToken);
+      vi.mocked(env.MODEL_BUCKET.put).mockClear();
+      return token;
+    }
+
+    function segmentImageRequest(token: string, body: unknown = {
+      image_base64: 'aGVsbG8=',
+      image_mime_type: 'image/jpeg',
+    }): Request {
+      return new Request('https://worker.example/segment-image', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+    }
+
+    it('requires an approved session before proxying segment-image requests', async () => {
+      const modalFetch = vi.fn();
+      const response = await handleGenerateModelRequest(
+        segmentImageRequest('not-a-session'),
+        createEnv(),
+        { fetch: modalFetch, now },
+      );
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: 'Login required.' });
+      expect(modalFetch).not.toHaveBeenCalled();
+    });
+
+    it('proxies a validated segment-image request and reconstructs a detected response without R2 writes', async () => {
+      const modalFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+        detected: true,
+        mask_base64: validMaskBase64,
+        mask_mime_type: 'image/png',
+        bounds: { x: 0.1, y: 0.2, width: 0.5, height: 0.6 },
+        confidence: 0.91,
+        ignored_upstream_field: 'not forwarded',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      const env = createEnv();
+      const token = await createSegmentationToken(env, modalFetch as typeof fetch);
+
+      const response = await handleGenerateModelRequest(
+        segmentImageRequest(token),
+        env,
+        { fetch: modalFetch as typeof fetch, now },
+      );
+
+      expect(response.status).toBe(200);
+      expect(modalFetch).toHaveBeenCalledWith('https://modal.example/segment', expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Modal-Key': 'modal-key',
+          'Modal-Secret': 'modal-secret',
+        },
+      }));
+      const forwardedInit = modalFetch.mock.calls[0]?.[1] as RequestInit;
+      expect(JSON.parse(String(forwardedInit.body))).toEqual({
+        image_base64: 'aGVsbG8=',
+        image_mime_type: 'image/jpeg',
+      });
+      expect(await response.json()).toEqual({
+        detected: true,
+        mask_base64: validMaskBase64,
+        mask_mime_type: 'image/png',
+        bounds: { x: 0.1, y: 0.2, width: 0.5, height: 0.6 },
+        confidence: 0.91,
+      });
+      expect(env.MODEL_BUCKET.put).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['an empty payload', ''],
+      ['non-base64 characters', 'not/base64*'],
+      ['non-canonical padding', 'aGVsbG8'],
+      ['non-canonical padding bits', 'aGVsbG9='],
+    ])('rejects %s in segment-image input', async (_description, imageBase64) => {
+      const modalFetch = vi.fn();
+      const env = createEnv();
+      const token = await createSegmentationToken(env, modalFetch as typeof fetch);
+
+      const response = await handleGenerateModelRequest(
+        segmentImageRequest(token, { image_base64: imageBase64, image_mime_type: 'image/jpeg' }),
+        env,
+        { fetch: modalFetch as typeof fetch, now },
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'Invalid segmentation image payload.' });
+      expect(modalFetch).not.toHaveBeenCalled();
+    });
+
+    it('rejects a null segment-image JSON value', async () => {
+      const modalFetch = vi.fn();
+      const env = createEnv();
+      const token = await createSegmentationToken(env, modalFetch as typeof fetch);
+
+      const response = await handleGenerateModelRequest(
+        segmentImageRequest(token, null),
+        env,
+        { fetch: modalFetch as typeof fetch, now },
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'Invalid segmentation image payload.' });
+      expect(modalFetch).not.toHaveBeenCalled();
+    });
+
+    it.each(['image/jpg', 'image/JPEG', 'image/jpeg; charset=binary']) (
+      'rejects non-exact segment-image MIME type %s',
+      async (imageMimeType) => {
+        const modalFetch = vi.fn();
+        const env = createEnv();
+        const token = await createSegmentationToken(env, modalFetch as typeof fetch);
+
+        const response = await handleGenerateModelRequest(
+          segmentImageRequest(token, { image_base64: 'aGVsbG8=', image_mime_type: imageMimeType }),
+          env,
+          { fetch: modalFetch as typeof fetch, now },
+        );
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({ error: 'Invalid segmentation image payload.' });
+        expect(modalFetch).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects segment-image input larger than 5 MiB before proxying', async () => {
+      const modalFetch = vi.fn();
+      const env = createEnv();
+      const token = await createSegmentationToken(env, modalFetch as typeof fetch);
+      const oversizedBase64 = Buffer.alloc((5 * 1024 * 1024) + 1).toString('base64');
+
+      const response = await handleGenerateModelRequest(
+        segmentImageRequest(token, { image_base64: oversizedBase64, image_mime_type: 'image/png' }),
+        env,
+        { fetch: modalFetch as typeof fetch, now },
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'Invalid segmentation image payload.' });
+      expect(modalFetch).not.toHaveBeenCalled();
+    });
+
+    it('returns a safe unavailable response when the segment-image endpoint is not configured', async () => {
+      const modalFetch = vi.fn();
+      const env = createEnv({
+        MODAL_OBJECT_SEGMENTATION_URL: '',
+        OPENAI_API_KEY: '',
+        MODAL_IMAGE_TO_3D_URL: '',
+      });
+      const token = await createSegmentationToken(env, modalFetch as typeof fetch);
+      const request = new Request('https://worker.example/segment-image', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: '{invalid-json',
+      });
+
+      const response = await handleGenerateModelRequest(request, env, { fetch: modalFetch as typeof fetch, now });
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: 'Object segmentation service is unavailable.' });
+      expect(modalFetch).not.toHaveBeenCalled();
+      expect(env.MODEL_BUCKET.put).not.toHaveBeenCalled();
+    });
+
+    it('returns an explicit detected-false segment-image response without forwarding extra fields', async () => {
+      const modalFetch = vi.fn(async () => new Response(JSON.stringify({
+        detected: false,
+        confidence: 0.42,
+        mask_base64: validMaskBase64,
+        mask_mime_type: 'image/png',
+        bounds: { x: 0, y: 0, width: 1, height: 1 },
+      })));
+      const env = createEnv();
+      const token = await createSegmentationToken(env, modalFetch as typeof fetch);
+
+      const response = await handleGenerateModelRequest(
+        segmentImageRequest(token),
+        env,
+        { fetch: modalFetch as typeof fetch, now },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ detected: false, confidence: 0.42 });
+      expect(env.MODEL_BUCKET.put).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['invalid JSON', 'not-json'],
+      ['null JSON', 'null'],
+      ['invalid confidence', JSON.stringify({ detected: false, confidence: 1.1 })],
+      ['non-PNG MIME', JSON.stringify({
+        detected: true,
+        confidence: 0.9,
+        mask_base64: validMaskBase64,
+        mask_mime_type: 'image/jpeg',
+        bounds: { x: 0, y: 0, width: 1, height: 1 },
+      })],
+      ['invalid mask base64', JSON.stringify({
+        detected: true,
+        confidence: 0.9,
+        mask_base64: '***',
+        mask_mime_type: 'image/png',
+        bounds: { x: 0, y: 0, width: 1, height: 1 },
+      })],
+      ['missing PNG signature', JSON.stringify({
+        detected: true,
+        confidence: 0.9,
+        mask_base64: 'bWFzaw==',
+        mask_mime_type: 'image/png',
+        bounds: { x: 0, y: 0, width: 1, height: 1 },
+      })],
+      ['non-positive bounds', JSON.stringify({
+        detected: true,
+        confidence: 0.9,
+        mask_base64: validMaskBase64,
+        mask_mime_type: 'image/png',
+        bounds: { x: 0, y: 0, width: 0, height: 1 },
+      })],
+      ['out-of-range bounds', JSON.stringify({
+        detected: true,
+        confidence: 0.9,
+        mask_base64: validMaskBase64,
+        mask_mime_type: 'image/png',
+        bounds: { x: 0.6, y: 0, width: 0.5, height: 1 },
+      })],
+    ])('returns a sanitized 502 for malformed segment-image success: %s', async (_description, responseBody) => {
+      const modalFetch = vi.fn(async () => new Response(responseBody));
+      const env = createEnv();
+      const token = await createSegmentationToken(env, modalFetch as typeof fetch);
+
+      const response = await handleGenerateModelRequest(
+        segmentImageRequest(token),
+        env,
+        { fetch: modalFetch as typeof fetch, now },
+      );
+
+      expect(response.status).toBe(502);
+      expect(await response.json()).toEqual({ error: 'Object segmentation service returned an invalid response.' });
+    });
+
+    it('returns a sanitized 502 for a non-success segment-image upstream response', async () => {
+      const modalFetch = vi.fn(async () => new Response('upstream secret details', { status: 500 }));
+      const env = createEnv();
+      const token = await createSegmentationToken(env, modalFetch as typeof fetch);
+
+      const response = await handleGenerateModelRequest(
+        segmentImageRequest(token),
+        env,
+        { fetch: modalFetch as typeof fetch, now },
+      );
+
+      expect(response.status).toBe(502);
+      expect(await response.json()).toEqual({ error: 'Object segmentation service request failed.' });
+    });
+
+    it('returns a sanitized 502 when the segment-image upstream request fails', async () => {
+      const modalFetch = vi.fn(async () => {
+        throw new Error('network secret details');
+      });
+      const env = createEnv();
+      const token = await createSegmentationToken(env, modalFetch as typeof fetch);
+
+      const response = await handleGenerateModelRequest(
+        segmentImageRequest(token),
+        env,
+        { fetch: modalFetch as typeof fetch, now },
+      );
+
+      expect(response.status).toBe(502);
+      expect(await response.json()).toEqual({ error: 'Object segmentation service request failed.' });
+    });
+
+    it('aborts segment-image proxy requests after 60 seconds and returns 504', async () => {
+      const env = createEnv();
+      const setupFetch = vi.fn();
+      const token = await createSegmentationToken(env, setupFetch as typeof fetch);
+      let notifyFetchStarted: (() => void) | undefined;
+      const fetchStarted = new Promise<void>((resolve) => {
+        notifyFetchStarted = resolve;
+      });
+      const modalFetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        notifyFetchStarted?.();
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      }));
+
+      vi.useFakeTimers();
+      try {
+        const responsePromise = handleGenerateModelRequest(
+          segmentImageRequest(token),
+          env,
+          { fetch: modalFetch as typeof fetch, now },
+        );
+        await fetchStarted;
+        await vi.advanceTimersByTimeAsync(60_000);
+        const response = await responsePromise;
+
+        expect(response.status).toBe(504);
+        expect(await response.json()).toEqual({ error: 'Object segmentation service timed out.' });
+        expect(modalFetch).toHaveBeenCalledWith('https://modal.example/segment', expect.objectContaining({
+          signal: expect.any(AbortSignal),
+        }));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps the segment-image timeout active while reading the upstream response body', async () => {
+      const env = createEnv();
+      const setupFetch = vi.fn();
+      const token = await createSegmentationToken(env, setupFetch as typeof fetch);
+      let notifyBodyReadStarted: (() => void) | undefined;
+      const bodyReadStarted = new Promise<void>((resolve) => {
+        notifyBodyReadStarted = resolve;
+      });
+      const modalFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            notifyBodyReadStarted?.();
+            init?.signal?.addEventListener('abort', () => {
+              controller.error(new DOMException('aborted', 'AbortError'));
+            });
+          },
+        }),
+      ));
+
+      vi.useFakeTimers();
+      try {
+        const responsePromise = handleGenerateModelRequest(
+          segmentImageRequest(token),
+          env,
+          { fetch: modalFetch as typeof fetch, now },
+        );
+        await bodyReadStarted;
+        await vi.advanceTimersByTimeAsync(60_000);
+        const response = await responsePromise;
+
+        expect(response.status).toBe(504);
+        expect(await response.json()).toEqual({ error: 'Object segmentation service timed out.' });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('creates the requested admin account as active and returns a reusable session', async () => {
