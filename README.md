@@ -114,4 +114,28 @@ npm run worker:deploy
 
 After deployment, set the web app's `VITE_GENERATE_MODEL_API_URL` to the deployed Worker `/generate-3d` URL before building the app.
 
+## Automatic Photo-to-AR Object Reconstruction
+
+Photo to AR and AI Photo to AR can optionally segment the primary captured object for a decorative reconstruction transition. It uses the pinned `ZhengPeng7/BiRefNet_lite` model revision `7838f1c3472f827cd8ce13ab5ccc2ce48077360f`. Enable the browser integration only with the exact frontend flag:
+
+```text
+VITE_OBJECT_SEGMENTATION_ENABLED=true
+```
+
+The Worker requires `MODAL_OBJECT_SEGMENTATION_URL` to contain the deployed, proxy-authenticated Modal endpoint. Nothing for this segmentation feature is currently deployed: populate that variable from the Modal deployment output before deploying the Worker. Keep Modal proxy authentication credentials in Worker secrets; set `MODAL_KEY` and `MODAL_SECRET` interactively, never in source control or browser configuration.
+
+Segmentation data is transient and in memory only. The source photo and returned mask are not persisted to R2. The client accepts a mask only at confidence `0.65` or higher; low-confidence, unavailable, or invalid results safely fall back to the ordinary captured preview without a full-frame effect.
+
+Deploy only after separately authorizing the external deployment:
+
+```powershell
+cd D:\Github-Projects\Modal-Apps
+uv run modal deploy llm-hosting/object-segmentation-birefnet-lite.py
+
+cd D:\Github-Projects\Web-AR
+npx wrangler secret put MODAL_KEY
+npx wrangler secret put MODAL_SECRET
+npx wrangler deploy
+```
+
 If `adb` is not recognized, install Android Platform Tools and add that folder to `PATH`, then open a new PowerShell session.
