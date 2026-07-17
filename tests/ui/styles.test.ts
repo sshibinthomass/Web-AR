@@ -118,6 +118,15 @@ describe('application design system', () => {
     }
   });
 
+  it('keeps the immersive exit action at least 44px tall', () => {
+    const declarations = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((match) => match[1].split(',').some((part) => part.trim() === '.immersive-exit'))
+      .map((match) => match[2])
+      .join('\n');
+
+    expect(declarations).toContain('min-height: 44px;');
+  });
+
   it('uses canonical palette tokens for visible standard-workspace descendants', () => {
     const contracts = [
       ['.account-menu-email', 'color: var(--color-context-slate);'],
@@ -248,6 +257,11 @@ describe('application design system', () => {
       '.model-preview-panel,\n.model-edit-panel,\n.confirmation-panel {',
     );
     expect(styles).toContain('.confirmation-actions {');
+  });
+
+  it('elevates the modal host above the shared header while a dialog is open', () => {
+    const selector = '.model-manager:has(> .model-preview:not(.hidden), > .model-edit-dialog, > .confirmation-dialog)';
+    expect(styles).toContain(`${selector} {\n  z-index: 100;`);
   });
 
   it('separates immersive inspector, model rail, and actions across viewports', () => {

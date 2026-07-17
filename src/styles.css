@@ -456,7 +456,7 @@ h3 {
 
 .route-back,
 .immersive-exit {
-  min-height: 40px;
+  min-height: 44px;
 }
 
 .mobile-top-bar {
@@ -5148,6 +5148,10 @@ h3 {
 }
 
 /* Accessible modal layer */
+.model-manager:has(> .model-preview:not(.hidden), > .model-edit-dialog, > .confirmation-dialog) {
+  z-index: 100;
+}
+
 .model-preview,
 .model-edit-dialog,
 .confirmation-dialog {
