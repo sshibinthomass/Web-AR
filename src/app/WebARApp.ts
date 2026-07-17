@@ -88,6 +88,7 @@ export class WebARApp {
   private capturedImage: CapturedImage | null = null;
   private capturedImageGenerationPipeline: GenerationPipeline = 'openai-to-3d';
   private capturedImagePreviewUrl: string | null = null;
+  private capturedMediaOperationEpoch = 0;
   private objectSegmentationController: AbortController | null = null;
   private objectSegmentationToken = 0;
   private speechRecordingSession: AudioRecordingSession | null = null;
@@ -527,6 +528,7 @@ export class WebARApp {
   }
 
   private async startCamera(): Promise<void> {
+    const mediaOperationEpoch = this.beginCapturedMediaOperation();
     this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction();
     const preview = this.hud?.cameraPreviewVideo;
@@ -535,17 +537,28 @@ export class WebARApp {
     }
 
     try {
-      stopCameraPreview(this.cameraStream);
-      this.clearCapturedImagePreview();
-      this.cameraStream = await startCameraPreview(preview);
+      const previousStream = this.cameraStream;
+      this.cameraStream = null;
+      stopCameraPreview(previousStream);
+      this.clearCapturedImagePreview(false);
+      const cameraStream = await startCameraPreview(preview);
+      if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+        stopCameraPreview(cameraStream);
+        return;
+      }
+      this.cameraStream = cameraStream;
       this.hud?.updateCameraStatus('Camera ready. Capture one object when the frame is clear.', false);
     } catch (error) {
+      if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : 'Camera permission was not granted.';
       this.hud?.updateCameraStatus(`Camera unavailable: ${message}`, false);
     }
   }
 
   private async captureImage(route: CameraCaptureRoute): Promise<void> {
+    const mediaOperationEpoch = this.beginCapturedMediaOperation();
     this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction();
     const preview = this.hud?.cameraPreviewVideo;
@@ -555,11 +568,14 @@ export class WebARApp {
 
     try {
       const capturedImage = await captureVideoFrame(preview);
+      if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+        return;
+      }
       this.capturedImage = capturedImage;
       this.capturedImageGenerationPipeline = 'openai-to-3d';
       stopCameraPreview(this.cameraStream);
       this.cameraStream = null;
-      this.setCapturedImagePreview(capturedImage.blob);
+      this.setCapturedImagePreview(capturedImage.blob, mediaOperationEpoch);
       if (
         import.meta.env.VITE_OBJECT_SEGMENTATION_ENABLED === 'true'
         && isPhotoToARRoute(route)
@@ -567,6 +583,9 @@ export class WebARApp {
         void this.segmentCapturedObject(capturedImage);
       }
     } catch (error) {
+      if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : 'Could not capture image.';
       this.hud?.updateCameraStatus(`Capture failed: ${message}`, false);
     }
@@ -602,7 +621,6 @@ export class WebARApp {
         || result.confidence < OBJECT_SEGMENTATION_CONFIDENCE_THRESHOLD
       ) {
         this.hud?.showObjectSegmentationFallback();
-        this.objectSegmentationController = null;
         return;
       }
 
@@ -613,14 +631,23 @@ export class WebARApp {
       if (!this.isCurrentObjectSegmentation(token, controller, capturedImage)) {
         return;
       }
-      this.objectSegmentationController = null;
     } catch (error) {
-      if (isAbortError(error) || !this.isCurrentObjectSegmentation(token, controller, capturedImage)) {
+      if (!this.ownsCurrentObjectSegmentation(token, controller, capturedImage)) {
+        return;
+      }
+      if (isAbortError(error) || controller.signal.aborted) {
+        this.hud?.showObjectSegmentationFallback();
         return;
       }
       console.warn('Object segmentation failed; showing the original capture.');
       this.hud?.showObjectSegmentationFallback();
-      this.objectSegmentationController = null;
+    } finally {
+      if (
+        this.objectSegmentationToken === token
+        && this.objectSegmentationController === controller
+      ) {
+        this.objectSegmentationController = null;
+      }
     }
   }
 
@@ -629,16 +656,33 @@ export class WebARApp {
     controller: AbortController,
     capturedImage: CapturedImage,
   ): boolean {
+    return this.ownsCurrentObjectSegmentation(token, controller, capturedImage)
+      && !controller.signal.aborted;
+  }
+
+  private ownsCurrentObjectSegmentation(
+    token: number,
+    controller: AbortController,
+    capturedImage: CapturedImage,
+  ): boolean {
     return this.objectSegmentationToken === token
       && this.objectSegmentationController === controller
-      && this.capturedImage === capturedImage
-      && !controller.signal.aborted;
+      && this.capturedImage === capturedImage;
   }
 
   private cancelObjectSegmentation(): void {
     this.objectSegmentationToken += 1;
     this.objectSegmentationController?.abort();
     this.objectSegmentationController = null;
+  }
+
+  private beginCapturedMediaOperation(): number {
+    this.capturedMediaOperationEpoch += 1;
+    return this.capturedMediaOperationEpoch;
+  }
+
+  private isCurrentCapturedMediaOperation(epoch: number): boolean {
+    return this.capturedMediaOperationEpoch === epoch;
   }
 
   private async generateModel(targetObject: string): Promise<void> {
@@ -652,6 +696,8 @@ export class WebARApp {
       return;
     }
 
+    const mediaOperationEpoch = this.beginCapturedMediaOperation();
+    const capturedImage = this.capturedImage;
     this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction();
     this.hud?.updateCameraStatus('Starting background generation...', false);
@@ -659,15 +705,18 @@ export class WebARApp {
     try {
       const job = await startGeneratedModelJob({
         apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
-        imageBase64: this.capturedImage.imageBase64,
-        imageMimeType: this.capturedImage.imageMimeType,
+        imageBase64: capturedImage.imageBase64,
+        imageMimeType: capturedImage.imageMimeType,
         targetObject,
         generationPipeline: this.capturedImageGenerationPipeline,
         authToken,
       });
+      if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+        return;
+      }
       this.capturedImage = null;
       this.capturedImageGenerationPipeline = 'openai-to-3d';
-      this.clearCapturedImagePreview();
+      this.clearCapturedImagePreview(false);
       this.hud?.updateGeneratedModelSource(`${job.label} (generating in background)`);
       this.hud?.updateCameraStatus(
         `Generation started: ${job.label}. You can close the app; it will appear in the Model dropdown when ready.`,
@@ -675,6 +724,9 @@ export class WebARApp {
       );
       void this.refreshGeneratedModels();
     } catch (error) {
+      if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : 'Unknown generation error.';
       this.hud?.updateCameraStatus(`Generation failed: ${message}`, true);
     }
@@ -691,6 +743,8 @@ export class WebARApp {
       return;
     }
 
+    const mediaOperationEpoch = this.beginCapturedMediaOperation();
+    const capturedImage = this.capturedImage;
     this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction();
     this.hud?.updateCameraStatus('Submitting image to GPT for object extraction...', false);
@@ -698,11 +752,14 @@ export class WebARApp {
     try {
       const extractedImage = await extractImageFor3D({
         apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
-        imageBase64: this.capturedImage.imageBase64,
-        imageMimeType: this.capturedImage.imageMimeType,
+        imageBase64: capturedImage.imageBase64,
+        imageMimeType: capturedImage.imageMimeType,
         targetObject,
         authToken,
       });
+      if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+        return;
+      }
       const blob = base64ToBlob(extractedImage.imageBase64, extractedImage.imageMimeType);
       this.capturedImage = {
         imageBase64: extractedImage.imageBase64,
@@ -710,8 +767,11 @@ export class WebARApp {
         blob,
       };
       this.capturedImageGenerationPipeline = 'trellis';
-      this.setExtractedImagePreview(blob);
+      this.setExtractedImagePreview(blob, mediaOperationEpoch);
     } catch (error) {
+      if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : 'GPT extraction failed.';
       this.hud?.updateCameraStatus(`GPT extraction failed: ${message}`, true);
     }
@@ -728,6 +788,7 @@ export class WebARApp {
       return;
     }
 
+    this.beginCapturedMediaOperation();
     this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction();
     try {
@@ -735,7 +796,7 @@ export class WebARApp {
       const generationPipeline = this.capturedImageGenerationPipeline;
       this.capturedImage = null;
       this.capturedImageGenerationPipeline = 'openai-to-3d';
-      this.clearCapturedImagePreview();
+      this.clearCapturedImagePreview(false);
       this.hud?.showFullFlowLoading('Building your 3D object in Modal. Keep this page open.');
 
       const generatedModel = await generateModelFromImage({
@@ -776,13 +837,14 @@ export class WebARApp {
       return;
     }
 
+    this.beginCapturedMediaOperation();
     this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction();
     try {
       const capturedImage = this.capturedImage;
       this.capturedImage = null;
       this.capturedImageGenerationPipeline = 'openai-to-3d';
-      this.clearCapturedImagePreview();
+      this.clearCapturedImagePreview(false);
       this.hud?.showFullFlowLoading('Generating a dynamic image, then building your 3D object in Modal. Keep this page open.');
 
       const generatedModel = await generateModelFromImage({
@@ -866,6 +928,7 @@ export class WebARApp {
       return;
     }
 
+    this.beginCapturedMediaOperation();
     this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction?.();
     const recordedAudio = this.speechAudio;
@@ -900,6 +963,7 @@ export class WebARApp {
       return;
     }
 
+    this.beginCapturedMediaOperation();
     this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction?.();
     this.hud?.showSpeechDetecting(normalizedText);
@@ -1009,6 +1073,7 @@ export class WebARApp {
   }
 
   private async resetTransientExperience(): Promise<void> {
+    this.beginCapturedMediaOperation();
     this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction();
     stopCameraPreview(this.cameraStream);
@@ -1022,7 +1087,7 @@ export class WebARApp {
     this.pendingUploadModelFile = null;
     this.layoutMode = false;
     this.layoutSceneManager?.clear();
-    this.clearCapturedImagePreview();
+    this.clearCapturedImagePreview(false);
     this.closeModelPreview();
 
     const session = this.sceneContext?.renderer.xr.getSession();
@@ -1198,16 +1263,24 @@ export class WebARApp {
   }
 
   private async uploadImage(file: File): Promise<void> {
+    const mediaOperationEpoch = this.beginCapturedMediaOperation();
     this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction();
     try {
       stopCameraPreview(this.cameraStream);
       this.cameraStream = null;
       this.hud?.updateCameraStatus('Preparing uploaded image...', false);
-      this.capturedImage = await imageFileToCapturedImage(file);
+      const capturedImage = await imageFileToCapturedImage(file);
+      if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+        return;
+      }
+      this.capturedImage = capturedImage;
       this.capturedImageGenerationPipeline = 'openai-to-3d';
-      this.setUploadedImagePreview(this.capturedImage.blob);
+      this.setUploadedImagePreview(capturedImage.blob, mediaOperationEpoch);
     } catch (error) {
+      if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : 'Could not prepare uploaded image.';
       this.hud?.updateCameraStatus(`Upload failed: ${message}`, false);
     }
@@ -1298,25 +1371,43 @@ export class WebARApp {
     }
   }
 
-  private setCapturedImagePreview(blob: Blob): void {
-    this.clearCapturedImagePreview();
+  private setCapturedImagePreview(blob: Blob, mediaOperationEpoch?: number): void {
+    if (mediaOperationEpoch === undefined) {
+      this.beginCapturedMediaOperation();
+    } else if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+      return;
+    }
+    this.clearCapturedImagePreview(false);
     this.capturedImagePreviewUrl = URL.createObjectURL(blob);
     this.hud?.showCapturedImagePreview(this.capturedImagePreviewUrl);
   }
 
-  private setExtractedImagePreview(blob: Blob): void {
-    this.clearCapturedImagePreview();
+  private setExtractedImagePreview(blob: Blob, mediaOperationEpoch?: number): void {
+    if (mediaOperationEpoch === undefined) {
+      this.beginCapturedMediaOperation();
+    } else if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+      return;
+    }
+    this.clearCapturedImagePreview(false);
     this.capturedImagePreviewUrl = URL.createObjectURL(blob);
     this.hud?.showExtractedImageReady(this.capturedImagePreviewUrl);
   }
 
-  private setUploadedImagePreview(blob: Blob): void {
-    this.clearCapturedImagePreview();
+  private setUploadedImagePreview(blob: Blob, mediaOperationEpoch?: number): void {
+    if (mediaOperationEpoch === undefined) {
+      this.beginCapturedMediaOperation();
+    } else if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
+      return;
+    }
+    this.clearCapturedImagePreview(false);
     this.capturedImagePreviewUrl = URL.createObjectURL(blob);
     this.hud?.showUploadedImagePreview(this.capturedImagePreviewUrl);
   }
 
-  private clearCapturedImagePreview(): void {
+  private clearCapturedImagePreview(invalidateMediaOperation = true): void {
+    if (invalidateMediaOperation) {
+      this.beginCapturedMediaOperation();
+    }
     this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction();
     if (this.capturedImagePreviewUrl) {

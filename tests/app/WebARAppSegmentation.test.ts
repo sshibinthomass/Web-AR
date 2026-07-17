@@ -132,6 +132,10 @@ function capturedImage(label = 'original'): CapturedImageFixture {
   };
 }
 
+function mediaStream(label: string): MediaStream {
+  return { label, getTracks: () => [] } as unknown as MediaStream;
+}
+
 function createHud(): HudFixture {
   return {
     cameraPreviewVideo: document.createElement('video'),
@@ -275,6 +279,186 @@ describe('WebARApp object segmentation orchestration', () => {
     expect(app.hud.showObjectSegmentationPending).not.toHaveBeenCalled();
   });
 
+  it('keeps the second capture when two captures resolve in reverse order', async () => {
+    const firstCapture = deferred<CapturedImageFixture>();
+    const secondCapture = deferred<CapturedImageFixture>();
+    const firstImage = capturedImage('first');
+    const secondImage = capturedImage('second');
+    dependencies.captureVideoFrame
+      .mockReturnValueOnce(firstCapture.promise)
+      .mockReturnValueOnce(secondCapture.promise);
+    const app = createApp();
+
+    const firstOperation = app.captureImage('full-flow');
+    const secondOperation = app.captureImage('dynamic');
+    secondCapture.resolve(secondImage);
+    await secondOperation;
+    firstCapture.resolve(firstImage);
+    await firstOperation;
+
+    expect(app.capturedImage).toBe(secondImage);
+    expect(app.hud.showCapturedImagePreview).toHaveBeenCalledOnce();
+    expect(dependencies.prepareSegmentationImage).toHaveBeenCalledOnce();
+    expect(dependencies.prepareSegmentationImage.mock.calls[0][0]).toBe(secondImage.blob);
+  });
+
+  it('ignores a capture that resolves after transient route reset', async () => {
+    const pendingCapture = deferred<CapturedImageFixture>();
+    dependencies.captureVideoFrame.mockReturnValueOnce(pendingCapture.promise);
+    const app = createApp();
+
+    const captureOperation = app.captureImage('full-flow');
+    await app.resetTransientExperience();
+    pendingCapture.resolve(capturedImage('stale-after-reset'));
+    await captureOperation;
+
+    expect(app.capturedImage).toBeNull();
+    expect(app.hud.showCapturedImagePreview).not.toHaveBeenCalled();
+    expect(dependencies.prepareSegmentationImage).not.toHaveBeenCalled();
+  });
+
+  it('silently ignores a stale capture rejection', async () => {
+    const pendingCapture = deferred<CapturedImageFixture>();
+    dependencies.captureVideoFrame.mockReturnValueOnce(pendingCapture.promise);
+    const app = createApp();
+
+    const captureOperation = app.captureImage('full-flow');
+    app.clearCapturedImagePreview();
+    pendingCapture.reject(new Error('late camera failure'));
+    await captureOperation;
+
+    expect(app.hud.updateCameraStatus).not.toHaveBeenCalledWith(
+      expect.stringContaining('late camera failure'),
+      expect.anything(),
+    );
+  });
+
+  it('invalidates a pending capture when live camera restart begins', async () => {
+    const pendingCapture = deferred<CapturedImageFixture>();
+    dependencies.captureVideoFrame.mockReturnValueOnce(pendingCapture.promise);
+    const app = createApp();
+
+    const captureOperation = app.captureImage('full-flow');
+    await app.startCamera();
+    pendingCapture.resolve(capturedImage('stale-after-restart'));
+    await captureOperation;
+
+    expect(app.capturedImage).toBeNull();
+    expect(app.hud.showCapturedImagePreview).not.toHaveBeenCalled();
+  });
+
+  it('does not let a pending capture overwrite a newer upload', async () => {
+    const pendingCapture = deferred<CapturedImageFixture>();
+    const uploadedImage = capturedImage('uploaded-newer');
+    dependencies.captureVideoFrame.mockReturnValueOnce(pendingCapture.promise);
+    dependencies.imageFileToCapturedImage.mockResolvedValueOnce(uploadedImage);
+    const app = createApp();
+
+    const captureOperation = app.captureImage('full-flow');
+    await app.uploadImage(new File(['upload'], 'newer.png', { type: 'image/png' }));
+    pendingCapture.resolve(capturedImage('stale-after-upload'));
+    await captureOperation;
+
+    expect(app.capturedImage).toBe(uploadedImage);
+    expect(app.hud.showUploadedImagePreview).toHaveBeenCalledOnce();
+    expect(app.hud.showCapturedImagePreview).not.toHaveBeenCalled();
+  });
+
+  it('does not resurrect a pending capture after generation starts', async () => {
+    const pendingCapture = deferred<CapturedImageFixture>();
+    dependencies.captureVideoFrame.mockReturnValueOnce(pendingCapture.promise);
+    const app = createApp();
+    app.capturedImage = capturedImage('generation-input');
+
+    const captureOperation = app.captureImage('full-flow');
+    await app.generateModel('chair');
+    pendingCapture.resolve(capturedImage('stale-after-generation'));
+    await captureOperation;
+
+    expect(app.capturedImage).toBeNull();
+    expect(app.hud.showCapturedImagePreview).not.toHaveBeenCalled();
+  });
+
+  it('stops a camera stream returned after route reset while permission was pending', async () => {
+    const pendingStart = deferred<MediaStream>();
+    const existingStream = mediaStream('existing');
+    const staleStream = mediaStream('stale-after-route-reset');
+    dependencies.startCameraPreview.mockReturnValueOnce(pendingStart.promise);
+    const app = createApp();
+    app.cameraStream = existingStream;
+
+    const startOperation = app.startCamera();
+    await app.resetTransientExperience();
+    pendingStart.resolve(staleStream);
+    await startOperation;
+
+    expect(dependencies.stopCameraPreview).toHaveBeenCalledWith(staleStream);
+    expect(app.cameraStream).toBeNull();
+    expect(app.hud.updateCameraStatus).not.toHaveBeenCalledWith(
+      expect.stringContaining('Camera ready'),
+      expect.anything(),
+    );
+  });
+
+  it('stops a pending camera-start stream when capture finishes first', async () => {
+    const pendingStart = deferred<MediaStream>();
+    const staleStream = mediaStream('stale-after-capture');
+    const currentCapture = capturedImage('capture-wins');
+    dependencies.startCameraPreview.mockReturnValueOnce(pendingStart.promise);
+    dependencies.captureVideoFrame.mockResolvedValueOnce(currentCapture);
+    const app = createApp();
+
+    const startOperation = app.startCamera();
+    await app.captureImage('camera');
+    pendingStart.resolve(staleStream);
+    await startOperation;
+
+    expect(dependencies.stopCameraPreview).toHaveBeenCalledWith(staleStream);
+    expect(app.cameraStream).toBeNull();
+    expect(app.capturedImage).toBe(currentCapture);
+  });
+
+  it('keeps the newest camera start when two permission requests resolve in reverse order', async () => {
+    const firstStart = deferred<MediaStream>();
+    const secondStart = deferred<MediaStream>();
+    const existingStream = mediaStream('existing');
+    const firstStream = mediaStream('first-stale');
+    const secondStream = mediaStream('second-current');
+    dependencies.startCameraPreview
+      .mockReturnValueOnce(firstStart.promise)
+      .mockReturnValueOnce(secondStart.promise);
+    const app = createApp();
+    app.cameraStream = existingStream;
+
+    const firstOperation = app.startCamera();
+    const secondOperation = app.startCamera();
+    secondStart.resolve(secondStream);
+    await secondOperation;
+    firstStart.resolve(firstStream);
+    await firstOperation;
+
+    expect(app.cameraStream).toBe(secondStream);
+    expect(dependencies.stopCameraPreview).toHaveBeenCalledWith(existingStream);
+    expect(dependencies.stopCameraPreview.mock.calls.filter(([stream]) => stream === existingStream)).toHaveLength(1);
+    expect(dependencies.stopCameraPreview).toHaveBeenCalledWith(firstStream);
+    expect(dependencies.stopCameraPreview).not.toHaveBeenCalledWith(secondStream);
+    expect(app.hud.updateCameraStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let an upload resolve after reset and resurrect captured media', async () => {
+    const pendingUpload = deferred<CapturedImageFixture>();
+    dependencies.imageFileToCapturedImage.mockReturnValueOnce(pendingUpload.promise);
+    const app = createApp();
+
+    const uploadOperation = app.uploadImage(new File(['upload'], 'chair.png', { type: 'image/png' }));
+    await app.resetTransientExperience();
+    pendingUpload.resolve(capturedImage('stale-upload'));
+    await uploadOperation;
+
+    expect(app.capturedImage).toBeNull();
+    expect(app.hud.showUploadedImagePreview).not.toHaveBeenCalled();
+  });
+
   it('requests segmentation with the compressed payload, Worker URL, current auth, and abort signal', async () => {
     const app = createApp();
     const original = capturedImage();
@@ -380,15 +564,41 @@ describe('WebARApp object segmentation orchestration', () => {
     expect(warningText).not.toContain('bearer-secret');
   });
 
-  it('treats AbortError as silent cancellation', async () => {
+  it('cleans up a current AbortError without warning or leaving the HUD pending', async () => {
     dependencies.segmentObject.mockRejectedValueOnce(new DOMException('Aborted', 'AbortError'));
     const app = createApp();
 
     await app.captureImage('full-flow');
     await waitForSegmentationRequest();
+    await vi.waitFor(() => expect(app.hud.showObjectSegmentationFallback).toHaveBeenCalledOnce());
+
+    expect(app.objectSegmentationController).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('keeps caller-cancelled AbortError cleanup from overwriting the newer capture state', async () => {
+    const oldRequest = deferred<never>();
+    dependencies.captureVideoFrame
+      .mockResolvedValueOnce(capturedImage('first'))
+      .mockResolvedValueOnce(capturedImage('second'));
+    dependencies.segmentObject
+      .mockReturnValueOnce(oldRequest.promise)
+      .mockResolvedValueOnce({ detected: false, confidence: 0.2 });
+    const app = createApp();
+
+    await app.captureImage('full-flow');
+    await waitForSegmentationRequest();
+    await app.captureImage('dynamic');
+    await vi.waitFor(() => expect(app.hud.showObjectSegmentationFallback).toHaveBeenCalledOnce());
+    const fallbackCalls = app.hud.showObjectSegmentationFallback.mock.calls.length;
+    const clearCalls = app.hud.clearObjectReconstruction.mock.calls.length;
+
+    oldRequest.reject(new DOMException('Aborted', 'AbortError'));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(app.hud.showObjectSegmentationFallback).not.toHaveBeenCalled();
+    expect(app.hud.showObjectSegmentationFallback).toHaveBeenCalledTimes(fallbackCalls);
+    expect(app.hud.clearObjectReconstruction).toHaveBeenCalledTimes(clearCalls);
+    expect(app.capturedImage?.imageBase64).toBe('second-generation-base64');
     expect(warn).not.toHaveBeenCalled();
   });
 
