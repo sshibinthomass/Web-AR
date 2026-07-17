@@ -95,9 +95,11 @@ Add `MODAL_OBJECT_SEGMENTATION_URL` as a Worker environment variable. Modal cred
 
 ### 5.3 Modal segmentation service
 
-Deploy a dedicated Modal function using an automatic foreground-segmentation model suitable for commercial use. Final model selection is made during implementation by benchmarking candidate models against representative product, furniture, vehicle, and cluttered-background photos; the selected model and license are documented with the service.
+Deploy a dedicated Modal function in `D:\Github-Projects\Modal-Apps\llm-hosting\object-segmentation-birefnet-lite.py`. It follows the hosting, cache-volume, proxy-authentication, T4 GPU, local-entrypoint, and warm-container conventions already used by `rmbg-2-0.py` in that repository.
 
-The container preloads the model, decodes the supplied image, applies EXIF orientation, converts it to RGB, and limits inference resolution while preserving aspect ratio. It then:
+The service uses the official `ZhengPeng7/BiRefNet_lite` checkpoint. This is the 44.4-million-parameter, Swin-T-backed BiRefNet variant released under the MIT license. The production image pins the exact Hugging Face model revision, loads safetensors at container startup, runs inference in FP16 on a Modal T4, and uses a `1024 x 1024` inference tensor. The full-size BiRefNet and 2K lite checkpoint are excluded because this transition favors response time and container size over high-resolution matting detail.
+
+The container preloads the model, decodes the supplied image, applies EXIF orientation, converts it to RGB, and prepares the documented `1024 x 1024` normalized input. It then:
 
 1. produces foreground probability data;
 2. thresholds the probability map;
@@ -110,6 +112,8 @@ The container preloads the model, decodes the supplied image, applies EXIF orien
 9. calculates normalized object bounds and aggregate confidence.
 
 The service handles one image per request and does not persist inputs or outputs.
+
+The Modal app is named `object-segmentation-birefnet-lite`. It uses the existing `hf-hub-cache` volume, `huggingface-secret`, `requires_proxy_auth=True`, `MIN_CONTAINERS = 0`, and `SCALEDOWN_WINDOW = 120` defaults. The first implementation benchmarks cold start and warm inference on T4; these container settings change only if measured user-visible latency requires a warm instance.
 
 ## 6. API Contract
 
@@ -193,7 +197,8 @@ The renderer must pause or cancel when hidden, removed, superseded, or complete.
 
 - Compress or resize the segmentation request independently of the original generation image, targeting a maximum long edge suitable for mask inference.
 - Enforce request-size limits in both the client and Worker.
-- Preload the segmentation model in the Modal container; configure warm capacity only after measuring real traffic and cold-start cost.
+- Preload pinned `ZhengPeng7/BiRefNet_lite` weights in the Modal container and cache them in the existing `hf-hub-cache` volume.
+- Start with the repository convention of zero minimum containers and a 120-second scaledown window; configure warm capacity only after measuring real traffic and cold-start cost.
 - Cap canvas backing resolution to avoid excessive memory use on high-density mobile displays.
 - Do not log image payloads, masks, or full authorization headers.
 - Do not store the source photo or returned mask in R2 for this feature.
@@ -230,6 +235,8 @@ The renderer must pause or cancel when hidden, removed, superseded, or complete.
 ### Modal service
 
 - Unit tests cover component ranking, minimum-area removal, bounds, and mask encoding.
+- A local entrypoint accepts an image path and writes both the mask and JSON metadata for manual inspection.
+- Deployment verification exercises the proxy-authenticated endpoint on a Modal T4 and records cold-start and warm-inference duration.
 - A fixed evaluation set covers centered products, off-center products, furniture, vehicles, multiple visible objects, clutter, low contrast, and no-object photos.
 - Release acceptance requires that no-object and low-confidence cases return the explicit no-object response rather than a full-frame mask.
 
