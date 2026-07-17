@@ -1,9 +1,9 @@
 {
-  "name": "web-ar-floor-placement",
+  "name": "webxrify",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Local Android WebXR app for creating, managing, and placing 3D models in AR.",
+  "description": "WebXRify by Arvenilo creates, manages, and places 3D models through browser-based AR.",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
