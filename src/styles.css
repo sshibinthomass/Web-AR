@@ -4208,6 +4208,10 @@ h3 {
     min-height: 120px;
   }
 
+  .landing-preview.webxr-aperture-stage {
+    min-height: 300px;
+  }
+
   .preview-stage {
     inset: 8px 14px 36px;
   }
@@ -4969,13 +4973,17 @@ h3 {
 
 .model-manager-row.is-generated .model-manager-badge,
 .model-manager-row.is-uploaded .model-manager-badge,
-.model-manager-row .model-manager-badge.visibility-public {
+.model-manager-row .model-manager-badge.visibility-public,
+.model-manager-row.is-generated .model-manager-badge.visibility-public,
+.model-manager-row.is-uploaded .model-manager-badge.visibility-public {
   border-color: color-mix(in srgb, var(--color-signal-mint) 70%, var(--color-border-light));
   color: var(--color-spatial-ink);
   background: var(--color-mint-wash);
 }
 
-.model-manager-row .model-manager-badge.visibility-private {
+.model-manager-row .model-manager-badge.visibility-private,
+.model-manager-row.is-generated .model-manager-badge.visibility-private,
+.model-manager-row.is-uploaded .model-manager-badge.visibility-private {
   border-color: var(--color-border-light);
   color: var(--color-context-slate);
   background: var(--color-reality-mist);
@@ -5468,6 +5476,15 @@ h3 {
   border-color: var(--color-error-light);
   color: var(--color-error-light);
   background: var(--color-spatial-surface);
+}
+
+.app-shell[data-shell="immersive"] .model-rail-item.is-selected {
+  border-color: var(--color-anchor-gold);
+  color: var(--color-interface-white);
+  background: var(--color-spatial-surface);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--color-anchor-gold) 30%, transparent),
+    0 10px 26px color-mix(in srgb, var(--color-spatial-void) 70%, transparent);
 }
 
 .app-shell[data-shell="immersive"] .model-rail {

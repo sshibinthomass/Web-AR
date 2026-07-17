@@ -8,6 +8,12 @@ const styles = readFileSync(
   'utf8',
 ).replace(/\r\n/g, '\n');
 
+const declarationsFor = (selector: string): string[] => (
+  [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((match) => match[1].split(',').some((part) => part.trim() === selector))
+    .map((match) => match[2])
+);
+
 describe('application design system', () => {
   it('defines the approved Arvenilo tokens and local font families', () => {
     for (const declaration of [
@@ -269,6 +275,61 @@ describe('application design system', () => {
     expect(styles).toContain('.immersive-actions {');
     expect(styles).toContain('.immersive-actions .rotate-control,');
     expect(styles).toContain('bottom: calc(108px + env(safe-area-inset-bottom));');
+  });
+
+  it('uses a solid Anchor Gold selected treatment for immersive model rail items', () => {
+    const selector = '.app-shell[data-shell="immersive"] .model-rail-item.is-selected';
+    const declarations = declarationsFor(selector).at(-1) ?? '';
+
+    expect(declarations).toContain('border-color: var(--color-anchor-gold);');
+    expect(declarations).toContain('background: var(--color-spatial-surface);');
+    expect(declarations).toMatch(/box-shadow:[\s\S]*var\(--color-anchor-gold\)/);
+    expect(declarations).not.toContain('gradient(');
+  });
+
+  it('keeps generated and uploaded visibility badges on the canonical palette', () => {
+    const contracts = [
+      [
+        '.model-manager-row.is-generated .model-manager-badge.visibility-public',
+        'border-color: color-mix(in srgb, var(--color-signal-mint) 70%, var(--color-border-light));',
+        'color: var(--color-spatial-ink);',
+        'background: var(--color-mint-wash);',
+      ],
+      [
+        '.model-manager-row.is-uploaded .model-manager-badge.visibility-public',
+        'border-color: color-mix(in srgb, var(--color-signal-mint) 70%, var(--color-border-light));',
+        'color: var(--color-spatial-ink);',
+        'background: var(--color-mint-wash);',
+      ],
+      [
+        '.model-manager-row.is-generated .model-manager-badge.visibility-private',
+        'border-color: var(--color-border-light);',
+        'color: var(--color-context-slate);',
+        'background: var(--color-reality-mist);',
+      ],
+      [
+        '.model-manager-row.is-uploaded .model-manager-badge.visibility-private',
+        'border-color: var(--color-border-light);',
+        'color: var(--color-context-slate);',
+        'background: var(--color-reality-mist);',
+      ],
+    ] as const;
+
+    for (const [selector, ...declarations] of contracts) {
+      const effectiveDeclarations = declarationsFor(selector).at(-1) ?? '';
+      for (const declaration of declarations) {
+        expect({ selector, effectiveDeclarations }).toMatchObject({
+          selector,
+          effectiveDeclarations: expect.stringContaining(declaration),
+        });
+      }
+    }
+  });
+
+  it('keeps the mobile WebXR aperture stage at least 300px tall', () => {
+    const declarations = declarationsFor('.landing-preview.webxr-aperture-stage').at(-1) ?? '';
+
+    expect(declarations).toContain('min-height: 300px;');
   });
 
   it('keeps mobile account, upload, and admin controls compact and aligned', () => {
