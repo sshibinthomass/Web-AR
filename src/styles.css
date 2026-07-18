@@ -744,6 +744,33 @@ h3 {
   animation: loading-spin 0.9s linear infinite;
 }
 
+.full-flow-reconstruction-stage {
+  position: relative;
+  width: min(72vw, 560px);
+  height: min(58dvh, 680px);
+  min-height: 280px;
+  overflow: hidden;
+  border-radius: var(--radius-stage);
+  background: color-mix(in srgb, var(--color-spatial-void) 8%, transparent);
+}
+
+.full-flow-reconstruction-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.full-flow-reconstruction-stage .object-reconstruction-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
 @keyframes loading-spin {
   to {
     transform: rotate(360deg);

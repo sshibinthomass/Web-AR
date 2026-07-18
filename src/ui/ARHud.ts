@@ -143,6 +143,10 @@ export class ARHud {
   private readonly cameraMediaLayer: HTMLElement;
   private readonly objectReconstructionOverlay: ObjectReconstructionOverlay;
   private readonly fullFlowLoading: HTMLElement;
+  private readonly fullFlowLoadingRing: HTMLElement;
+  private readonly fullFlowReconstructionOverlay: ObjectReconstructionOverlay;
+  private readonly fullFlowReconstructionPreview: HTMLImageElement;
+  private readonly fullFlowReconstructionStage: HTMLElement;
   private readonly modelManager: HTMLElement;
   private readonly modelSearchInput: HTMLInputElement;
   private readonly modelFilterSelect: HTMLSelectElement;
@@ -218,6 +222,12 @@ export class ARHud {
   private authResolved: boolean;
   private pendingRoute: HudRoute | null = null;
   private pendingAuthMessage: string | null = null;
+  private latestObjectReconstruction: {
+    bounds: ObjectBounds;
+    maskUrl: string;
+    sourceHeight: number;
+    sourceWidth: number;
+  } | null = null;
 
   constructor(
     root: HTMLElement,
@@ -588,9 +598,15 @@ export class ARHud {
     this.fullFlowLoading = document.createElement('section');
     this.fullFlowLoading.className = 'full-flow-loading hidden';
     this.fullFlowLoading.innerHTML = `
+      <div class="full-flow-reconstruction-stage hidden" aria-hidden="true">
+        <img class="full-flow-reconstruction-preview" alt="">
+      </div>
       <div class="loading-ring" aria-hidden="true"></div>
       <p>Building your 3D object in Modal...</p>
     `;
+    this.fullFlowReconstructionStage = this.fullFlowLoading.querySelector<HTMLElement>('.full-flow-reconstruction-stage')!;
+    this.fullFlowReconstructionPreview = this.fullFlowLoading.querySelector<HTMLImageElement>('.full-flow-reconstruction-preview')!;
+    this.fullFlowLoadingRing = this.fullFlowLoading.querySelector<HTMLElement>('.loading-ring')!;
     this.statusPanel.appendChild(this.fullFlowLoading);
 
     const modelPicker = document.createElement('label');
@@ -652,6 +668,10 @@ export class ARHud {
     this.objectReconstructionOverlay = new ObjectReconstructionOverlay(
       this.cameraMediaLayer,
       this.cameraPreviewImage,
+    );
+    this.fullFlowReconstructionOverlay = new ObjectReconstructionOverlay(
+      this.fullFlowReconstructionStage,
+      this.fullFlowReconstructionPreview,
     );
     this.cameraLabel = cameraPanel.querySelector<HTMLElement>('.camera-label')!;
     this.cameraStatusMessage = cameraPanel.querySelector<HTMLElement>('.camera-status')!;
@@ -1183,6 +1203,16 @@ export class ARHud {
   playObjectReconstruction(maskUrl: string, bounds: ObjectBounds): Promise<void> {
     this.cameraMediaLayer.classList.remove('is-object-segmentation-pending');
     this.updateCameraStatus(this.capturedImageReadyMessage(), true);
+    this.latestObjectReconstruction = {
+      bounds: { ...bounds },
+      maskUrl,
+      sourceHeight: this.cameraPreviewImage.naturalHeight || this.cameraPreviewImage.height,
+      sourceWidth: this.cameraPreviewImage.naturalWidth || this.cameraPreviewImage.width,
+    };
+    if (!this.fullFlowLoading.classList.contains('hidden')) {
+      this.objectReconstructionOverlay.cancel();
+      return this.playFullFlowReconstruction();
+    }
     return this.objectReconstructionOverlay.play({ maskUrl, bounds, durationMs: 2500 });
   }
 
@@ -1196,9 +1226,16 @@ export class ARHud {
     this.objectReconstructionOverlay.cancel();
   }
 
+  discardObjectReconstruction(): void {
+    this.latestObjectReconstruction = null;
+    this.clearObjectReconstruction();
+    this.cancelFullFlowReconstruction();
+  }
+
   dispose(): void {
     this.cameraMediaLayer.classList.remove('is-object-segmentation-pending');
     this.objectReconstructionOverlay.dispose();
+    this.fullFlowReconstructionOverlay.dispose();
     this.router.dispose();
   }
 
@@ -1372,6 +1409,7 @@ export class ARHud {
 
   showFullFlowLoading(message: string): void {
     this.clearObjectReconstruction();
+    this.cancelFullFlowReconstruction();
     this.setCreationStage('generate');
     this.landing.classList.add('hidden');
     this.statusPanel.classList.remove('hidden');
@@ -1388,9 +1426,13 @@ export class ARHud {
     if (messageElement) {
       messageElement.textContent = message;
     }
+    if (this.latestObjectReconstruction) {
+      void this.playFullFlowReconstruction();
+    }
   }
 
   showFullFlowReady(message: string, modelOption?: ModelOption): void {
+    this.cancelFullFlowReconstruction();
     this.setCreationStage('place');
     this.navigateTo('ar', 'replace');
     this.arPlacementStarted = true;
@@ -1404,6 +1446,7 @@ export class ARHud {
   }
 
   showFullFlowError(message: string): void {
+    this.cancelFullFlowReconstruction();
     this.setCreationStage('generate');
     this.fullFlowLoading.classList.add('hidden');
     this.statusPanel.classList.add('camera-active');
@@ -1420,6 +1463,36 @@ export class ARHud {
 
   private navigateTo(route: HudRoute, mode: 'push' | 'replace' = 'push'): void {
     this.router.navigate(route, mode);
+  }
+
+  private playFullFlowReconstruction(): Promise<void> {
+    const reconstruction = this.latestObjectReconstruction;
+    if (!reconstruction) {
+      this.cancelFullFlowReconstruction();
+      return Promise.resolve();
+    }
+
+    this.fullFlowReconstructionPreview.src = reconstruction.maskUrl;
+    this.fullFlowReconstructionPreview.width = Math.max(1, reconstruction.sourceWidth);
+    this.fullFlowReconstructionPreview.height = Math.max(1, reconstruction.sourceHeight);
+    this.fullFlowReconstructionStage.classList.remove('hidden');
+    this.fullFlowLoadingRing.classList.add('hidden');
+    return this.fullFlowReconstructionOverlay.play({
+      maskUrl: reconstruction.maskUrl,
+      bounds: reconstruction.bounds,
+      loop: true,
+    }).catch(() => {
+      if (this.latestObjectReconstruction === reconstruction) {
+        this.fullFlowReconstructionStage.classList.add('hidden');
+        this.fullFlowLoadingRing.classList.remove('hidden');
+      }
+    });
+  }
+
+  private cancelFullFlowReconstruction(): void {
+    this.fullFlowReconstructionOverlay.cancel();
+    this.fullFlowReconstructionStage.classList.add('hidden');
+    this.fullFlowLoadingRing.classList.remove('hidden');
   }
 
   private navigateBack(): void {
@@ -1578,6 +1651,7 @@ export class ARHud {
   }
 
   private prepareRoute(route: HudRoute, previousRoute: HudRoute | null): void {
+    this.cancelFullFlowReconstruction();
     if (previousRoute && previousRoute !== route && isCameraCaptureRoute(previousRoute)) {
       this.clearObjectReconstruction();
     }

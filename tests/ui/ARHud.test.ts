@@ -137,7 +137,7 @@ describe('ARHud', () => {
     ]);
   });
 
-  it('owns one reconstruction overlay in a media layer shared by both camera previews', () => {
+  it('owns separate reconstruction overlays for capture and generation loading', () => {
     const root = document.createElement('div');
     new ARHud(root, modelOptions, createHandlers());
 
@@ -150,8 +150,13 @@ describe('ARHud', () => {
     expect(previewImage).not.toBeNull();
     expect(stage.querySelector('.upload-image-field')?.parentElement).toBe(stage);
     expect(stage.querySelector('.upload-model-field')?.parentElement).toBe(stage);
-    expect(reconstructionOverlay.construct).toHaveBeenCalledOnce();
-    expect(reconstructionOverlay.construct).toHaveBeenCalledWith(mediaLayer, previewImage);
+    expect(reconstructionOverlay.construct).toHaveBeenCalledTimes(2);
+    expect(reconstructionOverlay.construct).toHaveBeenNthCalledWith(1, mediaLayer, previewImage);
+    expect(reconstructionOverlay.construct).toHaveBeenNthCalledWith(
+      2,
+      root.querySelector('.full-flow-reconstruction-stage'),
+      root.querySelector('.full-flow-reconstruction-preview'),
+    );
   });
 
   it('shows non-blocking object segmentation and restores ready copy when playback starts', async () => {
@@ -243,21 +248,21 @@ describe('ARHud', () => {
     root.querySelector<HTMLButtonElement>('[data-nav-route="full-flow"]')?.click();
     reconstructionOverlay.cancel.mockClear();
 
-    const expectCancellation = (action: () => void) => {
+    const expectCancellation = (action: () => void, count = 1) => {
       const before = reconstructionOverlay.cancel.mock.calls.length;
       action();
-      expect(reconstructionOverlay.cancel).toHaveBeenCalledTimes(before + 1);
+      expect(reconstructionOverlay.cancel).toHaveBeenCalledTimes(before + count);
     };
 
     expectCancellation(() => hud.showLiveCameraPreview('full-flow'));
     expectCancellation(() => hud.showCapturedImagePreview('blob:first-capture'));
     expectCancellation(() => hud.showCapturedImagePreview('blob:replacement-capture'));
     expectCancellation(() => hud.showExtractedImageReady('blob:extracted-image'));
-    expectCancellation(() => hud.showFullFlowLoading('Building your 3D object in Modal...'));
-    expectCancellation(() => root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click());
+    expectCancellation(() => hud.showFullFlowLoading('Building your 3D object in Modal...'), 2);
+    expectCancellation(() => root.querySelector<HTMLButtonElement>('[data-nav-route="models"]')?.click(), 2);
 
     hud.dispose();
-    expect(reconstructionOverlay.dispose).toHaveBeenCalledOnce();
+    expect(reconstructionOverlay.dispose).toHaveBeenCalledTimes(2);
   });
 
   it('starts on a branded first screen with public and login-required actions grouped', () => {
@@ -1895,6 +1900,76 @@ describe('ARHud', () => {
     expect(root.querySelector('.camera-panel')?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(true);
     expect(root.textContent).toContain('Building your 3D object in Modal...');
+    expect(root.querySelector('.full-flow-reconstruction-stage')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.full-flow-loading .loading-ring')?.classList.contains('hidden')).toBe(false);
+  });
+
+  it('reuses the detected object as a looping reconstruction on the generation screen', async () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Photo to AR')?.click();
+    hud.showCapturedImagePreview('blob:captured-image');
+
+    await hud.playObjectReconstruction('data:image/png;base64,bWFzaw==', {
+      x: 0.1,
+      y: 0.2,
+      width: 0.5,
+      height: 0.6,
+    });
+    hud.showFullFlowLoading('Building your 3D object in Modal...');
+    await Promise.resolve();
+
+    expect(reconstructionOverlay.construct).toHaveBeenCalledTimes(2);
+    expect(reconstructionOverlay.play).toHaveBeenLastCalledWith({
+      maskUrl: 'data:image/png;base64,bWFzaw==',
+      bounds: { x: 0.1, y: 0.2, width: 0.5, height: 0.6 },
+      loop: true,
+    });
+    expect(root.querySelector('.full-flow-reconstruction-stage')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.full-flow-loading .loading-ring')?.classList.contains('hidden')).toBe(true);
+  });
+
+  it('falls back to the spinner when generation reconstruction playback fails', async () => {
+    reconstructionOverlay.play
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('loading canvas failed'));
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.showCapturedImagePreview('blob:captured-image');
+    await hud.playObjectReconstruction('data:image/png;base64,bWFzaw==', {
+      x: 0.1,
+      y: 0.2,
+      width: 0.5,
+      height: 0.6,
+    });
+
+    hud.showFullFlowLoading('Building...');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(root.querySelector('.full-flow-reconstruction-stage')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.full-flow-loading .loading-ring')?.classList.contains('hidden')).toBe(false);
+  });
+
+  it('discards cached reconstruction so a later loading state cannot reuse a stale object', async () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.showCapturedImagePreview('blob:captured-image');
+    await hud.playObjectReconstruction('data:image/png;base64,bWFzaw==', {
+      x: 0.1,
+      y: 0.2,
+      width: 0.5,
+      height: 0.6,
+    });
+    reconstructionOverlay.play.mockClear();
+
+    hud.discardObjectReconstruction();
+    hud.showFullFlowLoading('Building...');
+
+    expect(reconstructionOverlay.play).not.toHaveBeenCalled();
+    expect(root.querySelector('.full-flow-reconstruction-stage')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.full-flow-loading .loading-ring')?.classList.contains('hidden')).toBe(false);
   });
 
   it('shows placement controls after Full Flow generation returns', () => {

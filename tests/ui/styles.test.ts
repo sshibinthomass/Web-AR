@@ -290,6 +290,15 @@ describe('application design system', () => {
     expect(styles).not.toContain('.object-segmentation-spinner');
   });
 
+  it('provides a dedicated responsive canvas stage for reconstruction during generation', () => {
+    expect(styles).toContain('.full-flow-reconstruction-stage {');
+    expect(styles).toContain('width: min(72vw, 560px);');
+    expect(styles).toContain('height: min(58dvh, 680px);');
+    expect(styles).toContain('.full-flow-reconstruction-preview {');
+    expect(styles).toContain('object-fit: cover;');
+    expect(styles).toContain('.full-flow-reconstruction-stage .object-reconstruction-overlay {');
+  });
+
   it('defines explicit selection and mobile layouts for model collections', () => {
     expect(styles).toContain(
       '.ar-model-card[aria-pressed="true"],\n.model-manager-row.is-selected {',
