@@ -853,4 +853,44 @@ describe('WebARApp object segmentation orchestration', () => {
       await generation;
     },
   );
+
+  it.each([
+    ['full-flow', 'runFullFlow'],
+    ['dynamic', 'runDynamicFlow'],
+  ] as const)(
+    'ignores stale %s generation without cancelling segmentation for a newer capture',
+    async (route, method) => {
+      const oldSegmentationRequest = deferred<{ detected: false; confidence: number }>();
+      const newSegmentationRequest = deferred<{ detected: false; confidence: number }>();
+      const generationRequest = deferred<{ modelUrl: string }>();
+      dependencies.segmentObject
+        .mockReturnValueOnce(oldSegmentationRequest.promise)
+        .mockReturnValueOnce(newSegmentationRequest.promise);
+      dependencies.generateModelFromImage.mockReturnValueOnce(generationRequest.promise);
+      dependencies.captureVideoFrame
+        .mockResolvedValueOnce(capturedImage('old'))
+        .mockResolvedValueOnce(capturedImage('new'));
+      const app = createApp();
+
+      await app.captureImage(route);
+      await vi.waitFor(() => expect(dependencies.segmentObject).toHaveBeenCalledTimes(1));
+      const generation = app[method]('chair');
+      await vi.waitFor(() => expect(dependencies.generateModelFromImage).toHaveBeenCalledOnce());
+
+      await app.resetTransientExperience();
+      await app.captureImage(route);
+      await vi.waitFor(() => expect(dependencies.segmentObject).toHaveBeenCalledTimes(2));
+      const newSignal = dependencies.segmentObject.mock.calls[1][0].signal as AbortSignal;
+
+      generationRequest.resolve({ modelUrl: 'https://assets.example/stale.glb' });
+      await generation;
+
+      expect(app.loadModelFromUrl).not.toHaveBeenCalled();
+      expect(app.hud.showFullFlowReady).not.toHaveBeenCalled();
+      expect(newSignal.aborted).toBe(false);
+
+      oldSegmentationRequest.resolve({ detected: false, confidence: 0.2 });
+      newSegmentationRequest.resolve({ detected: false, confidence: 0.2 });
+    },
+  );
 });
