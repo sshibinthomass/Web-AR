@@ -1921,6 +1921,9 @@ describe('ARHud', () => {
   });
 
   it('reuses the detected object as a looping reconstruction on the generation screen', async () => {
+    reconstructionOverlay.play
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(() => new Promise<void>(() => undefined));
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());
     hud.updateAuthState(activeUser);
@@ -1961,6 +1964,32 @@ describe('ARHud', () => {
     });
 
     hud.showFullFlowLoading('Building...');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(root.querySelector('.full-flow-reconstruction-stage')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.full-flow-loading .loading-ring')?.classList.contains('hidden')).toBe(false);
+  });
+
+  it('falls back to the spinner when loop playback ends after visibility or geometry changes', async () => {
+    let finishLoadingPlayback!: () => void;
+    reconstructionOverlay.play
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(() => new Promise<void>((resolve) => {
+        finishLoadingPlayback = resolve;
+      }));
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.showCapturedImagePreview('blob:captured-image');
+    await hud.playObjectReconstruction('data:image/png;base64,bWFzaw==', {
+      x: 0.1,
+      y: 0.2,
+      width: 0.5,
+      height: 0.6,
+    });
+    hud.showFullFlowLoading('Building...');
+
+    finishLoadingPlayback();
     await Promise.resolve();
     await Promise.resolve();
 

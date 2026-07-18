@@ -228,6 +228,7 @@ export class ARHud {
     sourceHeight: number;
     sourceWidth: number;
   } | null = null;
+  private fullFlowReconstructionPlaybackToken = 0;
 
   constructor(
     root: HTMLElement,
@@ -1477,19 +1478,26 @@ export class ARHud {
     this.fullFlowReconstructionPreview.height = Math.max(1, reconstruction.sourceHeight);
     this.fullFlowReconstructionStage.classList.remove('hidden');
     this.fullFlowLoadingRing.classList.add('hidden');
+    const playbackToken = ++this.fullFlowReconstructionPlaybackToken;
+    const showFallback = () => {
+      if (
+        playbackToken === this.fullFlowReconstructionPlaybackToken
+        && this.latestObjectReconstruction === reconstruction
+        && !this.fullFlowLoading.classList.contains('hidden')
+      ) {
+        this.fullFlowReconstructionStage.classList.add('hidden');
+        this.fullFlowLoadingRing.classList.remove('hidden');
+      }
+    };
     return this.fullFlowReconstructionOverlay.play({
       maskUrl: reconstruction.maskUrl,
       bounds: reconstruction.bounds,
       loop: true,
-    }).catch(() => {
-      if (this.latestObjectReconstruction === reconstruction) {
-        this.fullFlowReconstructionStage.classList.add('hidden');
-        this.fullFlowLoadingRing.classList.remove('hidden');
-      }
-    });
+    }).then(showFallback, showFallback);
   }
 
   private cancelFullFlowReconstruction(): void {
+    this.fullFlowReconstructionPlaybackToken += 1;
     this.fullFlowReconstructionOverlay.cancel();
     this.fullFlowReconstructionStage.classList.add('hidden');
     this.fullFlowLoadingRing.classList.remove('hidden');
