@@ -1112,7 +1112,7 @@ export class WebARApp {
     this.pendingUploadModelFile = null;
     this.layoutMode = false;
     this.layoutSceneManager?.clear();
-    this.clearCapturedImagePreview(false);
+    this.clearCapturedImagePreview(false, false);
     this.closeModelPreview();
 
     const session = this.sceneContext?.renderer.xr.getSession();
