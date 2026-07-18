@@ -1652,6 +1652,7 @@ export class ARHud {
 
   private prepareRoute(route: HudRoute, previousRoute: HudRoute | null): void {
     this.cancelFullFlowReconstruction();
+    this.cameraPanel.classList.toggle('photo-to-ar-immersive', route === 'full-flow');
     if (previousRoute && previousRoute !== route && isCameraCaptureRoute(previousRoute)) {
       this.clearObjectReconstruction();
     }

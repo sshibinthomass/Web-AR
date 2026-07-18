@@ -137,6 +137,22 @@ describe('ARHud', () => {
     ]);
   });
 
+  it('uses an immersive full-viewport workspace only for Photo to AR live and captured media', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+    const cameraPanel = root.querySelector<HTMLElement>('.camera-panel')!;
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="full-flow"]')?.click();
+    expect(cameraPanel.classList.contains('photo-to-ar-immersive')).toBe(true);
+
+    hud.showCapturedImagePreview('blob:captured-image');
+    expect(cameraPanel.classList.contains('photo-to-ar-immersive')).toBe(true);
+
+    root.querySelector<HTMLButtonElement>('[data-nav-route="upload"]')?.click();
+    expect(cameraPanel.classList.contains('photo-to-ar-immersive')).toBe(false);
+  });
+
   it('owns separate reconstruction overlays for capture and generation loading', () => {
     const root = document.createElement('div');
     new ARHud(root, modelOptions, createHandlers());

@@ -299,6 +299,19 @@ describe('application design system', () => {
     expect(styles).toContain('.full-flow-reconstruction-stage .object-reconstruction-overlay {');
   });
 
+  it('makes only the Photo to AR camera workspace edge to edge with safe-area overlays', () => {
+    expect(styles).toContain('.creation-workspace.fullscreen.photo-to-ar-immersive {');
+    expect(styles).toContain('padding: 0;');
+    expect(styles).toContain('.photo-to-ar-immersive .camera-media-layer {');
+    expect(styles).toContain('.photo-to-ar-immersive .camera-media-layer > .camera-preview {');
+    expect(styles).toContain('object-fit: cover;');
+    expect(styles).toContain('.photo-to-ar-immersive .creation-guidance {');
+    expect(styles).toContain('padding-bottom: max(16px, env(safe-area-inset-bottom));');
+    expect(styles).toContain('backdrop-filter: blur(18px);');
+    expect(styles).toContain('.photo-to-ar-immersive .creation-step-list {');
+    expect(styles).not.toContain('.app-shell[data-route="upload"] .photo-to-ar-immersive');
+  });
+
   it('defines explicit selection and mobile layouts for model collections', () => {
     expect(styles).toContain(
       '.ar-model-card[aria-pressed="true"],\n.model-manager-row.is-selected {',
