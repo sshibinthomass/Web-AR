@@ -176,6 +176,7 @@ describe('WebARApp animated GLB playback', () => {
           successMessage: string;
           sourceMessage: string;
           selectedModelId?: string;
+          isCurrent?: () => boolean;
         },
       ): Promise<void>;
       render(time: number): void;
@@ -267,6 +268,38 @@ describe('WebARApp animated GLB playback', () => {
     expect(app.hud.markModelDownloadStarted).not.toHaveBeenCalled();
     expect(app.hud.markModelDownloaded).toHaveBeenCalledWith('generated-chair');
     expect(app.hud.markModelDownloadFailed).not.toHaveBeenCalled();
+  });
+
+  it('discards a downloaded model when its guarded load is no longer current', async () => {
+    let resolveModel!: (model: THREE.Group) => void;
+    vi.mocked(loadGLBModel).mockReset();
+    vi.mocked(loadGLBModel).mockReturnValue(new Promise((resolve) => {
+      resolveModel = resolve;
+    }));
+    const { app } = createAnimatedApp();
+    let isCurrent = true;
+
+    const staleLoad = app.loadModelFromUrl('https://assets.example/stale.glb', 'Stale model', {
+      loadingMessage: 'Loading stale model...',
+      successMessage: 'Stale model loaded.',
+      sourceMessage: 'Generated model',
+      isCurrent: () => isCurrent,
+    });
+    await vi.waitFor(() => expect(loadGLBModel).toHaveBeenCalledOnce());
+
+    isCurrent = false;
+    const newerModel = new THREE.Group();
+    app.sceneContext.modelRoot.add(newerModel);
+    app.appState.modelLoaded = true;
+    app.hud.update.mockClear();
+    app.hud.updateModelReady.mockClear();
+    resolveModel(new THREE.Group());
+    await staleLoad;
+
+    expect(app.sceneContext.modelRoot.children).toEqual([newerModel]);
+    expect(app.appState.modelLoaded).toBe(true);
+    expect(app.hud.updateModelReady).not.toHaveBeenCalled();
+    expect(app.hud.update).not.toHaveBeenCalled();
   });
 
   it('plays only the selected GLB animation clip and exposes choices to the HUD', async () => {

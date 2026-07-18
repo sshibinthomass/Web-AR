@@ -893,4 +893,48 @@ describe('WebARApp object segmentation orchestration', () => {
       newSegmentationRequest.resolve({ detected: false, confidence: 0.2 });
     },
   );
+
+  it.each([
+    ['full-flow', 'runFullFlow'],
+    ['dynamic', 'runDynamicFlow'],
+  ] as const)(
+    'invalidates the guarded model load when leaving %s during its download',
+    async (route, method) => {
+      const modelLoadRequest = deferred<void>();
+      const newSegmentationRequest = deferred<{ detected: false; confidence: number }>();
+      dependencies.segmentObject
+        .mockResolvedValueOnce({ detected: false, confidence: 0.2 })
+        .mockReturnValueOnce(newSegmentationRequest.promise);
+      dependencies.captureVideoFrame
+        .mockResolvedValueOnce(capturedImage('old'))
+        .mockResolvedValueOnce(capturedImage('new'));
+      const app = createApp();
+      let isCurrentLoad: (() => boolean) | undefined;
+      app.loadModelFromUrl.mockImplementation((
+        _modelUrl: string,
+        _label: string,
+        options: { isCurrent?: () => boolean },
+      ) => {
+        isCurrentLoad = options.isCurrent;
+        return modelLoadRequest.promise;
+      });
+
+      await app.captureImage(route);
+      const generation = app[method]('chair');
+      await vi.waitFor(() => expect(app.loadModelFromUrl).toHaveBeenCalledOnce());
+
+      await app.resetTransientExperience();
+      await app.captureImage(route);
+      await vi.waitFor(() => expect(dependencies.segmentObject).toHaveBeenCalledTimes(2));
+      const newSignal = dependencies.segmentObject.mock.calls[1][0].signal as AbortSignal;
+
+      expect(isCurrentLoad?.()).toBe(false);
+      modelLoadRequest.resolve();
+      await generation;
+
+      expect(app.hud.showFullFlowReady).not.toHaveBeenCalled();
+      expect(newSignal.aborted).toBe(false);
+      newSegmentationRequest.resolve({ detected: false, confidence: 0.2 });
+    },
+  );
 });
