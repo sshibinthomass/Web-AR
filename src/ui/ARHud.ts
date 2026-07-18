@@ -1434,6 +1434,8 @@ export class ARHud {
 
   showFullFlowReady(message: string, modelOption?: ModelOption): void {
     this.cancelFullFlowReconstruction();
+    this.fullFlowLoading.classList.add('hidden');
+    this.statusPanel.classList.remove('camera-active', 'ar-picker-active', 'full-flow-active');
     this.setCreationStage('place');
     this.navigateTo('ar', 'replace');
     this.arPlacementStarted = true;

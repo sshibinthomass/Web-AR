@@ -1834,6 +1834,38 @@ describe('ARHud', () => {
     expect(root.querySelector('.ar-model-picker')?.classList.contains('hidden')).toBe(true);
   });
 
+  it('reveals AR placement when Full Flow finishes after already navigating to AR', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    hud.updateAuthState(activeUser);
+    const arButton = document.createElement('button');
+    arButton.textContent = 'Start AR';
+    hud.attachARButton(arButton);
+
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Photo to AR')?.click();
+    hud.showCapturedImagePreview('blob:captured-image');
+    [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Generate and place',
+    )?.click();
+
+    expect(window.location.hash).toBe('#/ar');
+    expect(root.querySelector('.full-flow-loading')?.classList.contains('hidden')).toBe(false);
+
+    hud.showFullFlowReady('Generated object is ready. Scan the floor, then tap Place.', {
+      id: 'full-flow-generated-object',
+      label: 'Generated object',
+      url: 'https://assets.example/generated-object.glb',
+    });
+
+    expect(root.querySelector('.full-flow-loading')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.status-panel')?.classList.contains('full-flow-active')).toBe(false);
+    expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.ar-model-picker')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector<HTMLSelectElement>('.model-picker select')?.value)
+      .toBe('full-flow-generated-object');
+  });
+
   it('starts AR from the GPT-assisted Full Flow generate tap after extraction', () => {
     const root = document.createElement('div');
     const onSubmitTarget = vi.fn();
