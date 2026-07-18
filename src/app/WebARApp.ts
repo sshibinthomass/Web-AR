@@ -90,7 +90,9 @@ export class WebARApp {
   private capturedImagePreviewUrl: string | null = null;
   private capturedMediaOperationEpoch = 0;
   private objectSegmentationController: AbortController | null = null;
+  private objectSegmentationCapturedImage: CapturedImage | null = null;
   private objectSegmentationToken = 0;
+  private photoGenerationTransitionActive = false;
   private speechRecordingSession: AudioRecordingSession | null = null;
   private speechAudio: RecordedAudio | null = null;
   private speechJobWatchToken = 0;
@@ -603,6 +605,7 @@ export class WebARApp {
     const controller = new AbortController();
     const token = this.objectSegmentationToken;
     this.objectSegmentationController = controller;
+    this.objectSegmentationCapturedImage = capturedImage;
     this.hud?.showObjectSegmentationPending();
 
     try {
@@ -654,6 +657,7 @@ export class WebARApp {
         && this.objectSegmentationController === controller
       ) {
         this.objectSegmentationController = null;
+        this.objectSegmentationCapturedImage = null;
       }
     }
   }
@@ -674,13 +678,14 @@ export class WebARApp {
   ): boolean {
     return this.objectSegmentationToken === token
       && this.objectSegmentationController === controller
-      && this.capturedImage === capturedImage;
+      && this.objectSegmentationCapturedImage === capturedImage;
   }
 
   private cancelObjectSegmentation(): void {
     this.objectSegmentationToken += 1;
     this.objectSegmentationController?.abort();
     this.objectSegmentationController = null;
+    this.objectSegmentationCapturedImage = null;
   }
 
   private beginCapturedMediaOperation(): number {
@@ -796,14 +801,14 @@ export class WebARApp {
     }
 
     this.beginCapturedMediaOperation();
-    this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction();
+    this.photoGenerationTransitionActive = true;
     try {
       const capturedImage = this.capturedImage;
       const generationPipeline = this.capturedImageGenerationPipeline;
       this.capturedImage = null;
       this.capturedImageGenerationPipeline = 'openai-to-3d';
-      this.clearCapturedImagePreview(false);
+      this.clearCapturedImagePreview(false, false);
       this.hud?.showFullFlowLoading('Building your 3D object in Modal. Keep this page open.');
 
       const generatedModel = await generateModelFromImage({
@@ -830,6 +835,9 @@ export class WebARApp {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Full Flow failed.';
       this.hud?.showFullFlowError(`Full Flow failed: ${message}`);
+    } finally {
+      this.photoGenerationTransitionActive = false;
+      this.cancelObjectSegmentation();
     }
   }
 
@@ -845,13 +853,13 @@ export class WebARApp {
     }
 
     this.beginCapturedMediaOperation();
-    this.cancelObjectSegmentation();
     this.hud?.clearObjectReconstruction();
+    this.photoGenerationTransitionActive = true;
     try {
       const capturedImage = this.capturedImage;
       this.capturedImage = null;
       this.capturedImageGenerationPipeline = 'openai-to-3d';
-      this.clearCapturedImagePreview(false);
+      this.clearCapturedImagePreview(false, false);
       this.hud?.showFullFlowLoading('Generating a dynamic image, then building your 3D object in Modal. Keep this page open.');
 
       const generatedModel = await generateModelFromImage({
@@ -878,6 +886,9 @@ export class WebARApp {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Dynamic flow failed.';
       this.hud?.showFullFlowError(`Dynamic flow failed: ${message}`);
+    } finally {
+      this.photoGenerationTransitionActive = false;
+      this.cancelObjectSegmentation();
     }
   }
 
@@ -1062,7 +1073,14 @@ export class WebARApp {
     this.hud?.startARCamera();
   }
 
-  private async leaveRoute(previousRoute: HudRoute, _nextRoute: HudRoute): Promise<void> {
+  private async leaveRoute(previousRoute: HudRoute, nextRoute: HudRoute): Promise<void> {
+    if (
+      this.photoGenerationTransitionActive
+      && isPhotoToARRoute(previousRoute)
+      && nextRoute === 'ar'
+    ) {
+      return;
+    }
     const transientRoutes: HudRoute[] = [
       'camera',
       'upload',
@@ -1082,7 +1100,7 @@ export class WebARApp {
   private async resetTransientExperience(): Promise<void> {
     this.beginCapturedMediaOperation();
     this.cancelObjectSegmentation();
-    this.hud?.clearObjectReconstruction();
+    this.hud?.discardObjectReconstruction();
     stopCameraPreview(this.cameraStream);
     this.cameraStream = null;
     this.capturedImage = null;
@@ -1411,12 +1429,19 @@ export class WebARApp {
     this.hud?.showUploadedImagePreview(this.capturedImagePreviewUrl);
   }
 
-  private clearCapturedImagePreview(invalidateMediaOperation = true): void {
+  private clearCapturedImagePreview(
+    invalidateMediaOperation = true,
+    discardReconstruction = true,
+  ): void {
     if (invalidateMediaOperation) {
       this.beginCapturedMediaOperation();
     }
-    this.cancelObjectSegmentation();
-    this.hud?.clearObjectReconstruction();
+    if (discardReconstruction) {
+      this.cancelObjectSegmentation();
+      this.hud?.discardObjectReconstruction();
+    } else {
+      this.hud?.clearObjectReconstruction();
+    }
     if (this.capturedImagePreviewUrl) {
       URL.revokeObjectURL(this.capturedImagePreviewUrl);
       this.capturedImagePreviewUrl = null;

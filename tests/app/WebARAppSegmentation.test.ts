@@ -75,6 +75,7 @@ interface CapturedImageFixture {
 interface HudFixture {
   cameraPreviewVideo: HTMLVideoElement;
   clearObjectReconstruction: ReturnType<typeof vi.fn>;
+  discardObjectReconstruction: ReturnType<typeof vi.fn>;
   hideModelPreview: ReturnType<typeof vi.fn>;
   playObjectReconstruction: ReturnType<typeof vi.fn>;
   showCapturedImagePreview: ReturnType<typeof vi.fn>;
@@ -104,6 +105,7 @@ interface TestApp {
   generateSpeechModel(): Promise<void>;
   generateTextModel(text: string): Promise<void>;
   hud: HudFixture;
+  leaveRoute(previousRoute: 'full-flow' | 'dynamic', nextRoute: 'ar'): Promise<void>;
   loadModelFromUrl: ReturnType<typeof vi.fn>;
   objectSegmentationController: AbortController | null;
   resetTransientExperience(): Promise<void>;
@@ -174,9 +176,11 @@ function prepareCameraPreview(app: TestApp, playResult: 'resolve' | 'reject' = '
 }
 
 function createHud(): HudFixture {
+  const clearObjectReconstruction = vi.fn();
   return {
     cameraPreviewVideo: document.createElement('video'),
-    clearObjectReconstruction: vi.fn(),
+    clearObjectReconstruction,
+    discardObjectReconstruction: vi.fn(() => clearObjectReconstruction()),
     hideModelPreview: vi.fn(),
     playObjectReconstruction: vi.fn().mockResolvedValue(undefined),
     showCapturedImagePreview: vi.fn(),
@@ -799,10 +803,18 @@ describe('WebARApp object segmentation orchestration', () => {
     ['full-flow', 'runFullFlow', 'openai-to-3d'],
     ['dynamic', 'runDynamicFlow', 'dynamic'],
   ] as const)(
-    'cancels segmentation and generates %s from the original capture rather than its compressed copy',
+    'preserves pending segmentation while generating %s from the original capture rather than its compressed copy',
     async (route, method, generationPipeline) => {
-      const segmentationRequest = deferred<{ detected: false; confidence: number }>();
+      const segmentationRequest = deferred<{
+        detected: true;
+        confidence: number;
+        maskBase64: string;
+        maskMimeType: 'image/png';
+        bounds: { x: number; y: number; width: number; height: number };
+      }>();
+      const generationRequest = deferred<{ modelUrl: string }>();
       dependencies.segmentObject.mockReturnValueOnce(segmentationRequest.promise);
+      dependencies.generateModelFromImage.mockReturnValueOnce(generationRequest.promise);
       const original = capturedImage(route);
       dependencies.captureVideoFrame.mockResolvedValueOnce(original);
       const app = createApp();
@@ -810,9 +822,11 @@ describe('WebARApp object segmentation orchestration', () => {
       await app.captureImage(route);
       await waitForSegmentationRequest();
       const signal = dependencies.segmentObject.mock.calls[0][0].signal as AbortSignal;
-      await app[method]('chair');
+      const generation = app[method]('chair');
+      await vi.waitFor(() => expect(dependencies.generateModelFromImage).toHaveBeenCalledOnce());
+      await app.leaveRoute(route, 'ar');
 
-      expect(signal.aborted).toBe(true);
+      expect(signal.aborted).toBe(false);
       expect(app.hud.clearObjectReconstruction).toHaveBeenCalled();
       expect(dependencies.generateModelFromImage).toHaveBeenCalledWith(expect.objectContaining({
         imageBase64: original.imageBase64,
@@ -822,6 +836,21 @@ describe('WebARApp object segmentation orchestration', () => {
       expect(dependencies.generateModelFromImage).not.toHaveBeenCalledWith(expect.objectContaining({
         imageBase64: preparedImage.imageBase64,
       }));
+      segmentationRequest.resolve({
+        detected: true,
+        confidence: 0.9,
+        maskBase64: 'late-generation-mask',
+        maskMimeType: 'image/png',
+        bounds: { x: 0.1, y: 0.2, width: 0.5, height: 0.6 },
+      });
+      await vi.waitFor(() => expect(app.hud.playObjectReconstruction).toHaveBeenCalledWith(
+        'data:image/png;base64,late-generation-mask',
+        { x: 0.1, y: 0.2, width: 0.5, height: 0.6 },
+      ));
+      expect(dependencies.segmentObject).toHaveBeenCalledOnce();
+
+      generationRequest.resolve({ modelUrl: 'https://assets.example/generated.glb' });
+      await generation;
     },
   );
 });
