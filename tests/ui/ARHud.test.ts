@@ -1809,6 +1809,8 @@ describe('ARHud', () => {
     expect(startArCamera).toHaveBeenCalledTimes(1);
     expect(onFullFlowCapture).toHaveBeenCalledWith('laptop');
     expect(onSubmitTarget).not.toHaveBeenCalled();
+    expect(root.querySelector('.full-flow-loading')?.classList.contains('hidden')).toBe(false);
+    expect(root.querySelector('.ar-model-picker')?.classList.contains('hidden')).toBe(true);
   });
 
   it('starts AR from the GPT-assisted Full Flow generate tap after extraction', () => {

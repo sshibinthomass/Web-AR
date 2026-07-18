@@ -1742,6 +1742,11 @@ export class ARHud {
         this.handlers.onFullFlowCapture(targetObject);
       }
       this.navigateTo('ar');
+      this.showFullFlowLoading(
+        isDynamicRoute
+          ? 'Generating a dynamic image, then building your 3D object in Modal. Keep this page open.'
+          : 'Building your 3D object in Modal. Keep this page open.',
+      );
       this.statusMessage.textContent =
         isDynamicRoute
           ? 'Opening AR camera, generating a dynamic image, and building your 3D object...'
