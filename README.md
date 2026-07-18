@@ -130,7 +130,7 @@ Deploy only after separately authorizing the external deployment:
 
 ```powershell
 cd D:\Github-Projects\Modal-Apps
-uv run modal deploy llm-hosting/object-segmentation-birefnet-lite.py
+uv run --frozen --with scipy python -m modal deploy llm-hosting/object-segmentation-birefnet-lite.py
 
 cd D:\Github-Projects\Web-AR
 npx wrangler secret put MODAL_KEY
