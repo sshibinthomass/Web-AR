@@ -7,6 +7,7 @@ export interface ReconstructionPlayback {
   bounds: ObjectBounds;
   durationMs?: number;
   reducedMotion?: boolean;
+  loop?: boolean;
 }
 
 export interface OverlayDependencies {
@@ -260,6 +261,9 @@ export class ObjectReconstructionOverlay {
       const reducedMotion = options.reducedMotion ?? this.matchMedia('(prefers-reduced-motion: reduce)').matches;
       if (reducedMotion) {
         this.drawStaticOutline(prepared);
+        if (options.loop === true) {
+          return;
+        }
         active.timerId = this.setTimer(() => {
           active.timerId = null;
           this.finish(active);
@@ -276,9 +280,11 @@ export class ObjectReconstructionOverlay {
         }
         try {
           const elapsed = Math.max(0, this.now() - startedAt);
-          const progress = Math.min(1, elapsed / durationMs);
+          const progress = options.loop === true
+            ? (elapsed % durationMs) / durationMs
+            : Math.min(1, elapsed / durationMs);
           this.drawAnimatedFrame(prepared, progress);
-          if (progress >= 1) {
+          if (options.loop !== true && progress >= 1) {
             this.finish(active);
             return;
           }

@@ -30,6 +30,7 @@ interface Harness {
   contexts: ContextRecord[];
   dependencies: OverlayDependencies;
   host: HTMLElement;
+  pendingTimerCount(): number;
   preview: HTMLImageElement;
   requestAnimationFrame: ReturnType<typeof vi.fn>;
   resizeHost(width: number, height: number): void;
@@ -253,6 +254,29 @@ describe('ObjectReconstructionOverlay', () => {
     expect(harness.host.querySelector('canvas')).toBeNull();
   });
 
+  it('loops animated playback until it is explicitly cancelled', async () => {
+    const harness = createHarness();
+    const overlay = new ObjectReconstructionOverlay(harness.host, harness.preview, harness.dependencies);
+    const playback = overlay.play({ ...validPlayback(), durationMs: 100, loop: true });
+    let settled = false;
+    void playback.then(() => {
+      settled = true;
+    });
+    await flushSetup();
+
+    harness.setNow(250);
+    harness.advanceFrame(250);
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    expect(harness.host.querySelector('canvas')).not.toBeNull();
+    expect(harness.requestAnimationFrame).toHaveBeenCalledTimes(2);
+
+    overlay.cancel();
+    await expect(playback).resolves.toBeUndefined();
+    expect(harness.host.querySelector('canvas')).toBeNull();
+  });
+
   it('draws only a brief static object outline in reduced motion and schedules no moving frame', async () => {
     const harness = createHarness({ reducedMotion: true });
     const overlay = new ObjectReconstructionOverlay(harness.host, harness.preview, harness.dependencies);
@@ -267,6 +291,28 @@ describe('ObjectReconstructionOverlay', () => {
     expect(harness.host.querySelector('canvas')).not.toBeNull();
 
     harness.runTimer();
+    await expect(playback).resolves.toBeUndefined();
+    expect(harness.host.querySelector('canvas')).toBeNull();
+  });
+
+  it('keeps the static reduced-motion outline visible for loop playback until cancellation', async () => {
+    const harness = createHarness({ reducedMotion: true });
+    const overlay = new ObjectReconstructionOverlay(harness.host, harness.preview, harness.dependencies);
+    const playback = overlay.play({ ...validPlayback(), loop: true });
+    let settled = false;
+    void playback.then(() => {
+      settled = true;
+    });
+    await flushSetup();
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    expect(harness.pendingTimerCount()).toBe(0);
+    expect(harness.requestAnimationFrame).not.toHaveBeenCalled();
+    expect(harness.host.querySelector('canvas')).not.toBeNull();
+    expect(harness.contexts[2].drawImages).toContainEqual([harness.canvases[3], 0, 0, 300, 300]);
+
+    overlay.cancel();
     await expect(playback).resolves.toBeUndefined();
     expect(harness.host.querySelector('canvas')).toBeNull();
   });
@@ -690,6 +736,9 @@ function createHarness(options: {
     contexts,
     dependencies,
     host,
+    pendingTimerCount() {
+      return timers.size;
+    },
     preview,
     requestAnimationFrame,
     resizeHost(width: number, height: number) {
