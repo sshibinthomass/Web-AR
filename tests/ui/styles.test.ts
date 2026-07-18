@@ -309,6 +309,8 @@ describe('application design system', () => {
     expect(styles).toContain('padding-bottom: max(16px, env(safe-area-inset-bottom));');
     expect(styles).toContain('backdrop-filter: blur(18px);');
     expect(styles).toContain('.photo-to-ar-immersive .creation-step-list {');
+    const progressDeclarations = declarationsFor('.photo-to-ar-immersive .creation-step-list').join('\n');
+    expect(progressDeclarations).toContain('display: none;');
     expect(styles).not.toContain('.app-shell[data-route="upload"] .photo-to-ar-immersive');
   });
 

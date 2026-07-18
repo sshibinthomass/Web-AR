@@ -4904,19 +4904,7 @@ h3 {
 }
 
 .photo-to-ar-immersive .creation-step-list {
-  position: fixed;
-  top: calc(max(12px, env(safe-area-inset-top)) + 64px);
-  left: 50%;
-  z-index: 6;
-  width: min(360px, calc(100vw - 160px));
-  transform: translateX(-50%);
-}
-
-.photo-to-ar-immersive .creation-step-list li {
-  border-color: rgba(255, 255, 255, 0.2);
-  color: var(--color-mist-slate);
-  background: rgba(2, 10, 12, 0.72);
-  backdrop-filter: blur(14px);
+  display: none;
 }
 
 .photo-to-ar-immersive .creation-guidance .target-object-field,
@@ -4945,11 +4933,6 @@ h3 {
 @media (max-width: 767px) {
   .photo-to-ar-immersive .creation-stage .camera-label {
     top: calc(max(8px, env(safe-area-inset-top)) + 58px);
-  }
-
-  .photo-to-ar-immersive .creation-step-list {
-    top: calc(max(8px, env(safe-area-inset-top)) + 58px);
-    width: min(300px, calc(100vw - 136px));
   }
 
   .photo-to-ar-immersive .creation-guidance {
