@@ -822,7 +822,7 @@ export class WebARApp {
       this.capturedImage = null;
       this.capturedImageGenerationPipeline = 'openai-to-3d';
       this.clearCapturedImagePreview(false, false);
-      this.hud?.showFullFlowLoading('Building your 3D object in Modal. Keep this page open.');
+      this.hud?.showFullFlowLoading('Building your 3D object in Modal.');
 
       const generatedModel = await generateModelFromImage({
         apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
@@ -887,7 +887,7 @@ export class WebARApp {
       this.capturedImage = null;
       this.capturedImageGenerationPipeline = 'openai-to-3d';
       this.clearCapturedImagePreview(false, false);
-      this.hud?.showFullFlowLoading('Generating a dynamic image, then building your 3D object in Modal. Keep this page open.');
+      this.hud?.showFullFlowLoading('Generating a dynamic image, then building your 3D object in Modal.');
 
       const generatedModel = await generateModelFromImage({
         apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),

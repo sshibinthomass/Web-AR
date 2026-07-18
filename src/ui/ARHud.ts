@@ -1064,7 +1064,7 @@ export class ARHud {
     this.speechGenerateButton.disabled = true;
   }
 
-  showSpeechGenerating(message = 'Generating a 3D-ready image and model from speech. Keep this page open.'): void {
+  showSpeechGenerating(message = 'Generating a 3D-ready image and model from speech.'): void {
     this.speechStatusMessage.textContent = message;
     this.speechVisualizer.classList.remove('is-listening');
     this.speechVisualizer.classList.add('is-working');
@@ -1830,8 +1830,8 @@ export class ARHud {
       this.navigateTo('ar');
       this.showFullFlowLoading(
         isDynamicRoute
-          ? 'Generating a dynamic image, then building your 3D object in Modal. Keep this page open.'
-          : 'Building your 3D object in Modal. Keep this page open.',
+          ? 'Generating a dynamic image, then building your 3D object in Modal.'
+          : 'Building your 3D object in Modal.',
       );
       this.statusMessage.textContent =
         isDynamicRoute

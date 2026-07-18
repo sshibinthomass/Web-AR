@@ -97,6 +97,8 @@ const activeUser = {
   status: 'active' as const,
 };
 
+const removedGenerationInstruction = ['Keep this', 'page open'].join(' ');
+
 const adminUser = {
   email: 'sshibinthomass@gmail.com',
   role: 'admin' as const,
@@ -580,6 +582,10 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Request');
     expect(root.textContent).toContain('make a red modern chair');
     expect(root.querySelector('[data-speech-stage="generating_image"]')?.classList.contains('is-active')).toBe(true);
+
+    hud.showSpeechGenerating();
+    expect(root.textContent).toContain('Generating a 3D-ready image and model from speech.');
+    expect(root.textContent).not.toContain(removedGenerationInstruction);
 
     hud.showSpeechBackgroundJob({
       label: 'red modern chair - 2026-07-07 08:30:00 UTC',
@@ -1832,6 +1838,8 @@ describe('ARHud', () => {
     expect(onSubmitTarget).not.toHaveBeenCalled();
     expect(root.querySelector('.full-flow-loading')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.ar-model-picker')?.classList.contains('hidden')).toBe(true);
+    expect(root.querySelector('.full-flow-loading p')?.textContent).toBe('Building your 3D object in Modal.');
+    expect(root.textContent).not.toContain(removedGenerationInstruction);
   });
 
   it('reveals AR placement when Full Flow finishes after already navigating to AR', () => {
