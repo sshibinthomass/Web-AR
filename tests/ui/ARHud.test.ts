@@ -2193,6 +2193,22 @@ describe('ARHud', () => {
     expect(root.querySelector('.immersive-exit')).toBeInstanceOf(HTMLButtonElement);
   });
 
+  it('marks only AR error mode for compact status feedback', () => {
+    const root = document.createElement('div');
+    const hud = new ARHud(root, modelOptions, createHandlers());
+    const statusPanel = root.querySelector('.status-panel');
+
+    hud.update('editing');
+    expect(statusPanel?.classList.contains('is-error')).toBe(false);
+
+    hud.update('unsupported', 'AR session failed.');
+    expect(statusPanel?.classList.contains('is-error')).toBe(true);
+    expect(root.querySelector('.status-message')?.textContent).toBe('AR session failed.');
+
+    hud.update('scanning');
+    expect(statusPanel?.classList.contains('is-error')).toBe(false);
+  });
+
   it('provides a gesture surface after opening AR placement controls', () => {
     const root = document.createElement('div');
     const hud = new ARHud(root, modelOptions, createHandlers());

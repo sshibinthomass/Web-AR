@@ -901,6 +901,7 @@ export class ARHud {
   }
 
   update(mode: AppMode, customMessage?: string): void {
+    this.statusPanel.classList.toggle('is-error', mode === 'unsupported');
     this.statusMessage.textContent = customMessage ?? this.messageForMode(mode);
 
     const hasPlacedObject = mode === 'placed' || mode === 'editing';

@@ -345,6 +345,19 @@ describe('application design system', () => {
     expect(styles).toContain('bottom: calc(108px + env(safe-area-inset-bottom));');
   });
 
+  it('shows single-object AR status only as compact transparent error feedback', () => {
+    const hiddenSelector = '.app-shell[data-route="ar"] .status-panel.immersive-inspector:not(.is-error)';
+    const errorSelector = '.app-shell[data-route="ar"] .status-panel.immersive-inspector.is-error';
+    const hiddenDeclarations = declarationsFor(hiddenSelector).join('\n');
+    const errorDeclarations = declarationsFor(errorSelector).join('\n');
+
+    expect(hiddenDeclarations).toContain('display: none;');
+    expect(errorDeclarations).toContain('top: max(12px, env(safe-area-inset-top));');
+    expect(errorDeclarations).toContain('background: rgba(2, 10, 12, 0.58);');
+    expect(styles).toContain(`${errorSelector} > .status-label,`);
+    expect(styles).toContain(`${errorSelector} > .status-source {`);
+  });
+
   it('uses a solid Anchor Gold selected treatment for immersive model rail items', () => {
     const selector = '.app-shell[data-shell="immersive"] .model-rail-item.is-selected';
     const declarations = declarationsFor(selector).at(-1) ?? '';
