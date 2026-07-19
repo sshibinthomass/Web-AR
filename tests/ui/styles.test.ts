@@ -217,6 +217,10 @@ describe('application design system', () => {
     expect(styles).toContain('outline: 3px solid var(--color-signal-mint);');
   });
 
+  it('keeps the full-screen WebGL canvas from intercepting page controls', () => {
+    expect(declarationsFor('canvas').join('\n')).toContain('pointer-events: none;');
+  });
+
   it('defines complete Precision Spatial responsive and immersive behavior', () => {
     for (const contract of [
       '@media (max-width: 767px)',
