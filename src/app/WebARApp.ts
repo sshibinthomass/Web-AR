@@ -1966,15 +1966,19 @@ export class WebARApp {
 
   private rotateBy(deltaRadians: number): void {
     if (this.layoutMode) {
-      this.prepareAnchoredTransform(this.requireLayoutSceneManager().selectedGroup());
+      const target = this.requireLayoutSceneManager().selectedGroup();
       this.requireLayoutSceneManager().rotateSelectedBy(deltaRadians);
+      if (target) {
+        this.anchorManager?.addYawOffset(target, deltaRadians);
+      }
       this.appState.setMode('editing');
       this.hud?.update(this.appState.mode);
       return;
     }
 
-    this.prepareAnchoredTransform(this.requireScene().modelRoot);
+    const target = this.requireScene().modelRoot;
     this.requireTransformController().rotateBy(deltaRadians);
+    this.anchorManager?.addYawOffset(target, deltaRadians);
     this.appState.setMode('editing');
     this.hud?.update(this.appState.mode);
   }

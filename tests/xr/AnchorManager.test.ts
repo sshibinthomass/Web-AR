@@ -37,6 +37,32 @@ describe('AnchorManager', () => {
     expect(secondTarget.position.toArray()).toEqual([2, 0.5, -3]);
   });
 
+  it('composes repeated user yaw changes onto the tracked pose without replacing the anchor', async () => {
+    const manager = new AnchorManager();
+    const target = new THREE.Group();
+    const anchor = createAnchor();
+    await manager.createFor(target, { createAnchor: vi.fn(async () => anchor) } as unknown as XRHitTestResult);
+    const trackedRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0.2, 0));
+    const frame = {
+      getPose: vi.fn(() => ({
+        transform: {
+          matrix: new THREE.Matrix4().compose(
+            new THREE.Vector3(1, 0.5, -3),
+            trackedRotation,
+            new THREE.Vector3(1, 1, 1),
+          ).toArray(),
+        },
+      } as unknown as XRPose)),
+    } as unknown as XRFrame;
+
+    manager.addYawOffset(target, 0.25);
+    manager.addYawOffset(target, 0.15);
+    manager.update(frame, {} as XRReferenceSpace);
+
+    expect(target.rotation.y).toBeCloseTo(0.6, 5);
+    expect(anchor.delete).not.toHaveBeenCalled();
+  });
+
   it('replaces and clears anchors without throwing when unsupported', async () => {
     const manager = new AnchorManager();
     const target = new THREE.Group();

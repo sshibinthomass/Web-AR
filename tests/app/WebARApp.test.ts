@@ -134,10 +134,13 @@ describe('WebARApp stable placement', () => {
 });
 
 describe('WebARApp anchored edits', () => {
-  it('detaches and schedules a replacement anchor before rotating', () => {
+  it('keeps the existing anchor and records a yaw offset while rotating', () => {
     const target = new THREE.Group();
     const app = new WebARApp(document.createElement('div')) as unknown as {
-      anchorManager: { deleteFor: ReturnType<typeof vi.fn> };
+      anchorManager: {
+        addYawOffset: ReturnType<typeof vi.fn>;
+        deleteFor: ReturnType<typeof vi.fn>;
+      };
       appState: { setMode(mode: 'placed'): void };
       hud: { update: ReturnType<typeof vi.fn> };
       layoutMode: boolean;
@@ -147,7 +150,7 @@ describe('WebARApp anchored edits', () => {
       transformController: { rotateBy: ReturnType<typeof vi.fn> };
       rotateBy(deltaRadians: number): void;
     };
-    app.anchorManager = { deleteFor: vi.fn() };
+    app.anchorManager = { addYawOffset: vi.fn(), deleteFor: vi.fn() };
     app.appState.setMode('placed');
     app.hud = { update: vi.fn() };
     app.layoutMode = false;
@@ -158,10 +161,11 @@ describe('WebARApp anchored edits', () => {
 
     app.rotateBy(0.25);
 
-    expect(app.anchorManager.deleteFor).toHaveBeenCalledWith(target);
-    expect(app.motionController.cancel).toHaveBeenCalledWith(target);
+    expect(app.anchorManager.addYawOffset).toHaveBeenCalledWith(target, 0.25);
+    expect(app.anchorManager.deleteFor).not.toHaveBeenCalled();
+    expect(app.motionController.cancel).not.toHaveBeenCalled();
     expect(app.transformController.rotateBy).toHaveBeenCalledWith(0.25);
-    expect(app.pendingReanchorTargets.has(target)).toBe(true);
+    expect(app.pendingReanchorTargets.has(target)).toBe(false);
   });
 
   it('processes pending reanchors independently for multiple objects', () => {
