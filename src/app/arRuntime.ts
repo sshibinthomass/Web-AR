@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GestureController } from '../interaction/GestureController';
 import { ObjectTransformController } from '../interaction/ObjectTransformController';
+import { SpatialMotionController } from '../interaction/SpatialMotionController';
 import {
   classifyPlacementGesture,
   type PlacementGestureZone,
@@ -17,6 +18,7 @@ export const arRuntime = {
   THREE,
   GestureController,
   ObjectTransformController,
+  SpatialMotionController,
   classifyPlacementGesture,
   LayoutSceneManager,
   createScene,
