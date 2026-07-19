@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GestureController, isInteractiveTarget } from '../../src/interaction/GestureController';
 import { clampScale, getAngleBetweenTouches, getDistanceBetweenTouches } from '../../src/utils/math';
 
 describe('gesture math', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('clamps scale to mobile-safe limits', () => {
     expect(clampScale(0.01)).toBe(0.1);
     expect(clampScale(10)).toBe(5);
@@ -50,6 +54,131 @@ describe('gesture math', () => {
       { x: 20, y: 30 },
       { x: 20, y: 30 },
     ]);
+  });
+
+  it('activates a long press after the configured hold duration', () => {
+    vi.useFakeTimers();
+    const target = document.createElement('div');
+    const longPresses = vi.fn();
+    const controller = new GestureController(target, {
+      onLongPress: longPresses,
+      onTap: () => undefined,
+      onDrag: () => undefined,
+      onPinch: () => undefined,
+    }, { longPressDurationMs: 450, longPressMoveTolerancePx: 12 });
+    controller.connect();
+
+    target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));
+    vi.advanceTimersByTime(449);
+    expect(longPresses).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(longPresses).toHaveBeenCalledOnce();
+    expect(longPresses).toHaveBeenCalledWith({ x: 20, y: 30 });
+  });
+
+  it('cancels a pending long press at the movement tolerance', () => {
+    vi.useFakeTimers();
+    const target = document.createElement('div');
+    const longPresses = vi.fn();
+    const controller = new GestureController(target, {
+      onLongPress: longPresses,
+      onTap: () => undefined,
+      onDrag: () => undefined,
+      onPinch: () => undefined,
+    }, { longPressDurationMs: 450, longPressMoveTolerancePx: 12 });
+    controller.connect();
+
+    target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));
+    target.dispatchEvent(touchEvent('touchmove', [{ clientX: 32, clientY: 30 }]));
+    vi.advanceTimersByTime(450);
+
+    expect(longPresses).not.toHaveBeenCalled();
+  });
+
+  it.each(['touchend', 'touchcancel'])(
+    'cancels a pending long press on %s',
+    (eventType) => {
+      vi.useFakeTimers();
+      const target = document.createElement('div');
+      const longPresses = vi.fn();
+      const controller = new GestureController(target, {
+        onLongPress: longPresses,
+        onTap: () => undefined,
+        onDrag: () => undefined,
+        onPinch: () => undefined,
+      }, { longPressDurationMs: 450 });
+      controller.connect();
+
+      target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));
+      target.dispatchEvent(touchEvent(eventType, []));
+      vi.advanceTimersByTime(450);
+
+      expect(longPresses).not.toHaveBeenCalled();
+    },
+  );
+
+  it('cancels a pending long press when a second touch begins', () => {
+    vi.useFakeTimers();
+    const target = document.createElement('div');
+    const longPresses = vi.fn();
+    const controller = new GestureController(target, {
+      onLongPress: longPresses,
+      onTap: () => undefined,
+      onDrag: () => undefined,
+      onPinch: () => undefined,
+    }, { longPressDurationMs: 450 });
+    controller.connect();
+
+    target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));
+    target.dispatchEvent(touchEvent('touchstart', [
+      { clientX: 20, clientY: 30 },
+      { clientX: 40, clientY: 30 },
+    ]));
+    vi.advanceTimersByTime(450);
+
+    expect(longPresses).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending long press when disconnected', () => {
+    vi.useFakeTimers();
+    const target = document.createElement('div');
+    const longPresses = vi.fn();
+    const controller = new GestureController(target, {
+      onLongPress: longPresses,
+      onTap: () => undefined,
+      onDrag: () => undefined,
+      onPinch: () => undefined,
+    }, { longPressDurationMs: 450 });
+    controller.connect();
+
+    target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));
+    controller.disconnect();
+    vi.advanceTimersByTime(450);
+
+    expect(longPresses).not.toHaveBeenCalled();
+  });
+
+  it('continues dragging without emitting a tap after long-press activation', () => {
+    vi.useFakeTimers();
+    const target = document.createElement('div');
+    const taps = vi.fn();
+    const drags = vi.fn();
+    const controller = new GestureController(target, {
+      onLongPress: () => undefined,
+      onTap: taps,
+      onDrag: drags,
+      onPinch: () => undefined,
+    }, { longPressDurationMs: 450 });
+    controller.connect();
+
+    target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));
+    vi.advanceTimersByTime(450);
+    target.dispatchEvent(touchEvent('touchmove', [{ clientX: 24, clientY: 34 }]));
+    target.dispatchEvent(touchEvent('touchend', []));
+
+    expect(drags).toHaveBeenCalledWith({ x: 24, y: 34 }, { x: 20, y: 30 });
+    expect(taps).not.toHaveBeenCalled();
   });
 });
 

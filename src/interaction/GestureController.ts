@@ -5,10 +5,16 @@ import {
 
 interface GestureHandlers {
   onGestureStart?(point: Point2): void;
+  onLongPress?(point: Point2): void;
   onTap(point: Point2): void;
   onDrag(point: Point2, startPoint: Point2): void;
   onPinch(multiplier: number): void;
   onGestureEnd?(): void;
+}
+
+interface GestureOptions {
+  longPressDurationMs?: number;
+  longPressMoveTolerancePx?: number;
 }
 
 export class GestureController {
@@ -16,11 +22,22 @@ export class GestureController {
   private startPoint: Point2 | null = null;
   private lastSinglePoint: Point2 | null = null;
   private lastPinchDistance: number | null = null;
+  private longPressTimer: ReturnType<typeof setTimeout> | null = null;
+  private longPressActivated = false;
+  private readonly longPressDurationMs: number;
+  private readonly longPressMoveTolerancePx: number;
 
   constructor(
     private readonly target: HTMLElement,
     private readonly handlers: GestureHandlers,
-  ) {}
+    {
+      longPressDurationMs = 450,
+      longPressMoveTolerancePx = 12,
+    }: GestureOptions = {},
+  ) {
+    this.longPressDurationMs = longPressDurationMs;
+    this.longPressMoveTolerancePx = longPressMoveTolerancePx;
+  }
 
   connect(): void {
     this.target.addEventListener('touchstart', this.onTouchStart, { passive: false });
@@ -34,6 +51,7 @@ export class GestureController {
     this.target.removeEventListener('touchmove', this.onTouchMove);
     this.target.removeEventListener('touchend', this.onTouchEnd);
     this.target.removeEventListener('touchcancel', this.onTouchCancel);
+    this.cancelLongPress();
   }
 
   private readonly onTouchStart = (event: TouchEvent) => {
@@ -50,11 +68,14 @@ export class GestureController {
       this.startPoint = point;
       this.lastSinglePoint = point;
       this.lastPinchDistance = null;
+      this.longPressActivated = false;
+      this.startLongPress(point);
       this.handlers.onGestureStart?.(point);
       return;
     }
 
     if (event.touches.length >= 2) {
+      this.cancelLongPress();
       const first = touchToPoint(event.touches[0]);
       const second = touchToPoint(event.touches[1]);
       this.lastPinchDistance = getDistanceBetweenTouches(first, second);
@@ -76,11 +97,19 @@ export class GestureController {
     if (event.touches.length === 1) {
       const point = touchToPoint(event.touches[0]);
       this.lastSinglePoint = point;
+      if (
+        !this.longPressActivated
+        && this.startPoint
+        && getDistanceBetweenTouches(this.startPoint, point) >= this.longPressMoveTolerancePx
+      ) {
+        this.cancelLongPress();
+      }
       this.handlers.onDrag(point, this.startPoint ?? point);
       return;
     }
 
     if (event.touches.length >= 2) {
+      this.cancelLongPress();
       const first = touchToPoint(event.touches[0]);
       const second = touchToPoint(event.touches[1]);
       const distance = getDistanceBetweenTouches(first, second);
@@ -107,7 +136,7 @@ export class GestureController {
 
     if (this.startPoint && this.lastSinglePoint) {
       const distance = getDistanceBetweenTouches(this.startPoint, this.lastSinglePoint);
-      if (distance < 12) {
+      if (!this.longPressActivated && distance < 12) {
         this.handlers.onTap(this.lastSinglePoint);
       }
     }
@@ -121,11 +150,29 @@ export class GestureController {
   };
 
   private reset(): void {
+    this.cancelLongPress();
     this.active = false;
     this.startPoint = null;
     this.lastSinglePoint = null;
     this.lastPinchDistance = null;
+    this.longPressActivated = false;
     this.handlers.onGestureEnd?.();
+  }
+
+  private startLongPress(point: Point2): void {
+    this.cancelLongPress();
+    this.longPressTimer = setTimeout(() => {
+      this.longPressTimer = null;
+      this.longPressActivated = true;
+      this.handlers.onLongPress?.(point);
+    }, this.longPressDurationMs);
+  }
+
+  private cancelLongPress(): void {
+    if (this.longPressTimer !== null) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
   }
 }
 
