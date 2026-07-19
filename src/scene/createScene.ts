@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createContactShadow } from './createContactShadow';
 
 export interface SceneContext {
   renderer: THREE.WebGLRenderer;
@@ -7,7 +8,7 @@ export interface SceneContext {
   reticle: THREE.Mesh;
   modelRoot: THREE.Group;
   placementMarker: THREE.Mesh;
-  floorGrid: THREE.GridHelper;
+  contactShadow: THREE.Mesh<THREE.CircleGeometry, THREE.ShadowMaterial>;
   dispose(): void;
 }
 
@@ -20,6 +21,8 @@ export function createScene(container: HTMLElement): SceneContext {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
   const hemiLight = new THREE.HemisphereLight(0xffffff, 0xbfd6ff, 2.4);
@@ -28,6 +31,10 @@ export function createScene(container: HTMLElement): SceneContext {
 
   const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
   directionalLight.position.set(1, 3, 2);
+  directionalLight.castShadow = true;
+  directionalLight.shadow.mapSize.set(1024, 1024);
+  directionalLight.shadow.camera.near = 0.1;
+  directionalLight.shadow.camera.far = 12;
   scene.add(directionalLight);
 
   const reticleGeometry = new THREE.RingGeometry(0.09, 0.105, 40).rotateX(-Math.PI / 2);
@@ -41,23 +48,12 @@ export function createScene(container: HTMLElement): SceneContext {
   reticle.visible = false;
   scene.add(reticle);
 
-  const floorGrid = new THREE.GridHelper(2, 16, 0x5eead4, 0xffffff);
-  const gridMaterial = floorGrid.material;
-  if (Array.isArray(gridMaterial)) {
-    gridMaterial.forEach((material) => {
-      material.transparent = true;
-      material.opacity = 0.24;
-    });
-  } else {
-    gridMaterial.transparent = true;
-    gridMaterial.opacity = 0.24;
-  }
-  floorGrid.visible = false;
-  scene.add(floorGrid);
-
   const modelRoot = new THREE.Group();
   modelRoot.visible = false;
   scene.add(modelRoot);
+
+  const contactShadow = createContactShadow();
+  modelRoot.add(contactShadow);
 
   const markerGeometry = new THREE.RingGeometry(0.22, 0.24, 48).rotateX(-Math.PI / 2);
   const markerMaterial = new THREE.MeshBasicMaterial({
@@ -85,7 +81,7 @@ export function createScene(container: HTMLElement): SceneContext {
     reticle,
     modelRoot,
     placementMarker,
-    floorGrid,
+    contactShadow,
     dispose() {
       window.removeEventListener('resize', onResize);
       renderer.setAnimationLoop(null);

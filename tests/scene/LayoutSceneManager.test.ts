@@ -55,6 +55,24 @@ function placementMatrix(x: number, y: number, z: number): THREE.Matrix4 {
 }
 
 describe('LayoutSceneManager', () => {
+  it('reveals a contact shadow when a layout object is placed', () => {
+    const root = new THREE.Group();
+    const manager = new LayoutSceneManager(root);
+    manager.addObject({
+      modelId: 'chair',
+      modelLabel: 'Chair',
+      modelUrl: '/chair.glb',
+      model: createModel('chair'),
+    });
+
+    const shadow = manager.selectedGroup()?.getObjectByName('contact-shadow');
+    expect(shadow?.visible).toBe(false);
+
+    manager.placePendingAt(placementMatrix(1, 0, -1));
+
+    expect(shadow?.visible).toBe(true);
+  });
+
   it('places multiple objects without replacing earlier objects', () => {
     const root = new THREE.Group();
     const manager = new LayoutSceneManager(root);

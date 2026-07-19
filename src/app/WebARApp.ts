@@ -2,7 +2,6 @@ import type * as Three from 'three';
 import type { GestureController } from '../interaction/GestureController';
 import type { ObjectTransformController } from '../interaction/ObjectTransformController';
 import type { HitTestManager } from '../xr/HitTestManager';
-import type { PlaneTrackingManager } from '../xr/PlaneTrackingManager';
 import { MODEL_OPTIONS, type ModelOption } from './models';
 import {
   captureVideoFrame,
@@ -73,7 +72,6 @@ export class WebARApp {
   private hud: ARHud | null = null;
   private gestureController: GestureController | null = null;
   private hitTestManager: HitTestManager | null = null;
-  private planeTrackingManager: PlaneTrackingManager | null = null;
   private readonly appState = new AppState();
   private transformController: ObjectTransformController | null = null;
   private layoutSceneManager: InstanceType<ARRuntime['LayoutSceneManager']> | null = null;
@@ -384,7 +382,6 @@ export class WebARApp {
       const sceneContext = arRuntime.createScene(this.root);
       this.sceneContext = sceneContext;
       this.hitTestManager = new arRuntime.HitTestManager(sceneContext.reticle);
-      this.planeTrackingManager = new arRuntime.PlaneTrackingManager(sceneContext.floorGrid);
       this.transformController = new arRuntime.ObjectTransformController();
       const layoutRoot = new arRuntime.THREE.Group();
       layoutRoot.name = 'layout-root';
@@ -1613,7 +1610,6 @@ export class WebARApp {
 
     sceneContext.renderer.xr.addEventListener('sessionend', () => {
       this.appState.setMode('loading');
-      this.sceneContext?.floorGrid && (this.sceneContext.floorGrid.visible = false);
       this.hud?.setCameraPanelVisible(false);
       this.hud?.update(this.appState.mode, 'AR session ended. Start AR again to continue.');
     });
@@ -1624,15 +1620,12 @@ export class WebARApp {
 
   private render(_time: number, frame?: XRFrame): void {
     const sceneContext = this.requireScene();
-    const transformController = this.requireTransformController();
     const clock = this.requireClock();
     const session = sceneContext.renderer.xr.getSession();
     const referenceSpace = sceneContext.renderer.xr.getReferenceSpace();
 
     if (frame && session && referenceSpace) {
       const hasFloorHit = this.hitTestManager?.update(frame, session, referenceSpace) ?? false;
-      const floorY = transformController.floorY ?? this.hitTestManager?.latestPoint?.y ?? null;
-      this.planeTrackingManager?.update(frame, referenceSpace, floorY);
 
       if (this.appState.mode === 'scanning' && hasFloorHit) {
         this.appState.setMode('readyToPlace');
@@ -1744,15 +1737,14 @@ export class WebARApp {
       }
       this.appState.floorLocked = true;
       this.appState.setMode('placed');
-      this.planeTrackingManager?.hide();
       this.hud?.update(this.appState.mode, `${placedObject.modelLabel} placed. Add another object or delete the selected one.`);
       return;
     }
 
     this.requireTransformController().placeAt(placementMatrix);
+    this.requireScene().contactShadow.visible = true;
     this.appState.floorLocked = true;
     this.appState.setMode('placed');
-    this.planeTrackingManager?.hide();
     this.hud?.update(this.appState.mode);
   }
 
@@ -1832,7 +1824,7 @@ export class WebARApp {
     camera.getWorldPosition(cameraPosition);
     camera.getWorldDirection(cameraDirection);
 
-    const floorY = this.planeTrackingManager?.latestFloor?.center.y ?? cameraPosition.y - 1.1;
+    const floorY = this.hitTestManager?.latestPoint?.y ?? cameraPosition.y - 1.1;
     const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -floorY);
     const ray = new THREE.Ray(cameraPosition, cameraDirection.normalize());
     const point = new THREE.Vector3();

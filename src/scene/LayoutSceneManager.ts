@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clampScale, type Point2 } from '../utils/math';
 import type { LayoutObject, LayoutVector3 } from './layoutTypes';
+import { createContactShadow } from './createContactShadow';
 
 interface LayoutSceneObjectInput {
   id?: string;
@@ -34,6 +35,7 @@ export class LayoutSceneManager {
     const group = new THREE.Group();
     group.name = 'layout-object';
     group.visible = false;
+    group.add(createContactShadow());
     group.add(input.model);
     this.root.add(group);
 
@@ -53,6 +55,7 @@ export class LayoutSceneManager {
 
     if (input.transform) {
       this.applyTransform(object, input.transform);
+      this.setContactShadowVisible(object, true);
       object.placed = true;
       object.floorY = object.group.position.y;
       object.initialScale = object.group.scale.x;
@@ -70,6 +73,7 @@ export class LayoutSceneManager {
 
     matrix.decompose(object.group.position, object.group.quaternion, object.group.scale);
     object.group.visible = true;
+    this.setContactShadowVisible(object, true);
     object.group.matrixAutoUpdate = true;
     object.floorY = object.group.position.y;
     object.initialScale = object.group.scale.x;
@@ -109,7 +113,9 @@ export class LayoutSceneManager {
         continue;
       }
 
-      const intersection = raycaster.intersectObject(object.group, true)[0];
+      const intersection = raycaster
+        .intersectObject(object.group, true)
+        .find((candidate) => !candidate.object.userData.ignoreRaycast);
       if (!intersection) {
         continue;
       }
@@ -234,6 +240,7 @@ export class LayoutSceneManager {
 
     matrix.decompose(object.group.position, object.group.quaternion, object.group.scale);
     object.group.visible = true;
+    this.setContactShadowVisible(object, true);
     object.floorY = object.group.position.y;
     object.initialScale = object.group.scale.x;
     object.placed = true;
@@ -256,6 +263,13 @@ export class LayoutSceneManager {
     object.group.rotation.set(transform.rotation.x, transform.rotation.y, transform.rotation.z);
     object.group.scale.copy(fromLayoutVector(transform.scale));
     object.group.visible = true;
+  }
+
+  private setContactShadowVisible(object: LayoutSceneObject, visible: boolean): void {
+    const shadow = object.group.getObjectByName('contact-shadow');
+    if (shadow) {
+      shadow.visible = visible;
+    }
   }
 
   private toLayoutObject(object: LayoutSceneObject): LayoutObject {

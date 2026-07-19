@@ -158,7 +158,6 @@ describe('WebARApp animated GLB playback', () => {
       };
       lastHudMode: string;
       layoutMode: boolean;
-      planeTrackingManager: null;
       sceneContext: {
         scene: THREE.Scene;
         camera: THREE.PerspectiveCamera;
@@ -202,7 +201,6 @@ describe('WebARApp animated GLB playback', () => {
       updateSelectedModel: vi.fn(),
     };
     app.layoutMode = false;
-    app.planeTrackingManager = null;
     app.sceneContext = {
       scene: new THREE.Scene(),
       camera: new THREE.PerspectiveCamera(),
