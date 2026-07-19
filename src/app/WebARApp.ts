@@ -2,6 +2,7 @@ import type * as Three from 'three';
 import type { GestureController } from '../interaction/GestureController';
 import type { ObjectTransformController } from '../interaction/ObjectTransformController';
 import type { SpatialMotionController } from '../interaction/SpatialMotionController';
+import type { SelectionFeedbackController } from '../interaction/SelectionFeedbackController';
 import type { HitTestManager } from '../xr/HitTestManager';
 import type { AnchorManager } from '../xr/AnchorManager';
 import type { EstimatedLightingController } from '../xr/EstimatedLightingController';
@@ -67,7 +68,7 @@ import {
   type HudRoute,
 } from '../ui/routes';
 import { getGenerateModelApiUrl } from './config';
-import type { ARRuntime, PlacementGestureZone, Point2, SceneContext } from './arRuntime';
+import type { ARRuntime, Point2, SceneContext } from './arRuntime';
 
 export class WebARApp {
   private arRuntime: ARRuntime | null = null;
@@ -80,6 +81,7 @@ export class WebARApp {
   private readonly appState = new AppState();
   private transformController: ObjectTransformController | null = null;
   private motionController: SpatialMotionController | null = null;
+  private selectionFeedback: SelectionFeedbackController | null = null;
   private layoutSceneManager: InstanceType<ARRuntime['LayoutSceneManager']> | null = null;
   private clock: Three.Clock | null = null;
   private activeModelAnimation: {
@@ -101,10 +103,14 @@ export class WebARApp {
   private speechAudio: RecordedAudio | null = null;
   private speechJobWatchToken = 0;
   private readonly speechJobPollDelayMs = 5000;
-  private placementDragMode: PlacementGestureZone | null = null;
-  private placementDragStart: Point2 | null = null;
-  private layoutGestureStartedOnObject = false;
+  private gestureCandidate: {
+    target: Three.Group;
+    layoutObjectId: string | null;
+    modelLabel: string;
+  } | null = null;
+  private longPressDragTarget: Three.Group | null = null;
   private activeDragTarget: Three.Group | null = null;
+  private gestureMovedTarget = false;
   private readonly pendingReanchorTargets = new Set<Three.Group>();
   private lastHudMode = this.appState.mode;
   private availableModels = [...MODEL_OPTIONS];
@@ -384,6 +390,7 @@ export class WebARApp {
       && this.sceneContext
       && this.transformController
       && this.motionController
+      && this.selectionFeedback
       && this.anchorManager
       && this.lightingController
       && this.clock
@@ -408,6 +415,7 @@ export class WebARApp {
       this.lightingController.start();
       this.transformController = new arRuntime.ObjectTransformController();
       this.motionController = new arRuntime.SpatialMotionController();
+      this.selectionFeedback = new arRuntime.SelectionFeedbackController();
       const layoutRoot = new arRuntime.THREE.Group();
       layoutRoot.name = 'layout-root';
       sceneContext.scene.add(layoutRoot);
@@ -416,9 +424,8 @@ export class WebARApp {
 
       const hud = this.requireHud();
       this.gestureController = new arRuntime.GestureController(hud.gestureSurface, {
-        onGestureStart: (point) => {
-          this.layoutGestureStartedOnObject = this.selectLayoutObjectAtPoint(point);
-        },
+        onGestureStart: (point) => this.handleGestureStart(point),
+        onLongPress: (point) => this.handleLongPress(point),
         onTap: (point) => this.handleTap(point),
         onDrag: (point, startPoint) => this.handleDrag(point, startPoint),
         onPinch: (multiplier) => this.handlePinch(multiplier),
@@ -536,6 +543,8 @@ export class WebARApp {
         return;
       }
       this.stopModelAnimations();
+      this.selectionFeedback?.clear();
+      this.resetPlacementDrag();
       this.pendingReanchorTargets.delete(sceneContext.modelRoot);
       this.motionController?.cancel(sceneContext.modelRoot);
       this.anchorManager?.deleteFor(sceneContext.modelRoot);
@@ -1180,6 +1189,8 @@ export class WebARApp {
     this.layoutMode = false;
     this.pendingReanchorTargets.clear();
     this.anchorManager?.clear();
+    this.selectionFeedback?.clear();
+    this.resetPlacementDrag();
     this.layoutSceneManager?.clear();
     this.clearCapturedImagePreview(false, false);
     this.closeModelPreview();
@@ -1213,6 +1224,8 @@ export class WebARApp {
     this.layoutMode = true;
     this.pendingReanchorTargets.clear();
     this.anchorManager?.clear();
+    this.selectionFeedback?.clear();
+    this.resetPlacementDrag();
     this.requireLayoutSceneManager().clear();
     this.appState.modelLoaded = false;
     this.hud?.updateModelReady(false);
@@ -1236,6 +1249,8 @@ export class WebARApp {
 
     const selectedGroup = this.requireLayoutSceneManager().selectedGroup();
     if (selectedGroup) {
+      this.selectionFeedback?.clear();
+      this.resetPlacementDrag();
       this.pendingReanchorTargets.delete(selectedGroup);
       this.anchorManager?.deleteFor(selectedGroup);
       this.motionController?.cancel(selectedGroup);
@@ -1651,6 +1666,8 @@ export class WebARApp {
     sceneContext.renderer.xr.addEventListener('sessionend', () => {
       this.lightingController?.stop();
       this.motionController?.cancel();
+      this.selectionFeedback?.clear();
+      this.resetPlacementDrag();
       this.anchorManager?.clear();
       this.pendingReanchorTargets.clear();
       this.appState.setMode('loading');
@@ -1678,6 +1695,7 @@ export class WebARApp {
     }
 
     this.motionController?.update(delta);
+    this.selectionFeedback?.update(delta);
     if (frame && referenceSpace) {
       this.processPendingReanchors(frame, referenceSpace);
     }
@@ -1693,7 +1711,6 @@ export class WebARApp {
 
   private handleTap(_point: Point2): void {
     if (this.layoutMode && (this.appState.mode === 'placed' || this.appState.mode === 'editing')) {
-      this.selectLayoutObjectAtPoint(_point);
       return;
     }
 
@@ -1702,49 +1719,78 @@ export class WebARApp {
     }
   }
 
-  private handleDrag(point: Point2, startPoint: Point2): void {
+  private handleGestureStart(point: Point2): void {
+    this.resetPlacementDrag();
+    if (
+      (this.appState.mode !== 'placed' && this.appState.mode !== 'editing')
+      || !this.sceneContext
+    ) {
+      return;
+    }
+
+    if (this.layoutMode) {
+      const manager = this.requireLayoutSceneManager();
+      const hit = manager.hitTestObjectAtScreenPoint(
+        point,
+        this.sceneContext.renderer.domElement,
+        this.sceneContext.camera,
+      );
+      const target = hit ? manager.groupForObject(hit.id) : null;
+      if (hit && target) {
+        this.gestureCandidate = {
+          target,
+          layoutObjectId: hit.id,
+          modelLabel: hit.modelLabel,
+        };
+      }
+      return;
+    }
+
+    const target = this.sceneContext.modelRoot;
+    if (this.hitTestGroupAtScreenPoint(point, target)) {
+      this.gestureCandidate = {
+        target,
+        layoutObjectId: null,
+        modelLabel: 'Object',
+      };
+    }
+  }
+
+  private handleLongPress(_point: Point2): void {
+    const candidate = this.gestureCandidate;
+    if (!candidate || !candidate.target.visible || !candidate.target.parent) {
+      return;
+    }
+
+    if (candidate.layoutObjectId) {
+      if (!this.requireLayoutSceneManager().selectObject(candidate.layoutObjectId)) {
+        return;
+      }
+    }
+
+    this.longPressDragTarget = candidate.target;
+    this.selectionFeedback?.show(candidate.target, this.prefersReducedMotion());
+    this.appState.setMode('editing');
+    this.hud?.update(
+      this.appState.mode,
+      `${candidate.modelLabel} selected. Keep holding to move it.`,
+    );
+  }
+
+  private handleDrag(point: Point2, _startPoint: Point2): void {
     if (this.appState.mode !== 'placed' && this.appState.mode !== 'editing') {
       this.resetPlacementDrag();
       return;
     }
 
+    const target = this.longPressDragTarget;
+    if (!target) {
+      return;
+    }
+
     const sceneContext = this.requireScene();
     const runtime = this.requireARRuntime();
-    if (this.layoutMode) {
-      if (!this.layoutGestureStartedOnObject) {
-        this.layoutGestureStartedOnObject = this.selectLayoutObjectAtPoint(startPoint);
-      }
-      if (!this.layoutGestureStartedOnObject) {
-        return;
-      }
-      const floorY = this.requireLayoutSceneManager().selectedGroup()?.position.y ?? this.hitTestManager?.latestPoint?.y ?? null;
-      if (floorY === null) {
-        return;
-      }
-      const floorPoint = runtime.screenPointToFloorPoint(point, sceneContext.renderer.domElement, sceneContext.camera, floorY);
-      if (!floorPoint) {
-        return;
-      }
-      const target = this.requireLayoutSceneManager().selectedGroup();
-      if (!target) {
-        return;
-      }
-      if (this.activeDragTarget !== target) {
-        this.anchorManager?.deleteFor(target);
-      }
-      this.activeDragTarget = target;
-      this.requireMotionController().setDragTarget(target, floorPoint);
-      this.appState.setMode('editing');
-      return;
-    }
-
-    const transformController = this.requireTransformController();
-    const dragMode = this.getPlacementDragMode(startPoint, sceneContext);
-    if (dragMode === 'none') {
-      return;
-    }
-
-    const floorY = transformController.floorY;
+    const floorY = this.layoutMode ? target.position.y : this.requireTransformController().floorY;
     if (floorY === null) {
       return;
     }
@@ -1754,11 +1800,12 @@ export class WebARApp {
       return;
     }
 
-    if (this.activeDragTarget !== sceneContext.modelRoot) {
-      this.anchorManager?.deleteFor(sceneContext.modelRoot);
+    if (this.activeDragTarget !== target) {
+      this.anchorManager?.deleteFor(target);
     }
-    this.activeDragTarget = sceneContext.modelRoot;
-    this.requireMotionController().setDragTarget(sceneContext.modelRoot, floorPoint);
+    this.activeDragTarget = target;
+    this.gestureMovedTarget = true;
+    this.requireMotionController().setDragTarget(target, floorPoint);
     this.appState.setMode('editing');
   }
 
@@ -1768,9 +1815,6 @@ export class WebARApp {
     }
 
     if (this.layoutMode) {
-      if (!this.layoutGestureStartedOnObject) {
-        return;
-      }
       this.requireLayoutSceneManager().scaleSelectedBy(multiplier);
       this.appState.setMode('editing');
       return;
@@ -1825,53 +1869,35 @@ export class WebARApp {
     this.hud?.update(this.appState.mode);
   }
 
-  private getPlacementDragMode(startPoint: Point2, sceneContext: SceneContext): PlacementGestureZone {
-    if (!this.placementDragStart || this.placementDragStart.x !== startPoint.x || this.placementDragStart.y !== startPoint.y) {
-      const bounds = this.getProjectedPlacementMarkerBounds(sceneContext);
-      this.placementDragStart = startPoint;
-      this.placementDragMode = bounds ? this.requireARRuntime().classifyPlacementGesture(startPoint, bounds) : 'none';
+  private hitTestGroupAtScreenPoint(point: Point2, target: Three.Group): boolean {
+    if (!target.visible || !this.sceneContext) {
+      return false;
     }
 
-    return this.placementDragMode ?? 'none';
-  }
-
-  private getProjectedPlacementMarkerBounds(sceneContext: SceneContext): { center: Point2; radiusPx: number } | null {
-    if (!sceneContext.modelRoot.visible || !sceneContext.placementMarker.visible) {
-      return null;
-    }
-
-    const canvas = sceneContext.renderer.domElement;
+    const canvas = this.sceneContext.renderer.domElement;
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) {
-      return null;
+      return false;
     }
 
     const { THREE } = this.requireARRuntime();
-    const centerWorld = new THREE.Vector3();
-    sceneContext.placementMarker.getWorldPosition(centerWorld);
-    const radiusWorld = sceneContext.placementMarker.localToWorld(new THREE.Vector3(0.24, 0, 0));
-
-    const center = this.worldToScreenPoint(centerWorld, sceneContext.camera, rect);
-    const radiusPoint = this.worldToScreenPoint(radiusWorld, sceneContext.camera, rect);
-    return {
-      center,
-      radiusPx: Math.hypot(radiusPoint.x - center.x, radiusPoint.y - center.y),
-    };
-  }
-
-  private worldToScreenPoint(worldPoint: Three.Vector3, camera: Three.Camera, rect: DOMRect): Point2 {
-    const projected = worldPoint.clone().project(camera);
-    return {
-      x: rect.left + ((projected.x + 1) / 2) * rect.width,
-      y: rect.top + ((1 - projected.y) / 2) * rect.height,
-    };
+    const normalizedPoint = new THREE.Vector2(
+      ((point.x - rect.left) / rect.width) * 2 - 1,
+      -(((point.y - rect.top) / rect.height) * 2 - 1),
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(normalizedPoint, this.sceneContext.camera);
+    target.updateWorldMatrix(true, true);
+    return raycaster.intersectObject(target, true).some(({ object }) => (
+      !object.userData.ignoreRaycast && object.name !== 'placement-marker'
+    ));
   }
 
   private resetPlacementDrag(): void {
-    this.placementDragMode = null;
-    this.placementDragStart = null;
-    this.layoutGestureStartedOnObject = false;
+    this.gestureCandidate = null;
+    this.longPressDragTarget = null;
     this.activeDragTarget = null;
+    this.gestureMovedTarget = false;
   }
 
   private syncPlacementReadiness(hasStableHit: boolean): void {
@@ -1883,7 +1909,7 @@ export class WebARApp {
   }
 
   private finishPlacementDrag(): void {
-    if (this.activeDragTarget) {
+    if (this.gestureMovedTarget && this.activeDragTarget) {
       this.requireMotionController().finishDrag(this.activeDragTarget);
       this.pendingReanchorTargets.add(this.activeDragTarget);
     }
@@ -1892,25 +1918,6 @@ export class WebARApp {
 
   private prefersReducedMotion(): boolean {
     return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-  }
-
-  private selectLayoutObjectAtPoint(point: Point2): boolean {
-    if (!this.layoutMode || !this.sceneContext) {
-      return false;
-    }
-
-    const selected = this.requireLayoutSceneManager().selectObjectAtScreenPoint(
-      point,
-      this.sceneContext.renderer.domElement,
-      this.sceneContext.camera,
-    );
-    if (!selected) {
-      return false;
-    }
-
-    this.appState.setMode('editing');
-    this.hud?.update(this.appState.mode, `${selected.modelLabel} selected. Move, scale, use Rotate, or delete it.`);
-    return true;
   }
 
   private setEditing(): void {

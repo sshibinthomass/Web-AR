@@ -240,6 +240,145 @@ describe('WebARApp anchored edits', () => {
   });
 });
 
+describe('WebARApp long-press object movement', () => {
+  it('records a layout hit without selecting it until long-press activation', () => {
+    const target = new THREE.Group();
+    const scene = new THREE.Group();
+    scene.add(target);
+    target.visible = true;
+    const selectObject = vi.fn(() => true);
+    const show = vi.fn();
+    const app = new WebARApp(document.createElement('div')) as unknown as {
+      appState: { mode: string; setMode(mode: 'placed' | 'editing'): void };
+      gestureCandidate: { target: THREE.Group; layoutObjectId: string | null; modelLabel: string } | null;
+      handleGestureStart(point: { x: number; y: number }): void;
+      handleLongPress(point: { x: number; y: number }): void;
+      hud: { update: ReturnType<typeof vi.fn> };
+      layoutMode: boolean;
+      layoutSceneManager: {
+        groupForObject: ReturnType<typeof vi.fn>;
+        hitTestObjectAtScreenPoint: ReturnType<typeof vi.fn>;
+        selectObject: typeof selectObject;
+      };
+      longPressDragTarget: THREE.Group | null;
+      sceneContext: {
+        camera: THREE.PerspectiveCamera;
+        renderer: { domElement: HTMLCanvasElement };
+      };
+      selectionFeedback: { show: typeof show };
+    };
+    app.appState.setMode('placed');
+    app.layoutMode = true;
+    app.sceneContext = {
+      camera: new THREE.PerspectiveCamera(),
+      renderer: { domElement: document.createElement('canvas') },
+    };
+    app.layoutSceneManager = {
+      groupForObject: vi.fn(() => target),
+      hitTestObjectAtScreenPoint: vi.fn(() => ({ id: 'chair-1', modelLabel: 'Chair' })),
+      selectObject,
+    };
+    app.selectionFeedback = { show };
+    app.hud = { update: vi.fn() };
+
+    app.handleGestureStart({ x: 50, y: 50 });
+
+    expect(app.gestureCandidate).toEqual({
+      target,
+      layoutObjectId: 'chair-1',
+      modelLabel: 'Chair',
+    });
+    expect(selectObject).not.toHaveBeenCalled();
+
+    app.handleLongPress({ x: 50, y: 50 });
+
+    expect(selectObject).toHaveBeenCalledWith('chair-1');
+    expect(app.longPressDragTarget).toBe(target);
+    expect(show).toHaveBeenCalledWith(target, false);
+    expect(app.appState.mode).toBe('editing');
+  });
+
+  it('does not move a placed model before long-press authorization', () => {
+    const setDragTarget = vi.fn();
+    const app = new WebARApp(document.createElement('div')) as unknown as {
+      appState: { setMode(mode: 'placed'): void };
+      handleDrag(point: { x: number; y: number }, startPoint: { x: number; y: number }): void;
+      layoutMode: boolean;
+      motionController: { setDragTarget: typeof setDragTarget };
+    };
+    app.appState.setMode('placed');
+    app.layoutMode = false;
+    app.motionController = { setDragTarget };
+
+    app.handleDrag({ x: 60, y: 60 }, { x: 50, y: 50 });
+
+    expect(setDragTarget).not.toHaveBeenCalled();
+  });
+
+  it('moves the authorized model and queues re-anchoring only after an actual drag', () => {
+    const target = new THREE.Group();
+    const scene = new THREE.Group();
+    scene.add(target);
+    target.visible = true;
+    const floorPoint = new THREE.Vector3(2, 0.25, -3);
+    const setDragTarget = vi.fn();
+    const finishDrag = vi.fn();
+    const deleteFor = vi.fn();
+    const pendingReanchorTargets = new Set<THREE.Group>();
+    const app = new WebARApp(document.createElement('div')) as unknown as {
+      activeDragTarget: THREE.Group | null;
+      anchorManager: { deleteFor: typeof deleteFor };
+      appState: { mode: string; setMode(mode: 'placed' | 'editing'): void };
+      arRuntime: { screenPointToFloorPoint: ReturnType<typeof vi.fn> };
+      finishPlacementDrag(): void;
+      gestureCandidate: { target: THREE.Group; layoutObjectId: null; modelLabel: string } | null;
+      handleDrag(point: { x: number; y: number }, startPoint: { x: number; y: number }): void;
+      handleLongPress(point: { x: number; y: number }): void;
+      hud: { update: ReturnType<typeof vi.fn> };
+      layoutMode: boolean;
+      longPressDragTarget: THREE.Group | null;
+      motionController: { finishDrag: typeof finishDrag; setDragTarget: typeof setDragTarget };
+      pendingReanchorTargets: Set<THREE.Group>;
+      sceneContext: {
+        camera: THREE.PerspectiveCamera;
+        renderer: { domElement: HTMLCanvasElement };
+      };
+      selectionFeedback: { show: ReturnType<typeof vi.fn> };
+      transformController: { floorY: number };
+    };
+    app.appState.setMode('placed');
+    app.layoutMode = false;
+    app.gestureCandidate = { target, layoutObjectId: null, modelLabel: 'Object' };
+    app.arRuntime = { screenPointToFloorPoint: vi.fn(() => floorPoint) };
+    app.sceneContext = {
+      camera: new THREE.PerspectiveCamera(),
+      renderer: { domElement: document.createElement('canvas') },
+    };
+    app.transformController = { floorY: 0.25 };
+    app.motionController = { finishDrag, setDragTarget };
+    app.anchorManager = { deleteFor };
+    app.pendingReanchorTargets = pendingReanchorTargets;
+    app.selectionFeedback = { show: vi.fn() };
+    app.hud = { update: vi.fn() };
+
+    app.handleLongPress({ x: 50, y: 50 });
+    app.finishPlacementDrag();
+    expect(pendingReanchorTargets.size).toBe(0);
+
+    app.gestureCandidate = { target, layoutObjectId: null, modelLabel: 'Object' };
+    app.handleLongPress({ x: 50, y: 50 });
+    app.handleDrag({ x: 60, y: 60 }, { x: 50, y: 50 });
+
+    expect(deleteFor).toHaveBeenCalledWith(target);
+    expect(setDragTarget).toHaveBeenCalledWith(target, floorPoint);
+    expect(app.activeDragTarget).toBe(target);
+
+    app.finishPlacementDrag();
+    expect(finishDrag).toHaveBeenCalledWith(target);
+    expect(pendingReanchorTargets.has(target)).toBe(true);
+  });
+});
+
 describe('WebARApp multi-object access', () => {
   it('starts a multi-object session without requiring a guest to sign in', async () => {
     const app = new WebARApp(document.createElement('div')) as unknown as {
