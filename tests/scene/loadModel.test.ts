@@ -23,7 +23,8 @@ describe('loadGLBModel', () => {
   it('keeps GLB animation clips available on the loaded group', async () => {
     const clip = new THREE.AnimationClip('mixamo.com', 1, []);
     const scene = new THREE.Group();
-    scene.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)));
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+    scene.add(mesh);
     gltfLoaderMock.loadAsync.mockResolvedValue({
       scene,
       animations: [clip],
@@ -32,5 +33,6 @@ describe('loadGLBModel', () => {
     const loadedModel = await loadGLBModel('https://assets.example/animated.glb');
 
     expect(loadedModel.userData.animations).toEqual([clip]);
+    expect(mesh.castShadow).toBe(true);
   });
 });

@@ -9,6 +9,7 @@ export interface SceneContext {
   modelRoot: THREE.Group;
   placementMarker: THREE.Mesh;
   contactShadow: THREE.Mesh<THREE.CircleGeometry, THREE.ShadowMaterial>;
+  fallbackLights: readonly [THREE.HemisphereLight, THREE.DirectionalLight];
   dispose(): void;
 }
 
@@ -82,6 +83,7 @@ export function createScene(container: HTMLElement): SceneContext {
     modelRoot,
     placementMarker,
     contactShadow,
+    fallbackLights: [hemiLight, directionalLight],
     dispose() {
       window.removeEventListener('resize', onResize);
       renderer.setAnimationLoop(null);

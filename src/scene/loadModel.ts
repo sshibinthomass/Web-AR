@@ -9,6 +9,7 @@ export async function loadGLBModel(url: string): Promise<THREE.Group> {
   model.traverse((child) => {
     if (child instanceof THREE.Mesh) {
       child.frustumCulled = false;
+      child.castShadow = true;
       if (child.material) {
         const materials = Array.isArray(child.material) ? child.material : [child.material];
         materials.forEach((material) => {

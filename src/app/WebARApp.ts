@@ -4,6 +4,7 @@ import type { ObjectTransformController } from '../interaction/ObjectTransformCo
 import type { SpatialMotionController } from '../interaction/SpatialMotionController';
 import type { HitTestManager } from '../xr/HitTestManager';
 import type { AnchorManager } from '../xr/AnchorManager';
+import type { EstimatedLightingController } from '../xr/EstimatedLightingController';
 import { MODEL_OPTIONS, type ModelOption } from './models';
 import {
   captureVideoFrame,
@@ -75,6 +76,7 @@ export class WebARApp {
   private gestureController: GestureController | null = null;
   private hitTestManager: HitTestManager | null = null;
   private anchorManager: AnchorManager | null = null;
+  private lightingController: EstimatedLightingController | null = null;
   private readonly appState = new AppState();
   private transformController: ObjectTransformController | null = null;
   private motionController: SpatialMotionController | null = null;
@@ -377,7 +379,15 @@ export class WebARApp {
   }
 
   private async ensureARRuntime(): Promise<ARRuntime> {
-    if (this.arRuntime && this.sceneContext && this.transformController && this.motionController && this.anchorManager && this.clock) {
+    if (
+      this.arRuntime
+      && this.sceneContext
+      && this.transformController
+      && this.motionController
+      && this.anchorManager
+      && this.lightingController
+      && this.clock
+    ) {
       return this.arRuntime;
     }
 
@@ -389,6 +399,13 @@ export class WebARApp {
       this.sceneContext = sceneContext;
       this.hitTestManager = new arRuntime.HitTestManager(sceneContext.reticle);
       this.anchorManager = new arRuntime.AnchorManager();
+      const estimatedLight = new arRuntime.XREstimatedLight(sceneContext.renderer, true);
+      this.lightingController = new arRuntime.EstimatedLightingController(
+        sceneContext.scene,
+        estimatedLight as ConstructorParameters<typeof arRuntime.EstimatedLightingController>[1],
+        sceneContext.fallbackLights,
+      );
+      this.lightingController.start();
       this.transformController = new arRuntime.ObjectTransformController();
       this.motionController = new arRuntime.SpatialMotionController();
       const layoutRoot = new arRuntime.THREE.Group();
@@ -1617,6 +1634,7 @@ export class WebARApp {
     this.hud?.attachARButton(button);
 
     sceneContext.renderer.xr.addEventListener('sessionstart', () => {
+      this.lightingController?.start();
       this.appState.setMode('scanning');
       stopCameraPreview(this.cameraStream);
       this.cameraStream = null;
@@ -1627,6 +1645,7 @@ export class WebARApp {
     });
 
     sceneContext.renderer.xr.addEventListener('sessionend', () => {
+      this.lightingController?.stop();
       this.motionController?.cancel();
       this.anchorManager?.clear();
       this.pendingReanchorTarget = null;

@@ -14,6 +14,8 @@ import { AnchorManager } from '../xr/AnchorManager';
 import { PoseStabilizer } from '../xr/PoseStabilizer';
 import { checkXRSupport } from '../xr/XRSupport';
 import { createARSessionButton } from '../xr/XRSessionManager';
+import { EstimatedLightingController } from '../xr/EstimatedLightingController';
+import { XREstimatedLight } from 'three/addons/webxr/XREstimatedLight.js';
 
 export const arRuntime = {
   THREE,
@@ -29,6 +31,8 @@ export const arRuntime = {
   PoseStabilizer,
   checkXRSupport,
   createARSessionButton,
+  EstimatedLightingController,
+  XREstimatedLight,
 };
 
 export type ARRuntime = typeof arRuntime;
