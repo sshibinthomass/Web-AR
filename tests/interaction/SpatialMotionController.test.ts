@@ -46,6 +46,7 @@ describe('SpatialMotionController', () => {
     const { target } = createTarget();
 
     controller.setDragTarget(target, new THREE.Vector3(3, 9, -4));
+    expect(controller.isActive(target)).toBe(true);
     controller.update(1 / 60);
 
     expect(target.position.x).toBeGreaterThan(1);
@@ -59,6 +60,7 @@ describe('SpatialMotionController', () => {
     }
 
     expect(target.position.toArray()).toEqual([3, 0.5, -4]);
+    expect(controller.isActive(target)).toBe(false);
   });
 
   it('updates an active drag target without snapping to the previous point', () => {

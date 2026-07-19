@@ -63,6 +63,10 @@ export class SpatialMotionController {
     });
   }
 
+  isActive(target: THREE.Group): boolean {
+    return this.motions.has(target);
+  }
+
   setDragTarget(target: THREE.Group, point: THREE.Vector3): void {
     const current = this.motions.get(target);
     if (current?.kind === 'drag') {

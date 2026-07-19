@@ -3,6 +3,7 @@ import type { GestureController } from '../interaction/GestureController';
 import type { ObjectTransformController } from '../interaction/ObjectTransformController';
 import type { SpatialMotionController } from '../interaction/SpatialMotionController';
 import type { HitTestManager } from '../xr/HitTestManager';
+import type { AnchorManager } from '../xr/AnchorManager';
 import { MODEL_OPTIONS, type ModelOption } from './models';
 import {
   captureVideoFrame,
@@ -73,6 +74,7 @@ export class WebARApp {
   private hud: ARHud | null = null;
   private gestureController: GestureController | null = null;
   private hitTestManager: HitTestManager | null = null;
+  private anchorManager: AnchorManager | null = null;
   private readonly appState = new AppState();
   private transformController: ObjectTransformController | null = null;
   private motionController: SpatialMotionController | null = null;
@@ -101,6 +103,7 @@ export class WebARApp {
   private placementDragStart: Point2 | null = null;
   private layoutGestureStartedOnObject = false;
   private activeDragTarget: Three.Group | null = null;
+  private pendingReanchorTarget: Three.Group | null = null;
   private lastHudMode = this.appState.mode;
   private availableModels = [...MODEL_OPTIONS];
   private generatedModelOptions: ModelOption[] = [];
@@ -374,7 +377,7 @@ export class WebARApp {
   }
 
   private async ensureARRuntime(): Promise<ARRuntime> {
-    if (this.arRuntime && this.sceneContext && this.transformController && this.motionController && this.clock) {
+    if (this.arRuntime && this.sceneContext && this.transformController && this.motionController && this.anchorManager && this.clock) {
       return this.arRuntime;
     }
 
@@ -385,6 +388,7 @@ export class WebARApp {
       const sceneContext = arRuntime.createScene(this.root);
       this.sceneContext = sceneContext;
       this.hitTestManager = new arRuntime.HitTestManager(sceneContext.reticle);
+      this.anchorManager = new arRuntime.AnchorManager();
       this.transformController = new arRuntime.ObjectTransformController();
       this.motionController = new arRuntime.SpatialMotionController();
       const layoutRoot = new arRuntime.THREE.Group();
@@ -516,6 +520,7 @@ export class WebARApp {
       }
       this.stopModelAnimations();
       this.motionController?.cancel(sceneContext.modelRoot);
+      this.anchorManager?.deleteFor(sceneContext.modelRoot);
       this.removeLoadedModels(sceneContext.modelRoot);
       sceneContext.modelRoot.add(model);
       this.startModelAnimations(model);
@@ -1155,6 +1160,7 @@ export class WebARApp {
     this.speechJobWatchToken += 1;
     this.pendingUploadModelFile = null;
     this.layoutMode = false;
+    this.anchorManager?.clear();
     this.layoutSceneManager?.clear();
     this.clearCapturedImagePreview(false, false);
     this.closeModelPreview();
@@ -1186,6 +1192,7 @@ export class WebARApp {
   private async startMultiObjectSession(): Promise<void> {
     await this.ensureARRuntime();
     this.layoutMode = true;
+    this.anchorManager?.clear();
     this.requireLayoutSceneManager().clear();
     this.appState.modelLoaded = false;
     this.hud?.updateModelReady(false);
@@ -1207,6 +1214,11 @@ export class WebARApp {
       return;
     }
 
+    const selectedGroup = this.requireLayoutSceneManager().selectedGroup();
+    if (selectedGroup) {
+      this.anchorManager?.deleteFor(selectedGroup);
+      this.motionController?.cancel(selectedGroup);
+    }
     const deleted = this.requireLayoutSceneManager().deleteSelected();
     this.hud?.showMultiObjectMessage(deleted ? 'Object removed from this session.' : 'Select an object before deleting.');
   }
@@ -1609,12 +1621,15 @@ export class WebARApp {
       stopCameraPreview(this.cameraStream);
       this.cameraStream = null;
       this.hitTestManager?.reset();
+      this.anchorManager?.clear();
       this.hud?.setCameraPanelVisible(false);
       this.hud?.update(this.appState.mode, this.appState.modelLoaded ? undefined : 'Select a Cloudflare model to download it.');
     });
 
     sceneContext.renderer.xr.addEventListener('sessionend', () => {
       this.motionController?.cancel();
+      this.anchorManager?.clear();
+      this.pendingReanchorTarget = null;
       this.appState.setMode('loading');
       this.hud?.setCameraPanelVisible(false);
       this.hud?.update(this.appState.mode, 'AR session ended. Start AR again to continue.');
@@ -1633,11 +1648,19 @@ export class WebARApp {
     const delta = clock.getDelta();
 
     if (frame && session && referenceSpace) {
+      this.anchorManager?.update(frame, referenceSpace);
       const hasFloorHit = this.hitTestManager?.update(frame, session, referenceSpace, delta) ?? false;
 
       if (this.appState.mode === 'scanning' && hasFloorHit) {
         this.appState.setMode('readyToPlace');
       }
+    }
+
+    this.motionController?.update(delta);
+    const pendingTarget = this.pendingReanchorTarget;
+    if (frame && referenceSpace && pendingTarget && !this.motionController?.isActive(pendingTarget)) {
+      this.pendingReanchorTarget = null;
+      void this.anchorManager?.createAtTransform(pendingTarget, frame, referenceSpace);
     }
 
     if (this.appState.mode !== this.lastHudMode) {
@@ -1646,7 +1669,6 @@ export class WebARApp {
     }
 
     this.activeModelAnimation?.mixer.update(delta);
-    this.motionController?.update(delta);
     sceneContext.renderer.render(sceneContext.scene, sceneContext.camera);
   }
 
@@ -1688,6 +1710,9 @@ export class WebARApp {
       if (!target) {
         return;
       }
+      if (this.activeDragTarget !== target) {
+        this.anchorManager?.deleteFor(target);
+      }
       this.activeDragTarget = target;
       this.requireMotionController().setDragTarget(target, floorPoint);
       this.appState.setMode('editing');
@@ -1710,6 +1735,9 @@ export class WebARApp {
       return;
     }
 
+    if (this.activeDragTarget !== sceneContext.modelRoot) {
+      this.anchorManager?.deleteFor(sceneContext.modelRoot);
+    }
     this.activeDragTarget = sceneContext.modelRoot;
     this.requireMotionController().setDragTarget(sceneContext.modelRoot, floorPoint);
     this.appState.setMode('editing');
@@ -1758,6 +1786,10 @@ export class WebARApp {
       const target = this.requireLayoutSceneManager().selectedGroup();
       if (target) {
         this.requireMotionController().startPlacement(target, this.prefersReducedMotion());
+        const hitResult = hitTestManager.latestHitResult;
+        if (hitResult) {
+          void this.anchorManager?.createFor(target, hitResult);
+        }
       }
       this.hud?.update(this.appState.mode, `${placedObject.modelLabel} placed. Add another object or delete the selected one.`);
       return;
@@ -1766,6 +1798,9 @@ export class WebARApp {
     this.requireTransformController().placeAt(placementMatrix);
     this.requireScene().contactShadow.visible = true;
     this.requireMotionController().startPlacement(this.requireScene().modelRoot, this.prefersReducedMotion());
+    if (hitTestManager.latestHitResult) {
+      void this.anchorManager?.createFor(this.requireScene().modelRoot, hitTestManager.latestHitResult);
+    }
     this.appState.floorLocked = true;
     this.appState.setMode('placed');
     this.hud?.update(this.appState.mode);
@@ -1823,6 +1858,7 @@ export class WebARApp {
   private finishPlacementDrag(): void {
     if (this.activeDragTarget) {
       this.requireMotionController().finishDrag(this.activeDragTarget);
+      this.pendingReanchorTarget = this.activeDragTarget;
     }
     this.resetPlacementDrag();
   }

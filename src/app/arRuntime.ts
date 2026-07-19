@@ -10,6 +10,7 @@ import { createScene, type SceneContext } from '../scene/createScene';
 import { LayoutSceneManager } from '../scene/LayoutSceneManager';
 import { screenPointToFloorPoint, type Point2 } from '../utils/math';
 import { HitTestManager } from '../xr/HitTestManager';
+import { AnchorManager } from '../xr/AnchorManager';
 import { PoseStabilizer } from '../xr/PoseStabilizer';
 import { checkXRSupport } from '../xr/XRSupport';
 import { createARSessionButton } from '../xr/XRSessionManager';
@@ -24,6 +25,7 @@ export const arRuntime = {
   createScene,
   screenPointToFloorPoint,
   HitTestManager,
+  AnchorManager,
   PoseStabilizer,
   checkXRSupport,
   createARSessionButton,
