@@ -74,4 +74,23 @@ describe('AnchorManager', () => {
     expect(result).toBe(createAnchorResult);
     expect(createAnchorRequest).toHaveBeenCalledOnce();
   });
+
+  it('deletes a pending anchor that resolves after clear', async () => {
+    let resolveAnchor!: (anchor: XRAnchor) => void;
+    const pending = new Promise<XRAnchor>((resolve) => {
+      resolveAnchor = resolve;
+    });
+    const anchor = createAnchor();
+    const manager = new AnchorManager();
+    const creation = manager.createFor(
+      new THREE.Group(),
+      { createAnchor: vi.fn(() => pending) } as unknown as XRHitTestResult,
+    );
+
+    manager.clear();
+    resolveAnchor(anchor);
+
+    await expect(creation).resolves.toBeNull();
+    expect(anchor.delete).toHaveBeenCalledOnce();
+  });
 });

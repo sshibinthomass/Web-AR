@@ -52,6 +52,7 @@ describe('WebARApp route cleanup', () => {
 describe('WebARApp layout reset', () => {
   it('resets the selected layout object when no fresh hit-test pose exists', () => {
     const app = new WebARApp(document.createElement('div')) as unknown as {
+      anchorManager: { deleteFor: ReturnType<typeof vi.fn> };
       appState: { mode: string; setMode(mode: 'editing' | 'placed'): void };
       hitTestManager: { latestPoseMatrix: null } | null;
       hud: { update: ReturnType<typeof vi.fn> };
@@ -59,16 +60,23 @@ describe('WebARApp layout reset', () => {
       layoutSceneManager: {
         placeSelectedAt: ReturnType<typeof vi.fn>;
         resetSelectedTransform: ReturnType<typeof vi.fn>;
+        selectedGroup: ReturnType<typeof vi.fn>;
       };
+      motionController: { cancel: ReturnType<typeof vi.fn> };
+      pendingReanchorTarget: THREE.Group | null;
       resetObject(): void;
     };
     const placeSelectedAt = vi.fn();
     const resetSelectedTransform = vi.fn(() => true);
     const update = vi.fn();
+    const target = new THREE.Group();
 
+    app.anchorManager = { deleteFor: vi.fn() };
     app.layoutMode = true;
     app.hitTestManager = { latestPoseMatrix: null };
-    app.layoutSceneManager = { placeSelectedAt, resetSelectedTransform };
+    app.layoutSceneManager = { placeSelectedAt, resetSelectedTransform, selectedGroup: vi.fn(() => target) };
+    app.motionController = { cancel: vi.fn() };
+    app.pendingReanchorTarget = null;
     app.hud = { update };
     app.appState.setMode('editing');
 
@@ -78,6 +86,9 @@ describe('WebARApp layout reset', () => {
     expect(placeSelectedAt).not.toHaveBeenCalled();
     expect(app.appState.mode).toBe('placed');
     expect(update).toHaveBeenCalledWith('placed');
+    expect(app.anchorManager.deleteFor).toHaveBeenCalledWith(target);
+    expect(app.motionController.cancel).toHaveBeenCalledWith(target);
+    expect(app.pendingReanchorTarget).toBe(target);
   });
 });
 
@@ -107,6 +118,50 @@ describe('WebARApp stable placement', () => {
     app.placeAtLatestHit();
 
     expect(app.transformController.placeAt).not.toHaveBeenCalled();
+  });
+
+  it('returns readiness to scanning when a stable hit is lost', () => {
+    const app = new WebARApp(document.createElement('div')) as unknown as {
+      appState: { mode: string; setMode(mode: 'scanning' | 'readyToPlace'): void };
+      syncPlacementReadiness(hasStableHit: boolean): void;
+    };
+    app.appState.setMode('readyToPlace');
+
+    app.syncPlacementReadiness(false);
+
+    expect(app.appState.mode).toBe('scanning');
+  });
+});
+
+describe('WebARApp anchored edits', () => {
+  it('detaches and schedules a replacement anchor before rotating', () => {
+    const target = new THREE.Group();
+    const app = new WebARApp(document.createElement('div')) as unknown as {
+      anchorManager: { deleteFor: ReturnType<typeof vi.fn> };
+      appState: { setMode(mode: 'placed'): void };
+      hud: { update: ReturnType<typeof vi.fn> };
+      layoutMode: boolean;
+      motionController: { cancel: ReturnType<typeof vi.fn> };
+      pendingReanchorTarget: THREE.Group | null;
+      sceneContext: { modelRoot: THREE.Group };
+      transformController: { rotateBy: ReturnType<typeof vi.fn> };
+      rotateBy(deltaRadians: number): void;
+    };
+    app.anchorManager = { deleteFor: vi.fn() };
+    app.appState.setMode('placed');
+    app.hud = { update: vi.fn() };
+    app.layoutMode = false;
+    app.motionController = { cancel: vi.fn() };
+    app.pendingReanchorTarget = null;
+    app.sceneContext = { modelRoot: target };
+    app.transformController = { rotateBy: vi.fn() };
+
+    app.rotateBy(0.25);
+
+    expect(app.anchorManager.deleteFor).toHaveBeenCalledWith(target);
+    expect(app.motionController.cancel).toHaveBeenCalledWith(target);
+    expect(app.transformController.rotateBy).toHaveBeenCalledWith(0.25);
+    expect(app.pendingReanchorTarget).toBe(target);
   });
 });
 

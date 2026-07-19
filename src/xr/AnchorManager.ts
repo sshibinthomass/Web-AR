@@ -3,6 +3,7 @@ import * as THREE from 'three';
 export class AnchorManager {
   private readonly anchors = new Map<THREE.Object3D, XRAnchor>();
   private readonly requestVersions = new Map<THREE.Object3D, number>();
+  private generation = 0;
 
   async createFor(target: THREE.Object3D, hitResult: XRHitTestResult): Promise<XRAnchor | null> {
     const createAnchor = hitResult.createAnchor?.bind(hitResult);
@@ -57,6 +58,7 @@ export class AnchorManager {
   }
 
   clear(): void {
+    this.generation += 1;
     for (const target of [...this.anchors.keys()]) {
       this.deleteFor(target);
     }
@@ -67,6 +69,7 @@ export class AnchorManager {
     create: (() => Promise<XRAnchor>) | null,
   ): Promise<XRAnchor | null> {
     const version = (this.requestVersions.get(target) ?? 0) + 1;
+    const generation = this.generation;
     this.requestVersions.set(target, version);
     const previous = this.anchors.get(target);
     if (previous) {
@@ -79,7 +82,7 @@ export class AnchorManager {
 
     try {
       const anchor = await create();
-      if (this.requestVersions.get(target) !== version) {
+      if (this.requestVersions.get(target) !== version || this.generation !== generation) {
         anchor.delete();
         return null;
       }

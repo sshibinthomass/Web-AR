@@ -41,4 +41,41 @@ describe('HitTestManager', () => {
     expect(manager.isStable).toBe(true);
     expect(manager.latestHitResult).toBe(hit);
   });
+
+  it('cancels an active hit-test source on reset', async () => {
+    const manager = new HitTestManager(new THREE.Mesh());
+    const source = { cancel: vi.fn() } as unknown as XRHitTestSource;
+    const session = {
+      requestReferenceSpace: vi.fn(async () => ({} as XRReferenceSpace)),
+      requestHitTestSource: vi.fn(async () => source),
+      addEventListener: vi.fn(),
+    } as unknown as XRSession;
+    manager.update({} as XRFrame, session, {} as XRReferenceSpace, 1 / 60);
+    await vi.waitFor(() => expect(session.requestHitTestSource).toHaveBeenCalledOnce());
+
+    manager.reset();
+
+    await vi.waitFor(() => expect(source.cancel).toHaveBeenCalledOnce());
+  });
+
+  it('cancels a source that resolves after reset', async () => {
+    let resolveSource!: (source: XRHitTestSource) => void;
+    const sourcePromise = new Promise<XRHitTestSource>((resolve) => {
+      resolveSource = resolve;
+    });
+    const source = { cancel: vi.fn() } as unknown as XRHitTestSource;
+    const manager = new HitTestManager(new THREE.Mesh());
+    const session = {
+      requestReferenceSpace: vi.fn(async () => ({} as XRReferenceSpace)),
+      requestHitTestSource: vi.fn(() => sourcePromise),
+      addEventListener: vi.fn(),
+    } as unknown as XRSession;
+    manager.update({} as XRFrame, session, {} as XRReferenceSpace, 1 / 60);
+    await vi.waitFor(() => expect(session.requestHitTestSource).toHaveBeenCalledOnce());
+    manager.reset();
+
+    resolveSource(source);
+
+    await vi.waitFor(() => expect(source.cancel).toHaveBeenCalledOnce());
+  });
 });

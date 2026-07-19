@@ -8,6 +8,7 @@ export class HitTestManager {
 
   private hitTestSource: XRHitTestSource | null = null;
   private hitTestSourceRequested = false;
+  private requestGeneration = 0;
   private readonly stabilizer = new PoseStabilizer();
 
   constructor(private readonly reticle: THREE.Mesh) {}
@@ -17,6 +18,8 @@ export class HitTestManager {
   }
 
   reset(): void {
+    this.requestGeneration += 1;
+    this.hitTestSource?.cancel();
     this.latestPoseMatrix = null;
     this.latestPoint = null;
     this.latestHitResult = null;
@@ -34,16 +37,25 @@ export class HitTestManager {
   ): boolean {
     if (!this.hitTestSourceRequested) {
       this.hitTestSourceRequested = true;
-      void session.requestReferenceSpace('viewer').then((viewerSpace) => {
-        const requestHitTestSource = session.requestHitTestSource;
-        if (!requestHitTestSource) {
-          return undefined;
-        }
-
-        return requestHitTestSource({ space: viewerSpace })?.then((source) => {
-          this.hitTestSource = source ?? null;
+      const requestGeneration = this.requestGeneration;
+      void session.requestReferenceSpace('viewer')
+        .then((viewerSpace) => session.requestHitTestSource?.({ space: viewerSpace }))
+        .then((source) => {
+          if (!source) {
+            return;
+          }
+          if (requestGeneration !== this.requestGeneration) {
+            source.cancel();
+            return;
+          }
+          this.hitTestSource = source;
+        })
+        .catch(() => {
+          if (requestGeneration === this.requestGeneration) {
+            this.hitTestSource = null;
+            this.hitTestSourceRequested = false;
+          }
         });
-      });
 
       session.addEventListener(
         'end',

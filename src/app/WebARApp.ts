@@ -1670,9 +1670,7 @@ export class WebARApp {
       this.anchorManager?.update(frame, referenceSpace);
       const hasFloorHit = this.hitTestManager?.update(frame, session, referenceSpace, delta) ?? false;
 
-      if (this.appState.mode === 'scanning' && hasFloorHit) {
-        this.appState.setMode('readyToPlace');
-      }
+      this.syncPlacementReadiness(hasFloorHit);
     }
 
     this.motionController?.update(delta);
@@ -1874,6 +1872,14 @@ export class WebARApp {
     this.activeDragTarget = null;
   }
 
+  private syncPlacementReadiness(hasStableHit: boolean): void {
+    if (this.appState.mode === 'scanning' && hasStableHit) {
+      this.appState.setMode('readyToPlace');
+    } else if (this.appState.mode === 'readyToPlace' && !hasStableHit) {
+      this.appState.setMode('scanning');
+    }
+  }
+
   private finishPlacementDrag(): void {
     if (this.activeDragTarget) {
       this.requireMotionController().finishDrag(this.activeDragTarget);
@@ -1918,6 +1924,8 @@ export class WebARApp {
     }
 
     if (this.layoutMode) {
+      const target = this.requireLayoutSceneManager().selectedGroup();
+      this.prepareAnchoredTransform(target);
       const latestMatrix = this.hitTestManager?.latestPoseMatrix;
       if (latestMatrix) {
         this.requireLayoutSceneManager().placeSelectedAt(latestMatrix);
@@ -1930,6 +1938,7 @@ export class WebARApp {
     }
 
     const latestMatrix = this.hitTestManager?.latestPoseMatrix;
+    this.prepareAnchoredTransform(this.requireScene().modelRoot);
     const transformController = this.requireTransformController();
     if (latestMatrix) {
       transformController.placeAt(latestMatrix);
@@ -1955,15 +1964,26 @@ export class WebARApp {
 
   private rotateBy(deltaRadians: number): void {
     if (this.layoutMode) {
+      this.prepareAnchoredTransform(this.requireLayoutSceneManager().selectedGroup());
       this.requireLayoutSceneManager().rotateSelectedBy(deltaRadians);
       this.appState.setMode('editing');
       this.hud?.update(this.appState.mode);
       return;
     }
 
+    this.prepareAnchoredTransform(this.requireScene().modelRoot);
     this.requireTransformController().rotateBy(deltaRadians);
     this.appState.setMode('editing');
     this.hud?.update(this.appState.mode);
+  }
+
+  private prepareAnchoredTransform(target: Three.Group | null): void {
+    if (!target) {
+      return;
+    }
+    this.motionController?.cancel(target);
+    this.anchorManager?.deleteFor(target);
+    this.pendingReanchorTarget = target;
   }
 
   private requireScene(): SceneContext {

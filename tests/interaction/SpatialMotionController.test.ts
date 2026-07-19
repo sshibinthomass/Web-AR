@@ -2,30 +2,35 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { SpatialMotionController } from '../../src/interaction/SpatialMotionController';
 
-function createTarget(): { target: THREE.Group; material: THREE.MeshBasicMaterial } {
+function createTarget(): { target: THREE.Group; visual: THREE.Mesh; material: THREE.MeshBasicMaterial } {
   const target = new THREE.Group();
   target.position.set(1, 0.5, -2);
   target.scale.setScalar(2);
   const material = new THREE.MeshBasicMaterial({ opacity: 0.8, transparent: false });
-  target.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material));
-  return { target, material };
+  const visual = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
+  target.add(visual);
+  return { target, visual, material };
 }
 
 describe('SpatialMotionController', () => {
   it('settles placement to the exact original transform and opacity', () => {
     const controller = new SpatialMotionController();
-    const { target, material } = createTarget();
+    const { target, visual, material } = createTarget();
 
     controller.startPlacement(target, false);
 
-    expect(target.position.y).toBeCloseTo(0.54);
-    expect(target.scale.x).toBeCloseTo(1.92);
+    expect(target.position.toArray()).toEqual([1, 0.5, -2]);
+    expect(target.scale.toArray()).toEqual([2, 2, 2]);
+    expect(visual.position.y).toBeCloseTo(0.04);
+    expect(visual.scale.x).toBeCloseTo(0.96);
     expect(material.opacity).toBe(0);
 
     controller.update(0.22);
 
     expect(target.position.toArray()).toEqual([1, 0.5, -2]);
     expect(target.scale.toArray()).toEqual([2, 2, 2]);
+    expect(visual.position.toArray()).toEqual([0, 0, 0]);
+    expect(visual.scale.toArray()).toEqual([1, 1, 1]);
     expect(material.opacity).toBe(0.8);
     expect(material.transparent).toBe(false);
   });

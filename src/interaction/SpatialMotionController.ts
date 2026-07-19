@@ -12,13 +12,18 @@ interface MaterialSnapshot {
   transparent: boolean;
 }
 
-interface PlacementMotion {
-  kind: 'placement';
-  elapsed: number;
+interface VisualSnapshot {
+  object: THREE.Object3D;
   startPosition: THREE.Vector3;
   finalPosition: THREE.Vector3;
   startScale: THREE.Vector3;
   finalScale: THREE.Vector3;
+}
+
+interface PlacementMotion {
+  kind: 'placement';
+  elapsed: number;
+  visuals: VisualSnapshot[];
   materials: MaterialSnapshot[];
 }
 
@@ -39,14 +44,25 @@ export class SpatialMotionController {
       return;
     }
 
-    const finalPosition = target.position.clone();
-    const finalScale = target.scale.clone();
-    const startPosition = finalPosition.clone().add(new THREE.Vector3(0, PLACEMENT_HEIGHT_METERS, 0));
-    const startScale = finalScale.clone().multiplyScalar(PLACEMENT_START_SCALE);
+    const visuals = target.children
+      .filter((child) => child.name !== 'contact-shadow' && child.name !== 'placement-marker')
+      .map((object): VisualSnapshot => {
+        const finalPosition = object.position.clone();
+        const finalScale = object.scale.clone();
+        return {
+          object,
+          startPosition: finalPosition.clone().add(new THREE.Vector3(0, PLACEMENT_HEIGHT_METERS, 0)),
+          finalPosition,
+          startScale: finalScale.clone().multiplyScalar(PLACEMENT_START_SCALE),
+          finalScale,
+        };
+      });
     const materials = this.captureMaterials(target);
 
-    target.position.copy(startPosition);
-    target.scale.copy(startScale);
+    for (const visual of visuals) {
+      visual.object.position.copy(visual.startPosition);
+      visual.object.scale.copy(visual.startScale);
+    }
     for (const snapshot of materials) {
       snapshot.material.transparent = true;
       snapshot.material.opacity = 0;
@@ -55,10 +71,7 @@ export class SpatialMotionController {
     this.motions.set(target, {
       kind: 'placement',
       elapsed: 0,
-      startPosition,
-      finalPosition,
-      startScale,
-      finalScale,
+      visuals,
       materials,
     });
   }
@@ -117,8 +130,10 @@ export class SpatialMotionController {
     motion.elapsed += Math.max(0, deltaSeconds);
     const progress = Math.min(1, motion.elapsed / PLACEMENT_DURATION_SECONDS);
     const eased = 1 - (1 - progress) ** 3;
-    target.position.lerpVectors(motion.startPosition, motion.finalPosition, eased);
-    target.scale.lerpVectors(motion.startScale, motion.finalScale, eased);
+    for (const visual of motion.visuals) {
+      visual.object.position.lerpVectors(visual.startPosition, visual.finalPosition, eased);
+      visual.object.scale.lerpVectors(visual.startScale, visual.finalScale, eased);
+    }
     for (const snapshot of motion.materials) {
       snapshot.material.opacity = snapshot.opacity * eased;
     }
@@ -145,8 +160,10 @@ export class SpatialMotionController {
 
   private finishMotion(target: THREE.Group, motion: MotionState): void {
     if (motion.kind === 'placement') {
-      target.position.copy(motion.finalPosition);
-      target.scale.copy(motion.finalScale);
+      for (const visual of motion.visuals) {
+        visual.object.position.copy(visual.finalPosition);
+        visual.object.scale.copy(visual.finalScale);
+      }
       for (const snapshot of motion.materials) {
         snapshot.material.opacity = snapshot.opacity;
         snapshot.material.transparent = snapshot.transparent;
