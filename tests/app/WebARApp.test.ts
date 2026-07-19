@@ -167,6 +167,8 @@ describe('WebARApp anchored edits', () => {
   it('processes pending reanchors independently for multiple objects', () => {
     const first = new THREE.Group();
     const second = new THREE.Group();
+    const root = new THREE.Group();
+    root.add(first, second);
     let firstIsActive = true;
     const createAtTransform = vi.fn(async () => null);
     const app = new WebARApp(document.createElement('div')) as unknown as {
@@ -192,6 +194,45 @@ describe('WebARApp anchored edits', () => {
 
     expect(createAtTransform).toHaveBeenCalledWith(first, frame, referenceSpace);
     expect(app.pendingReanchorTargets.size).toBe(0);
+  });
+
+  it('removes a deleted layout object from the pending reanchor queue', () => {
+    const target = new THREE.Group();
+    const createAtTransform = vi.fn(async () => null);
+    const app = new WebARApp(document.createElement('div')) as unknown as {
+      anchorManager: {
+        createAtTransform: typeof createAtTransform;
+        deleteFor: ReturnType<typeof vi.fn>;
+      };
+      hud: { showMultiObjectMessage: ReturnType<typeof vi.fn> };
+      layoutMode: boolean;
+      layoutSceneManager: {
+        deleteSelected: ReturnType<typeof vi.fn>;
+        selectedGroup: ReturnType<typeof vi.fn>;
+      };
+      motionController: {
+        cancel: ReturnType<typeof vi.fn>;
+        isActive: ReturnType<typeof vi.fn>;
+      };
+      pendingReanchorTargets: Set<THREE.Group>;
+      deleteSelectedLayoutObject(): void;
+      processPendingReanchors(frame: XRFrame, referenceSpace: XRReferenceSpace): void;
+    };
+    app.anchorManager = { createAtTransform, deleteFor: vi.fn() };
+    app.hud = { showMultiObjectMessage: vi.fn() };
+    app.layoutMode = true;
+    app.layoutSceneManager = {
+      deleteSelected: vi.fn(() => true),
+      selectedGroup: vi.fn(() => target),
+    };
+    app.motionController = { cancel: vi.fn(), isActive: vi.fn(() => false) };
+    app.pendingReanchorTargets = new Set([target]);
+
+    app.deleteSelectedLayoutObject();
+    app.processPendingReanchors({} as XRFrame, {} as XRReferenceSpace);
+
+    expect(app.pendingReanchorTargets.has(target)).toBe(false);
+    expect(createAtTransform).not.toHaveBeenCalled();
   });
 });
 

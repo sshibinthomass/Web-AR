@@ -536,6 +536,7 @@ export class WebARApp {
         return;
       }
       this.stopModelAnimations();
+      this.pendingReanchorTargets.delete(sceneContext.modelRoot);
       this.motionController?.cancel(sceneContext.modelRoot);
       this.anchorManager?.deleteFor(sceneContext.modelRoot);
       this.removeLoadedModels(sceneContext.modelRoot);
@@ -1177,6 +1178,7 @@ export class WebARApp {
     this.speechJobWatchToken += 1;
     this.pendingUploadModelFile = null;
     this.layoutMode = false;
+    this.pendingReanchorTargets.clear();
     this.anchorManager?.clear();
     this.layoutSceneManager?.clear();
     this.clearCapturedImagePreview(false, false);
@@ -1209,6 +1211,7 @@ export class WebARApp {
   private async startMultiObjectSession(): Promise<void> {
     await this.ensureARRuntime();
     this.layoutMode = true;
+    this.pendingReanchorTargets.clear();
     this.anchorManager?.clear();
     this.requireLayoutSceneManager().clear();
     this.appState.modelLoaded = false;
@@ -1233,6 +1236,7 @@ export class WebARApp {
 
     const selectedGroup = this.requireLayoutSceneManager().selectedGroup();
     if (selectedGroup) {
+      this.pendingReanchorTargets.delete(selectedGroup);
       this.anchorManager?.deleteFor(selectedGroup);
       this.motionController?.cancel(selectedGroup);
     }
@@ -1986,6 +1990,11 @@ export class WebARApp {
 
   private processPendingReanchors(frame: XRFrame, referenceSpace: XRReferenceSpace): void {
     for (const target of [...this.pendingReanchorTargets]) {
+      if (!target.parent) {
+        this.pendingReanchorTargets.delete(target);
+        this.anchorManager?.deleteFor(target);
+        continue;
+      }
       if (this.motionController?.isActive(target)) {
         continue;
       }
