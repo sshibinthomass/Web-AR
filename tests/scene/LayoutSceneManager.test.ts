@@ -172,6 +172,35 @@ describe('LayoutSceneManager', () => {
     ]);
   });
 
+  it('hit-tests a placed object without changing the active selection', () => {
+    const root = new THREE.Group();
+    const manager = new LayoutSceneManager(root);
+    const first = manager.addObject({
+      modelId: 'generated-chair',
+      modelLabel: 'Chair',
+      modelUrl: 'https://assets.example/chair.glb',
+      model: createPickableModel('chair-model'),
+    });
+    manager.placePendingAt(placementMatrix(0, 0, 0));
+    const second = manager.addObject({
+      modelId: 'generated-table',
+      modelLabel: 'Table',
+      modelUrl: 'https://assets.example/table.glb',
+      model: createPickableModel('table-model'),
+    });
+    manager.placePendingAt(placementMatrix(2, 0, 0));
+
+    const hit = manager.hitTestObjectAtScreenPoint(
+      { x: 50, y: 50 },
+      createCanvas(),
+      createCamera(),
+    );
+
+    expect(hit?.id).toBe(first.id);
+    expect(manager.groupForObject(first.id)?.name).toBe('layout-object');
+    expect(manager.selectedObjectId).toBe(second.id);
+  });
+
   it('resets the selected object transform without changing other placed objects', () => {
     const root = new THREE.Group();
     const manager = new LayoutSceneManager(root);

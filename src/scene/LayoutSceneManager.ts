@@ -93,6 +93,16 @@ export class LayoutSceneManager {
   }
 
   selectObjectAtScreenPoint(point: Point2, canvas: HTMLCanvasElement, camera: THREE.Camera): LayoutObject | null {
+    const hit = this.hitTestObjectAtScreenPoint(point, canvas, camera);
+    if (!hit) {
+      return null;
+    }
+
+    this.selectObject(hit.id);
+    return hit;
+  }
+
+  hitTestObjectAtScreenPoint(point: Point2, canvas: HTMLCanvasElement, camera: THREE.Camera): LayoutObject | null {
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) {
       return null;
@@ -130,7 +140,6 @@ export class LayoutSceneManager {
       return null;
     }
 
-    this.selectedObjectId = closestObject.id;
     return this.toLayoutObject(closestObject);
   }
 
@@ -252,6 +261,10 @@ export class LayoutSceneManager {
 
   selectedGroup(): THREE.Group | null {
     return this.selectedObject()?.group ?? null;
+  }
+
+  groupForObject(objectId: string): THREE.Group | null {
+    return this.objects.get(objectId)?.group ?? null;
   }
 
   private selectedObject(): LayoutSceneObject | null {
