@@ -1624,8 +1624,10 @@ export class WebARApp {
     const session = sceneContext.renderer.xr.getSession();
     const referenceSpace = sceneContext.renderer.xr.getReferenceSpace();
 
+    const delta = clock.getDelta();
+
     if (frame && session && referenceSpace) {
-      const hasFloorHit = this.hitTestManager?.update(frame, session, referenceSpace) ?? false;
+      const hasFloorHit = this.hitTestManager?.update(frame, session, referenceSpace, delta) ?? false;
 
       if (this.appState.mode === 'scanning' && hasFloorHit) {
         this.appState.setMode('readyToPlace');
@@ -1637,7 +1639,6 @@ export class WebARApp {
       this.lastHudMode = this.appState.mode;
     }
 
-    const delta = clock.getDelta();
     this.activeModelAnimation?.mixer.update(delta);
     sceneContext.renderer.render(sceneContext.scene, sceneContext.camera);
   }
@@ -1728,7 +1729,11 @@ export class WebARApp {
       return;
     }
 
-    const placementMatrix = this.hitTestManager?.latestPoseMatrix ?? this.createEstimatedPlacementMatrix();
+    const hitTestManager = this.hitTestManager;
+    if (!hitTestManager?.isStable || !hitTestManager.latestPoseMatrix) {
+      return;
+    }
+    const placementMatrix = hitTestManager.latestPoseMatrix;
 
     if (this.layoutMode) {
       const placedObject = this.requireLayoutSceneManager().placePendingAt(placementMatrix);
@@ -1813,31 +1818,6 @@ export class WebARApp {
     this.appState.setMode('editing');
     this.hud?.update(this.appState.mode, `${selected.modelLabel} selected. Move, scale, use Rotate, or delete it.`);
     return true;
-  }
-
-  private createEstimatedPlacementMatrix(): Three.Matrix4 {
-    const sceneContext = this.requireScene();
-    const { THREE } = this.requireARRuntime();
-    const camera = sceneContext.camera;
-    const cameraPosition = new THREE.Vector3();
-    const cameraDirection = new THREE.Vector3();
-    camera.getWorldPosition(cameraPosition);
-    camera.getWorldDirection(cameraDirection);
-
-    const floorY = this.hitTestManager?.latestPoint?.y ?? cameraPosition.y - 1.1;
-    const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -floorY);
-    const ray = new THREE.Ray(cameraPosition, cameraDirection.normalize());
-    const point = new THREE.Vector3();
-    const hasIntersection = ray.intersectPlane(floorPlane, point);
-
-    if (!hasIntersection || point.distanceTo(cameraPosition) > 4) {
-      point.copy(cameraPosition).add(cameraDirection.multiplyScalar(1.2));
-      point.y = floorY;
-    }
-
-    const matrix = new THREE.Matrix4();
-    matrix.compose(point, new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
-    return matrix;
   }
 
   private setEditing(): void {

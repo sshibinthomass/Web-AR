@@ -1,25 +1,37 @@
 import * as THREE from 'three';
+import { PoseStabilizer } from './PoseStabilizer';
 
 export class HitTestManager {
   latestPoseMatrix: THREE.Matrix4 | null = null;
   latestPoint: THREE.Vector3 | null = null;
-  stableFrames = 0;
+  latestHitResult: XRHitTestResult | null = null;
 
   private hitTestSource: XRHitTestSource | null = null;
   private hitTestSourceRequested = false;
+  private readonly stabilizer = new PoseStabilizer();
 
   constructor(private readonly reticle: THREE.Mesh) {}
+
+  get isStable(): boolean {
+    return this.stabilizer.isStable;
+  }
 
   reset(): void {
     this.latestPoseMatrix = null;
     this.latestPoint = null;
-    this.stableFrames = 0;
+    this.latestHitResult = null;
     this.hitTestSource = null;
     this.hitTestSourceRequested = false;
+    this.stabilizer.reset();
     this.reticle.visible = false;
   }
 
-  update(frame: XRFrame, session: XRSession, referenceSpace: XRReferenceSpace): boolean {
+  update(
+    frame: XRFrame,
+    session: XRSession,
+    referenceSpace: XRReferenceSpace,
+    deltaSeconds: number,
+  ): boolean {
     if (!this.hitTestSourceRequested) {
       this.hitTestSourceRequested = true;
       void session.requestReferenceSpace('viewer').then((viewerSpace) => {
@@ -43,15 +55,14 @@ export class HitTestManager {
     }
 
     if (!this.hitTestSource) {
-      this.reticle.visible = false;
+      this.loseTracking();
       return false;
     }
 
     const hitTestResults = frame.getHitTestResults(this.hitTestSource);
 
     if (hitTestResults.length === 0) {
-      this.reticle.visible = false;
-      this.stableFrames = 0;
+      this.loseTracking();
       return false;
     }
 
@@ -59,19 +70,34 @@ export class HitTestManager {
     const pose = hit.getPose(referenceSpace);
 
     if (!pose) {
+      this.loseTracking();
+      return false;
+    }
+
+    const rawMatrix = new THREE.Matrix4().fromArray(pose.transform.matrix);
+    const stableMatrix = this.stabilizer.update(rawMatrix, deltaSeconds);
+    if (!stableMatrix) {
       this.reticle.visible = false;
-      this.stableFrames = 0;
+      this.latestPoseMatrix = null;
+      this.latestPoint = null;
+      this.latestHitResult = null;
       return false;
     }
 
     this.reticle.visible = true;
-    this.reticle.matrix.fromArray(pose.transform.matrix);
-
-    const matrix = new THREE.Matrix4().fromArray(pose.transform.matrix);
-    this.latestPoseMatrix = matrix;
-    this.latestPoint = new THREE.Vector3().setFromMatrixPosition(matrix);
-    this.stableFrames += 1;
+    this.reticle.matrix.copy(stableMatrix);
+    this.latestPoseMatrix = stableMatrix;
+    this.latestPoint = new THREE.Vector3().setFromMatrixPosition(stableMatrix);
+    this.latestHitResult = hit;
 
     return true;
+  }
+
+  private loseTracking(): void {
+    this.reticle.visible = false;
+    this.latestPoseMatrix = null;
+    this.latestPoint = null;
+    this.latestHitResult = null;
+    this.stabilizer.reset();
   }
 }

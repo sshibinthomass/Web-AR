@@ -81,6 +81,35 @@ describe('WebARApp layout reset', () => {
   });
 });
 
+describe('WebARApp stable placement', () => {
+  it('does not place an object from an unstable hit pose', () => {
+    const app = new WebARApp(document.createElement('div')) as unknown as {
+      appState: { modelLoaded: boolean; setMode(mode: 'scanning'): void };
+      hitTestManager: {
+        isStable: boolean;
+        latestPoseMatrix: THREE.Matrix4;
+      };
+      layoutMode: boolean;
+      sceneContext: { contactShadow: { visible: boolean } };
+      transformController: { placeAt: ReturnType<typeof vi.fn> };
+      placeAtLatestHit(): void;
+    };
+    app.appState.modelLoaded = true;
+    app.appState.setMode('scanning');
+    app.hitTestManager = {
+      isStable: false,
+      latestPoseMatrix: new THREE.Matrix4(),
+    };
+    app.layoutMode = false;
+    app.sceneContext = { contactShadow: { visible: false } };
+    app.transformController = { placeAt: vi.fn() };
+
+    app.placeAtLatestHit();
+
+    expect(app.transformController.placeAt).not.toHaveBeenCalled();
+  });
+});
+
 describe('WebARApp multi-object access', () => {
   it('starts a multi-object session without requiring a guest to sign in', async () => {
     const app = new WebARApp(document.createElement('div')) as unknown as {
