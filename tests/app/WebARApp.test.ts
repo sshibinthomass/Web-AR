@@ -63,7 +63,7 @@ describe('WebARApp layout reset', () => {
         selectedGroup: ReturnType<typeof vi.fn>;
       };
       motionController: { cancel: ReturnType<typeof vi.fn> };
-      pendingReanchorTarget: THREE.Group | null;
+      pendingReanchorTargets: Set<THREE.Group>;
       resetObject(): void;
     };
     const placeSelectedAt = vi.fn();
@@ -76,7 +76,7 @@ describe('WebARApp layout reset', () => {
     app.hitTestManager = { latestPoseMatrix: null };
     app.layoutSceneManager = { placeSelectedAt, resetSelectedTransform, selectedGroup: vi.fn(() => target) };
     app.motionController = { cancel: vi.fn() };
-    app.pendingReanchorTarget = null;
+    app.pendingReanchorTargets = new Set();
     app.hud = { update };
     app.appState.setMode('editing');
 
@@ -88,7 +88,7 @@ describe('WebARApp layout reset', () => {
     expect(update).toHaveBeenCalledWith('placed');
     expect(app.anchorManager.deleteFor).toHaveBeenCalledWith(target);
     expect(app.motionController.cancel).toHaveBeenCalledWith(target);
-    expect(app.pendingReanchorTarget).toBe(target);
+    expect(app.pendingReanchorTargets.has(target)).toBe(true);
   });
 });
 
@@ -142,7 +142,7 @@ describe('WebARApp anchored edits', () => {
       hud: { update: ReturnType<typeof vi.fn> };
       layoutMode: boolean;
       motionController: { cancel: ReturnType<typeof vi.fn> };
-      pendingReanchorTarget: THREE.Group | null;
+      pendingReanchorTargets: Set<THREE.Group>;
       sceneContext: { modelRoot: THREE.Group };
       transformController: { rotateBy: ReturnType<typeof vi.fn> };
       rotateBy(deltaRadians: number): void;
@@ -152,7 +152,7 @@ describe('WebARApp anchored edits', () => {
     app.hud = { update: vi.fn() };
     app.layoutMode = false;
     app.motionController = { cancel: vi.fn() };
-    app.pendingReanchorTarget = null;
+    app.pendingReanchorTargets = new Set();
     app.sceneContext = { modelRoot: target };
     app.transformController = { rotateBy: vi.fn() };
 
@@ -161,7 +161,37 @@ describe('WebARApp anchored edits', () => {
     expect(app.anchorManager.deleteFor).toHaveBeenCalledWith(target);
     expect(app.motionController.cancel).toHaveBeenCalledWith(target);
     expect(app.transformController.rotateBy).toHaveBeenCalledWith(0.25);
-    expect(app.pendingReanchorTarget).toBe(target);
+    expect(app.pendingReanchorTargets.has(target)).toBe(true);
+  });
+
+  it('processes pending reanchors independently for multiple objects', () => {
+    const first = new THREE.Group();
+    const second = new THREE.Group();
+    let firstIsActive = true;
+    const createAtTransform = vi.fn(async () => null);
+    const app = new WebARApp(document.createElement('div')) as unknown as {
+      anchorManager: { createAtTransform: typeof createAtTransform };
+      motionController: { isActive(target: THREE.Group): boolean };
+      pendingReanchorTargets: Set<THREE.Group>;
+      processPendingReanchors(frame: XRFrame, referenceSpace: XRReferenceSpace): void;
+    };
+    app.anchorManager = { createAtTransform };
+    app.motionController = { isActive: (target) => target === first && firstIsActive };
+    app.pendingReanchorTargets = new Set([first, second]);
+    const frame = {} as XRFrame;
+    const referenceSpace = {} as XRReferenceSpace;
+
+    app.processPendingReanchors(frame, referenceSpace);
+
+    expect(createAtTransform).toHaveBeenCalledWith(second, frame, referenceSpace);
+    expect(app.pendingReanchorTargets.has(first)).toBe(true);
+    expect(app.pendingReanchorTargets.has(second)).toBe(false);
+
+    firstIsActive = false;
+    app.processPendingReanchors(frame, referenceSpace);
+
+    expect(createAtTransform).toHaveBeenCalledWith(first, frame, referenceSpace);
+    expect(app.pendingReanchorTargets.size).toBe(0);
   });
 });
 

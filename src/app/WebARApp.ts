@@ -105,7 +105,7 @@ export class WebARApp {
   private placementDragStart: Point2 | null = null;
   private layoutGestureStartedOnObject = false;
   private activeDragTarget: Three.Group | null = null;
-  private pendingReanchorTarget: Three.Group | null = null;
+  private readonly pendingReanchorTargets = new Set<Three.Group>();
   private lastHudMode = this.appState.mode;
   private availableModels = [...MODEL_OPTIONS];
   private generatedModelOptions: ModelOption[] = [];
@@ -1648,7 +1648,7 @@ export class WebARApp {
       this.lightingController?.stop();
       this.motionController?.cancel();
       this.anchorManager?.clear();
-      this.pendingReanchorTarget = null;
+      this.pendingReanchorTargets.clear();
       this.appState.setMode('loading');
       this.hud?.setCameraPanelVisible(false);
       this.hud?.update(this.appState.mode, 'AR session ended. Start AR again to continue.');
@@ -1674,10 +1674,8 @@ export class WebARApp {
     }
 
     this.motionController?.update(delta);
-    const pendingTarget = this.pendingReanchorTarget;
-    if (frame && referenceSpace && pendingTarget && !this.motionController?.isActive(pendingTarget)) {
-      this.pendingReanchorTarget = null;
-      void this.anchorManager?.createAtTransform(pendingTarget, frame, referenceSpace);
+    if (frame && referenceSpace) {
+      this.processPendingReanchors(frame, referenceSpace);
     }
 
     if (this.appState.mode !== this.lastHudMode) {
@@ -1883,7 +1881,7 @@ export class WebARApp {
   private finishPlacementDrag(): void {
     if (this.activeDragTarget) {
       this.requireMotionController().finishDrag(this.activeDragTarget);
-      this.pendingReanchorTarget = this.activeDragTarget;
+      this.pendingReanchorTargets.add(this.activeDragTarget);
     }
     this.resetPlacementDrag();
   }
@@ -1983,7 +1981,17 @@ export class WebARApp {
     }
     this.motionController?.cancel(target);
     this.anchorManager?.deleteFor(target);
-    this.pendingReanchorTarget = target;
+    this.pendingReanchorTargets.add(target);
+  }
+
+  private processPendingReanchors(frame: XRFrame, referenceSpace: XRReferenceSpace): void {
+    for (const target of [...this.pendingReanchorTargets]) {
+      if (this.motionController?.isActive(target)) {
+        continue;
+      }
+      this.pendingReanchorTargets.delete(target);
+      void this.anchorManager?.createAtTransform(target, frame, referenceSpace);
+    }
   }
 
   private requireScene(): SceneContext {
