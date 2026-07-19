@@ -57,7 +57,7 @@ npm run worker:dev
 
 ## Controls
 
-- Move the phone slowly until the floor ring appears.
+- Move the phone slowly until the turquoise floor ring appears and settles. Placement unlocks after several consistent surface hits to avoid using a noisy pose.
 - Choose a model from the `Model` selector. Models are downloaded from Cloudflare only after selection.
 - Use `Start camera`, `Capture`, and `Generate 3D` to create a model through the Cloudflare Worker and Modal. The generated GLB is saved to Cloudflare storage, then loaded into the AR scene.
 - Tap `Place` or tap the AR view to place the model.
@@ -69,7 +69,11 @@ npm run worker:dev
 
 ## Notes
 
-This app targets Android Chrome WebXR. It is local-only and tested through USB port forwarding. Full semantic floor meshing is not guaranteed by browser WebXR; the app uses hit testing as the reliable floor-placement baseline and plane detection when available.
+This app targets Android Chrome WebXR. It is local-only and tested through USB port forwarding. Full semantic floor meshing is not guaranteed by browser WebXR; the app uses stabilized WebXR hit testing as its floor-placement baseline.
+
+The immersive view intentionally shows only the turquoise placement ring; it does not draw a square floor grid. On browsers that expose them, WebXR anchors keep placed objects attached as environmental tracking is refined and lighting estimation matches virtual lighting to the room. Both capabilities are optional and fall back to stabilized world-space placement and fixed scene lights.
+
+For the best tracking, begin in a well-lit area with visible texture and edges on the floor, then move the phone slowly for a few seconds. Blank, glossy, dark, or reflective surfaces provide fewer visual features and can reduce stability.
 
 The app ships without built-in GLB models. Generated and uploaded models are stored in Cloudflare R2 and served through the Worker; GLB files are not committed to GitHub.
 
