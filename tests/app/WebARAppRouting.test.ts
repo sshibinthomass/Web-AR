@@ -94,7 +94,7 @@ describe('WebARApp route restoration', () => {
 
     expect(window.location.hash).toBe('#/login');
     expect(root.querySelector('.auth-panel')?.classList.contains('hidden')).toBe(false);
-    expect(root.textContent).toContain('Sign in to use Text or Voice to 3D.');
+    expect(root.textContent).toContain('Sign in to use Text or voice to 3D.');
     expect(window.localStorage.getItem('web-ar-auth-token')).toBeNull();
   });
 

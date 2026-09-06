@@ -303,29 +303,29 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Explore in AR');
     expect(root.textContent).toContain('Create a model');
     expect(choiceButtons).toEqual([
-      'Single-Object AR',
-      'Model Library',
-      'Multi-Object AR',
+      'Place in AR',
+      'Models',
+      'Multi-object AR',
       'Camera to 3D',
       'Image to 3D',
-      'Upload 3D Model',
-      'Text or Voice to 3D',
+      'Upload a model',
+      'Text or voice to 3D',
       'Photo to AR',
-      'AI-Enhanced Photo to AR',
+      'AI photo to AR',
     ]);
     const modeGroups = [...root.querySelectorAll('.mode-group')];
     expect([...modeGroups[0].querySelectorAll('button')].map((button) => button.textContent)).toEqual([
-      'Single-Object AR',
-      'Model Library',
-      'Multi-Object AR',
+      'Place in AR',
+      'Models',
+      'Multi-object AR',
     ]);
     expect([...modeGroups[1].querySelectorAll('button')].map((button) => button.textContent)).toEqual([
       'Camera to 3D',
       'Image to 3D',
-      'Upload 3D Model',
-      'Text or Voice to 3D',
+      'Upload a model',
+      'Text or voice to 3D',
       'Photo to AR',
-      'AI-Enhanced Photo to AR',
+      'AI photo to AR',
     ]);
     expect(statusPanel?.classList.contains('hidden')).toBe(true);
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
@@ -436,7 +436,7 @@ describe('ARHud', () => {
     expect(root.querySelector('.camera-status')?.textContent).toContain('Choose an image');
 
     root.querySelector<HTMLButtonElement>('[data-nav-route="camera"]')?.click();
-    expect(root.querySelector('.camera-label')?.textContent).toBe('Camera capture');
+    expect(root.querySelector('.camera-label')?.textContent).toBe('Camera to 3D');
     expect(root.querySelector('.camera-status')?.textContent).toBe('Frame one object, then capture an image.');
     expect(root.querySelector('.generated-model-status')?.textContent).toBe('No model generated yet.');
   });
@@ -447,7 +447,7 @@ describe('ARHud', () => {
     hud.updateAuthState(activeUser);
 
     for (const [route, title] of [
-      ['camera', 'Camera capture'],
+      ['camera', 'Camera to 3D'],
       ['full-flow', 'Photo to AR'],
       ['dynamic', 'AI photo to AR'],
     ] as const) {
@@ -479,20 +479,20 @@ describe('ARHud', () => {
 
     expect(onStartCamera).not.toHaveBeenCalled();
     expect(window.location.hash).toBe('#/login');
-    expect(root.textContent).toContain('Sign in to use Camera.');
+    expect(root.textContent).toContain('Sign in to use Camera to 3D.');
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Multi-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Multi-object AR')?.click();
 
     expect(window.location.hash).toBe('#/multi-object');
     expect(onStartMultiObject).toHaveBeenCalledTimes(1);
     expect(root.querySelector('.layout-manager')).toBeNull();
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Place in AR')?.click();
 
     expect(window.location.hash).toBe('#/ar');
     expect(root.querySelector('.ar-model-picker')?.classList.contains('hidden')).toBe(false);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Model Library')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
 
     expect(window.location.hash).toBe('#/models');
     expect(root.querySelector('.model-manager')?.classList.contains('hidden')).toBe(false);
@@ -502,10 +502,10 @@ describe('ARHud', () => {
     const guestRoot = document.createElement('div');
     new ARHud(guestRoot, modelOptions, createHandlers());
 
-    [...guestRoot.querySelectorAll('button')].find((button) => button.textContent === 'Text or Voice to 3D')?.click();
+    [...guestRoot.querySelectorAll('button')].find((button) => button.textContent === 'Text or voice to 3D')?.click();
 
     expect(window.location.hash).toBe('#/login');
-    expect(guestRoot.textContent).toContain('Sign in to use Text or Voice to 3D.');
+    expect(guestRoot.textContent).toContain('Sign in to use Text or voice to 3D.');
 
     const root = document.createElement('div');
     const onStartSpeechRecording = vi.fn();
@@ -519,7 +519,7 @@ describe('ARHud', () => {
     );
     hud.updateAuthState(activeUser);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Text or Voice to 3D')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Text or voice to 3D')?.click();
 
     expect(window.location.hash).toBe('#/speech');
     expect(root.querySelector('.speech-panel')?.classList.contains('hidden')).toBe(false);
@@ -557,7 +557,7 @@ describe('ARHud', () => {
     const hud = new ARHud(root, modelOptions, createHandlers());
     hud.updateAuthState(activeUser);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Text or Voice to 3D')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Text or voice to 3D')?.click();
 
     expect(root.textContent).toContain('Input request');
     expect(root.textContent).toContain('Prepare request');
@@ -651,9 +651,15 @@ describe('ARHud', () => {
     expect(root.textContent).toContain('Pending');
 
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Approve')?.click();
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Remove')?.click();
-
     expect(onApproveAccount).toHaveBeenCalledWith('maker@example.com');
+
+    // Removal is irreversible, so it goes through a confirmation step.
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Remove')?.click();
+    expect(onRemoveAccount).not.toHaveBeenCalled();
+
+    const confirmation = root.querySelector('.confirmation-dialog');
+    expect(confirmation?.textContent).toContain('cannot be undone');
+    confirmation?.querySelector<HTMLButtonElement>('[data-action="confirm"]')?.click();
     expect(onRemoveAccount).toHaveBeenCalledWith('maker@example.com');
   });
 
@@ -684,7 +690,7 @@ describe('ARHud', () => {
     const root = document.createElement('div');
     new ARHud(root, modelOptions, createHandlers());
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Place in AR')?.click();
 
     const landing = root.querySelector('.landing');
     const statusPanel = root.querySelector('.status-panel');
@@ -706,7 +712,10 @@ describe('ARHud', () => {
     expect(modelPicker?.classList.contains('hidden')).toBe(true);
     expect(arModelPicker?.classList.contains('hidden')).toBe(false);
     expect(modelRail?.classList.contains('hidden')).toBe(true);
-    expect(root.querySelector('.ar-picker-heading h2')?.textContent).toBe('Choose a model');
+    expect(root.querySelector('.app-route-title')?.textContent).toBe('Place in AR');
+    expect(root.querySelector('.ar-picker-heading')?.textContent).toContain(
+      'Select one model, then continue to AR placement.',
+    );
     expect(root.querySelector('.ar-picker-heading p')?.textContent).toBe(
       'Select one model, then continue to AR placement.',
     );
@@ -732,7 +741,7 @@ describe('ARHud', () => {
     hud.attachARButton(arButton);
     expect(root.querySelector('.ar-button-slot')?.classList.contains('hidden')).toBe(true);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Place in AR')?.click();
     root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-beta"]')?.click();
 
     const placeArButton = root.querySelector<HTMLButtonElement>('.ar-model-place-button')!;
@@ -756,10 +765,11 @@ describe('ARHud', () => {
       'Place',
       'Scale 1x',
       'Reset',
+      'Adjust',
     ]);
     expect(actionButtons.every((button) => button.classList.contains('hud-action-chip'))).toBe(true);
     expect(actionButtons.every((button) => button.querySelector('svg') === null)).toBe(true);
-    expect(root.querySelector<HTMLInputElement>('.rotate-control input[type="range"]')).toBeInstanceOf(HTMLInputElement);
+    expect(root.querySelector<HTMLInputElement>('.hud-adjust-tray .rotate-control input[type="range"]')).toBeInstanceOf(HTMLInputElement);
   });
 
   it('dispatches the visible placed-object action buttons to their handlers', () => {
@@ -859,7 +869,7 @@ describe('ARHud', () => {
     const hud = new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
     hud.updateAuthState(activeUser);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AI-Enhanced Photo to AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AI photo to AR')?.click();
 
     expect(window.location.hash).toBe('#/dynamic');
     expect(onStartCamera).toHaveBeenCalledTimes(1);
@@ -878,7 +888,7 @@ describe('ARHud', () => {
     arButton.addEventListener('click', startArCamera);
     hud.attachARButton(arButton);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Multi-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Multi-object AR')?.click();
 
     expect(window.location.hash).toBe('#/multi-object');
     expect(root.querySelector('.landing')?.classList.contains('hidden')).toBe(true);
@@ -954,12 +964,13 @@ describe('ARHud', () => {
       'Place',
       'Scale 1x',
       'Reset',
+      'Adjust',
       'Add model',
       'Delete selected',
     ]);
     expect(actionButtons.every((button) => button.classList.contains('hud-action-chip'))).toBe(true);
     expect(actionButtons.every((button) => button.querySelector('svg') === null)).toBe(true);
-    expect(root.querySelector<HTMLInputElement>('.rotate-control input[type="range"]')).toBeInstanceOf(HTMLInputElement);
+    expect(root.querySelector<HTMLInputElement>('.hud-adjust-tray .rotate-control input[type="range"]')).toBeInstanceOf(HTMLInputElement);
     expect(root.textContent).toContain('Place multiple objects in this session.');
     expect(onAddLayoutObject).toHaveBeenCalledTimes(1);
     expect(onDeleteLayoutObject).toHaveBeenCalledTimes(1);
@@ -1056,7 +1067,7 @@ describe('ARHud', () => {
     const hud = new ARHud(root, modelOptions, createHandlers({ onStartCamera, onUploadModel, onStoreUploadedModel }));
     hud.updateAuthState(activeUser);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Upload 3D Model')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Upload a model')?.click();
     const uploadInput = root.querySelector<HTMLInputElement>('input[type="file"][accept=".glb,model/gltf-binary"]')!;
     const storeButton = [...root.querySelectorAll('.camera-actions button')].find(
       (button) => button.textContent === 'Upload model',
@@ -1097,7 +1108,7 @@ describe('ARHud', () => {
         visibility: 'private',
       },
     ]);
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Model Library')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
 
     const manager = root.querySelector('.model-manager');
     const rows = [...root.querySelectorAll('.model-manager-row')];
@@ -1112,11 +1123,17 @@ describe('ARHud', () => {
     expect(root.querySelector<HTMLImageElement>('.model-manager-thumbnail img')?.src).toBe(
       'https://assets.example/previews/generated-chair.png',
     );
-    expect([...root.querySelectorAll('.model-manager-row.is-generated button')].map((button) => button.getAttribute('aria-label'))).toEqual([
+    expect(
+      [...root.querySelectorAll('.model-manager-row.is-generated .model-manager-actions button')]
+        .map((button) => button.getAttribute('aria-label') ?? button.textContent),
+    ).toEqual([
       'Preview chair - 2026-07-04 12:00:00 UTC',
       'Download chair - 2026-07-04 12:00:00 UTC',
-      'Favorite chair - 2026-07-04 12:00:00 UTC',
+      'Add to favourites',
     ]);
+    expect(root.querySelector('.model-manager-open')?.getAttribute('aria-label')).toBe(
+      'Preview chair - 2026-07-04 12:00:00 UTC',
+    );
     expect(manager?.textContent).toContain('Private');
     expect(manager?.textContent).not.toContain('No image');
     expect(manager?.textContent).not.toContain('Built-in');
@@ -1142,10 +1159,13 @@ describe('ARHud', () => {
       },
     ]);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Model Library')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
 
     const guestGeneratedRows = [...root.querySelectorAll('.model-manager-row.is-generated')];
-    expect(guestGeneratedRows.map((row) => [...row.querySelectorAll('button')].map((button) => button.getAttribute('data-action')))).toEqual([
+    expect(
+      guestGeneratedRows.map((row) => [...row.querySelectorAll('.model-manager-actions button')]
+        .map((button) => button.getAttribute('data-action'))),
+    ).toEqual([
       ['preview', 'download', 'favorite'],
       ['preview', 'download', 'favorite'],
     ]);
@@ -1155,7 +1175,7 @@ describe('ARHud', () => {
     const ownerRow = root.querySelector<HTMLElement>('.model-manager-row[data-model-id="generated-owned-chair"]')!;
     const otherRow = root.querySelector<HTMLElement>('.model-manager-row[data-model-id="generated-other-table"]')!;
 
-    expect([...ownerRow.querySelectorAll('button')].map((button) => button.getAttribute('data-action'))).toEqual([
+    expect([...ownerRow.querySelectorAll('.model-manager-actions button')].map((button) => button.getAttribute('data-action'))).toEqual([
       'preview',
       'download',
       'favorite',
@@ -1163,13 +1183,18 @@ describe('ARHud', () => {
       'edit',
       'delete',
     ]);
-    expect([...otherRow.querySelectorAll('button')].map((button) => button.getAttribute('data-action'))).toEqual([
+    expect([...otherRow.querySelectorAll('.model-manager-actions button')].map((button) => button.getAttribute('data-action'))).toEqual([
       'preview',
       'download',
       'favorite',
     ]);
-    expect(ownerRow.querySelector<HTMLButtonElement>('button[data-action="edit"]')?.getAttribute('aria-label')).toBe('Edit Chair');
-    expect(ownerRow.querySelector<HTMLButtonElement>('button[data-action="delete"]')?.getAttribute('aria-label')).toBe('Delete Chair');
+    // Only preview and download stay on the row; the rest are named menu rows.
+    expect([...ownerRow.querySelectorAll('.model-manager-overflow-menu button')].map((button) => button.textContent)).toEqual([
+      'Add to favourites',
+      'Make public',
+      'Rename',
+      'Delete',
+    ]);
   });
 
   it('does not open preview when model action icons are clicked', () => {
@@ -1193,12 +1218,14 @@ describe('ARHud', () => {
       },
     ]);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Model Library')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
 
     const clickIcon = (action: string): void => {
-      root
-        .querySelector<SVGElement>(`.model-manager-row[data-model-id="generated-owned-chair"] button[data-action="${action}"] svg`)
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      const button = root.querySelector<HTMLButtonElement>(
+        `.model-manager-row[data-model-id="generated-owned-chair"] button[data-action="${action}"]`,
+      );
+      const target = button?.querySelector<SVGElement>('svg') ?? button;
+      target?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     };
 
     clickIcon('favorite');
@@ -1235,7 +1262,7 @@ describe('ARHud', () => {
       },
     ]);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Model Library')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
     const searchInput = root.querySelector<HTMLInputElement>('input[name="modelSearch"]')!;
     const filterSelect = root.querySelector<HTMLSelectElement>('select[name="modelFilter"]')!;
 
@@ -1258,7 +1285,7 @@ describe('ARHud', () => {
 
     filterSelect.value = 'all';
     filterSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Place in AR')?.click();
     const arSearchInput = root.querySelector<HTMLInputElement>('input[name="arModelSearch"]')!;
     arSearchInput.value = 'laptop';
     arSearchInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1270,7 +1297,7 @@ describe('ARHud', () => {
     root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="generated-laptop"]')?.click();
     expect(onModelSelect).toHaveBeenCalledWith('generated-laptop');
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Model Library')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
     const recentFilter = root.querySelector<HTMLSelectElement>('select[name="modelFilter"]')!;
     recentFilter.value = 'recent';
     recentFilter.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1303,8 +1330,8 @@ describe('ARHud', () => {
       },
     ]);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Model Library')?.click();
-    const firstRow = root.querySelector<HTMLElement>('.model-manager-row')!;
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
+    const firstRow = root.querySelector<HTMLElement>('.model-manager-open')!;
 
     firstRow.click();
     hud.showModelPreviewLoading('Preview chair');
@@ -1328,7 +1355,7 @@ describe('ARHud', () => {
     directionInput.dispatchEvent(new Event('input', { bubbles: true }));
 
     expect(onPreviewLightDirectionChange).toHaveBeenCalledWith(225);
-    expect(root.querySelector('.model-preview-direction-value')?.textContent).toBe('225 deg');
+    expect(root.querySelector('.model-preview-direction-value')?.textContent).toBe('225°');
     expect(hud.getModelPreviewLightDirectionDegrees()).toBe(225);
 
     expect(root.querySelector('.model-preview-animation')?.classList.contains('hidden')).toBe(true);
@@ -1458,7 +1485,7 @@ describe('ARHud', () => {
       },
     ]);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Model Library')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
 
     const generatedRow = root.querySelector<HTMLElement>('.model-manager-row[data-model-id="generated-fc-123"]')!;
     const downloadButton = generatedRow.querySelector<HTMLButtonElement>('button[data-action="download"]')!;
@@ -1516,7 +1543,7 @@ describe('ARHud', () => {
       },
     ]);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Place in AR')?.click();
     const modelCards = [...root.querySelectorAll<HTMLButtonElement>('.ar-model-card')];
     expect(modelCards.map((button) => button.dataset.modelId)).toEqual([
       'built-in-alpha',
@@ -1544,14 +1571,14 @@ describe('ARHud', () => {
       'https://assets.example/previews/generated-chair.png',
     );
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Model Library')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
     const uploadedRow = root.querySelector<HTMLElement>('.model-manager-row.is-uploaded')!;
 
     expect(uploadedRow).toBeInstanceOf(HTMLElement);
     expect(uploadedRow.textContent).toContain('Uploaded');
     expect(uploadedRow.textContent).toContain('chair');
     expect(uploadedRow.querySelector('.model-manager-thumbnail')?.textContent).toBe('GLB');
-    expect([...uploadedRow.querySelectorAll('button')].map((button) => button.getAttribute('data-action'))).toEqual([
+    expect([...uploadedRow.querySelectorAll('.model-manager-actions button')].map((button) => button.getAttribute('data-action'))).toEqual([
       'preview',
       'download',
       'favorite',
@@ -1576,7 +1603,7 @@ describe('ARHud', () => {
         visibility: 'private',
       },
     ]);
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Model Library')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
 
     const generatedRow = root.querySelector('.model-manager-row.is-generated')!;
     generatedRow.querySelector<HTMLButtonElement>('button[data-action="edit"]')?.click();
@@ -1613,7 +1640,7 @@ describe('ARHud', () => {
       visibility: 'private' as const,
     };
     hud.updateGeneratedModels([generatedModel]);
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Model Library')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
 
     root
       .querySelector('.model-manager-row.is-generated button[data-action="edit"]')
@@ -1648,7 +1675,7 @@ describe('ARHud', () => {
         visibility: 'private',
       },
     ]);
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Model Library')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Models')?.click();
 
     const generatedRow = root.querySelector('.model-manager-row.is-generated')!;
 
@@ -1925,7 +1952,7 @@ describe('ARHud', () => {
     arButton.addEventListener('click', startArCamera);
     hud.attachARButton(arButton);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AI-Enhanced Photo to AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'AI photo to AR')?.click();
     [...root.querySelectorAll('button')].find((button) => button.textContent === 'Capture')?.click();
 
     expect(onCaptureImage).toHaveBeenCalledTimes(1);
@@ -2104,7 +2131,7 @@ describe('ARHud', () => {
     new ARHud(root, modelOptions, createHandlers({ onStartCamera }));
 
     expect(window.location.hash).toBe('#/login');
-    expect(root.textContent).toContain('Sign in to use Camera.');
+    expect(root.textContent).toContain('Sign in to use Camera to 3D.');
     expect(onStartCamera).not.toHaveBeenCalled();
   });
 
@@ -2187,7 +2214,7 @@ describe('ARHud', () => {
     const hud = new ARHud(root, modelOptions, createHandlers());
     hud.updateAuthState(activeUser);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Place in AR')?.click();
     root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-alpha"]')?.click();
     hud.updateModelReady(true);
     root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
@@ -2222,7 +2249,7 @@ describe('ARHud', () => {
     const hud = new ARHud(root, modelOptions, createHandlers());
     hud.updateAuthState(activeUser);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Place in AR')?.click();
     root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-alpha"]')?.click();
     hud.updateModelReady(true);
     root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
@@ -2238,7 +2265,7 @@ describe('ARHud', () => {
     const hud = new ARHud(root, modelOptions, createHandlers({ onRotate }));
     hud.updateAuthState(activeUser);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Place in AR')?.click();
     root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-alpha"]')?.click();
     hud.updateModelReady(true);
     root.querySelector<HTMLButtonElement>('.ar-model-place-button')?.click();
@@ -2277,7 +2304,7 @@ describe('ARHud', () => {
     const root = document.createElement('div');
     new ARHud(root, modelOptions, createHandlers());
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Place in AR')?.click();
     const modelCards = [...root.querySelectorAll<HTMLButtonElement>('.ar-model-card')];
 
     expect(root.querySelector('.ar-model-card.is-selected')).toBeNull();
@@ -2292,7 +2319,7 @@ describe('ARHud', () => {
 
     expect(onModelSelect).not.toHaveBeenCalled();
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Place in AR')?.click();
     root.querySelector<HTMLButtonElement>('.ar-model-card[data-model-id="built-in-beta"]')?.click();
 
     expect(onModelSelect).toHaveBeenCalledWith('built-in-beta');
@@ -2461,7 +2488,7 @@ describe('ARHud', () => {
       },
     ]);
 
-    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Single-Object AR')?.click();
+    [...root.querySelectorAll('button')].find((button) => button.textContent === 'Place in AR')?.click();
     const pickerItems = [...root.querySelectorAll<HTMLButtonElement>('.ar-model-card')].map((button) => ({
       label: button.querySelector('.ar-model-card-label')?.textContent,
       value: button.dataset.modelId,

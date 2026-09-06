@@ -41,7 +41,11 @@ describe('route metadata', () => {
   });
 
   it('defines route-specific identity and fallback metadata', () => {
-    expect(ROUTES.camera.title).toBe('Camera capture');
+    expect(ROUTES.camera.title).toBe('Camera to 3D');
+    // shortTitle is a truncation of the title, never a different word.
+    for (const meta of Object.values(ROUTES)) {
+      expect(meta.title.toLowerCase().startsWith(meta.shortTitle.toLowerCase())).toBe(true);
+    }
     expect(ROUTES['full-flow'].title).toBe('Photo to AR');
     expect(ROUTES.dynamic.title).toBe('AI photo to AR');
     expect(ROUTES.speech.parent).toBe('home');

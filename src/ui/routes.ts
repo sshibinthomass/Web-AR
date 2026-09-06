@@ -46,7 +46,7 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
   },
   camera: {
     hash: '#/camera',
-    title: 'Camera capture',
+    title: 'Camera to 3D',
     shortTitle: 'Camera',
     section: 'create',
     parent: 'home',
@@ -68,7 +68,7 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
   },
   'upload-model': {
     hash: '#/upload-model',
-    title: 'Upload model',
+    title: 'Upload a model',
     shortTitle: 'Upload',
     section: 'create',
     parent: 'home',
@@ -80,7 +80,7 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
   ar: {
     hash: '#/ar',
     title: 'Place in AR',
-    shortTitle: 'AR',
+    shortTitle: 'Place',
     section: 'ar',
     parent: 'home',
     requiresAuth: false,
@@ -91,7 +91,7 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
   'full-flow': {
     hash: '#/full-flow',
     title: 'Photo to AR',
-    shortTitle: 'Photo to AR',
+    shortTitle: 'Photo',
     section: 'create',
     parent: 'home',
     requiresAuth: true,
@@ -113,7 +113,7 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
   speech: {
     hash: '#/speech',
     title: 'Text or voice to 3D',
-    shortTitle: 'Text / voice',
+    shortTitle: 'Text or voice',
     section: 'create',
     parent: 'home',
     requiresAuth: true,

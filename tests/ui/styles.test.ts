@@ -20,6 +20,61 @@ const declarationsFor = (selector: string): string[] => (
 
 const declarationsJoined = (selector: string): string => declarationsFor(selector).join('\n');
 
+describe('layout contracts', () => {
+  const bands = ['.landing', '.auth-panel', '.speech-panel', '.admin-dashboard', '.model-manager', '.ar-model-picker'];
+
+  it('routes every page gutter through one token so the shell shares a left edge', () => {
+    // The stepped values stay as the token's definition; nothing else may read
+    // them directly, or two bands can end up on different edges again.
+    expect(styles).toContain('--gutter: var(--gutter-mobile);');
+    for (const step of ['tablet', 'desktop', 'wide']) {
+      expect(styles).toContain(`--gutter: var(--gutter-${step});`);
+    }
+    const consumers = rules.replace(/--gutter[a-z-]*:[^;]*;/g, '');
+    expect(consumers).not.toContain('var(--gutter-mobile)');
+    expect(consumers).not.toContain('var(--gutter-tablet)');
+    expect(consumers).not.toContain('var(--gutter-desktop)');
+    expect(consumers).not.toContain('var(--gutter-wide)');
+  });
+
+  it('keeps the document as the only scroller for standard routes', () => {
+    for (const band of bands) {
+      const declarations = declarationsJoined(band);
+      // A band that positions itself out of flow and scrolls internally gives
+      // the page two scroll surfaces and lets its scrollbar eat one gutter.
+      expect(declarations).not.toContain('position: fixed;');
+      expect(declarations).not.toContain('overflow-y: auto;');
+      expect(declarations).not.toContain('overflow: auto;');
+    }
+  });
+
+  it('reserves fixed chrome from tokens rather than magic numbers', () => {
+    expect(styles).toContain('--mobile-top-bar-height: 56px;');
+    expect(styles).toContain('--bottom-nav-height: 68px;');
+    expect(styles).toContain('--hud-inset: 10px;');
+    expect(declarationsJoined('.app-shell')).toContain(
+      'padding-top: calc(var(--mobile-top-bar-height) + env(safe-area-inset-top));',
+    );
+    // 168px stood in for header + route bar and broke when either changed.
+    expect(styles).not.toContain('padding-top: 168px;');
+  });
+
+  it('never hides the affordance for controls that overflow the AR dock', () => {
+    const dock = declarationsJoined('.immersive-actions');
+    expect(dock).toContain('flex-wrap: wrap;');
+    expect(dock).not.toContain('flex-wrap: nowrap;');
+    expect(dock).not.toContain('overflow-x: auto;');
+    expect(dock).not.toContain('scrollbar-width: none;');
+    // Rotate took a non-shrinking 260px and pushed Add model off a phone.
+    expect(declarationsJoined('.immersive-actions .rotate-control')).not.toContain('flex: 0 0');
+  });
+
+  it('gives the inspection and camera stages a fixed shape', () => {
+    expect(declarationsJoined('.model-preview-viewport')).toContain('aspect-ratio: 4 / 3;');
+    expect(declarationsJoined('.camera-media-layer')).toContain('aspect-ratio: 3 / 4;');
+  });
+});
+
 describe('application design system', () => {
   it('defines the approved Arvenilo tokens and local font families', () => {
     for (const declaration of [
@@ -142,17 +197,24 @@ describe('application design system', () => {
   });
 
   it('keeps every standard-workspace control family at least 44px tall', () => {
+    // Two tokens carry every control height: the standard family matches the
+    // input height, and icon trays and the HUD dock use the compact one.
+    expect(styles).toContain('--control-height: 48px;');
+    expect(styles).toContain('--control-height-compact: 44px;');
+
     const contracts = [
-      ['.shell-account .account-menu-trigger', 'min-height: 44px;'],
-      ['.route-bar .route-back', 'min-height: 44px;'],
-      ['.landing .auth-actions button', 'min-height: 44px;'],
+      ['.shell-account .account-menu-trigger', 'min-height: var(--control-height);'],
+      ['.route-bar .route-back', 'min-height: var(--control-height);'],
+      ['.landing .auth-actions button', 'min-height: var(--control-height);'],
       ['.model-manager .model-library-search input', 'min-height: var(--control-height);'],
       ['.model-manager .model-library-filter select', 'min-height: var(--control-height);'],
       ['.ar-model-picker .model-library-search input', 'min-height: var(--control-height);'],
       ['.ar-model-picker .model-library-filter select', 'min-height: var(--control-height);'],
-      ['.creation-workspace .upload-drop-zone input', 'min-height: var(--control-height);'],
+      ['.upload-drop-zone-cue', 'min-height: var(--control-height);'],
       ['.creation-workspace .target-object-field input', 'min-height: var(--control-height);'],
       ['.model-edit-field input', 'min-height: var(--control-height);'],
+      ['.model-manager-actions button', 'min-height: var(--control-height-compact);'],
+      ['.hud-actions button', 'min-height: var(--control-height-compact);'],
     ] as const;
 
     for (const [selector, declaration] of contracts) {
@@ -166,7 +228,7 @@ describe('application design system', () => {
   });
 
   it('keeps the immersive exit action at least 44px tall', () => {
-    expect(declarationsJoined('.immersive-exit')).toContain('min-height: 44px;');
+    expect(declarationsJoined('.immersive-exit')).toContain('min-height: var(--control-height-compact);');
   });
 
   it('uses canonical dark-ground palette tokens for visible standard-workspace descendants', () => {
@@ -307,17 +369,12 @@ describe('application design system', () => {
   });
 
   it('layers the reconstruction canvas exactly over the cover-cropped camera preview', () => {
-    expect(styles).toContain(
-      '.camera-media-layer {\n' +
-      '  position: relative;\n' +
-      '  grid-row: 2;\n' +
-      '  grid-column: 1;\n' +
-      '  min-width: 0;\n' +
-      '  min-height: 0;\n' +
-      '  pointer-events: none;\n' +
-      '  overflow: hidden;\n' +
-      '  border-radius: var(--radius-control);',
-    );
+    const cameraLayer = declarationsJoined('.camera-media-layer');
+    expect(cameraLayer).toContain('position: relative;');
+    expect(cameraLayer).toContain('overflow: hidden;');
+    expect(cameraLayer).toContain('border-radius: var(--radius-control);');
+    // A camera frame keeps a sensible shape instead of stretching to the panel.
+    expect(cameraLayer).toContain('aspect-ratio: 3 / 4;');
     expect(styles).toContain(
       '.camera-media-layer > .camera-preview,\n' +
       '.object-reconstruction-overlay {\n' +
@@ -378,7 +435,8 @@ describe('application design system', () => {
     expect(styles).toContain('.ar-model-card[aria-pressed="true"],\n.model-manager-row.is-selected,');
     expect(styles).toContain('.selection-label {');
     expect(styles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
-    expect(styles).toContain('grid-template-columns: repeat(3, minmax(44px, 1fr));');
+    expect(declarationsJoined('.model-manager-actions')).toContain('display: flex;');
+    expect(styles).toContain('.model-manager-overflow-menu {');
   });
 
   it('uses one modal layer for preview, edit, and confirmation dialogs', () => {
@@ -400,7 +458,10 @@ describe('application design system', () => {
     expect(styles).toContain('.immersive-inspector {');
     expect(styles).toContain('.immersive-actions {');
     expect(styles).toContain('.immersive-actions .rotate-control,');
-    expect(styles).toContain('bottom: calc(108px + env(safe-area-inset-bottom));');
+    expect(declarationsJoined('.immersive-actions')).toContain('flex-wrap: wrap;');
+    expect(declarationsJoined('.model-rail')).toContain(
+      'bottom: calc(var(--hud-dock-height, 118px) + var(--space-3) + env(safe-area-inset-bottom));',
+    );
   });
 
   it('shows single-object AR status only as compact transparent error feedback', () => {
@@ -511,7 +572,7 @@ describe('application design system', () => {
     );
     expect(styles).toContain(
       '  .account-menu {\n' +
-      '    top: calc(56px + env(safe-area-inset-top) + 8px);',
+      '    top: calc(var(--mobile-top-bar-height) + env(safe-area-inset-top) + var(--space-2));',
     );
     expect(styles).toContain(
       '  .mobile-account-link {\n' +

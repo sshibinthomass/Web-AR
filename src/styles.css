@@ -73,6 +73,8 @@
   --color-gold-wash: #fff1cf;
   --color-error-dark: #b83e4b;
   --color-error-light: #ff9099;
+  /* Disabled text stays legible; the flat fill, not low contrast, says inactive. */
+  --color-disabled-ink: color-mix(in srgb, var(--color-mist-slate) 84%, var(--color-spatial-surface));
 
   /* Veils — translucent fills laid over the spatial field, never solid slabs */
   --veil-ink: color-mix(in srgb, var(--color-spatial-ink) 24%, transparent);
@@ -148,7 +150,19 @@
   --gutter-tablet: 32px;
   --gutter-desktop: 48px;
   --gutter-wide: 64px;
+  /* The single page gutter. Every band, both headers and the route bar read
+     this one value, so they share a left edge at every width. */
+  --gutter: var(--gutter-mobile);
   --control-height: 48px;
+  --control-height-compact: 44px;
+
+  /* Fixed chrome. Bands reserve space from these rather than magic numbers. */
+  /* Every floating immersive layer hangs off this one inset. */
+  --hud-inset: 10px;
+  --mobile-top-bar-height: 56px;
+  --bottom-nav-height: 68px;
+  --band-space-top: calc(var(--mobile-top-bar-height) + var(--space-4) + env(safe-area-inset-top));
+  --band-space-bottom: calc(var(--bottom-nav-height) + var(--space-6) + env(safe-area-inset-bottom));
 
   /* Shape */
   --radius-control: 10px;
@@ -352,9 +366,9 @@ button.danger:hover,
 }
 
 button:disabled {
-  border-color: var(--color-border);
-  color: var(--color-context-slate);
-  background: var(--veil-ink);
+  border-color: transparent;
+  color: var(--color-disabled-ink);
+  background: var(--veil-raised);
   cursor: not-allowed;
 }
 
@@ -406,12 +420,22 @@ textarea {
   position: relative;
 }
 
+.calibration-frame {
+  --bracket-size: 22px;
+  --bracket-inset: 12px;
+}
+
+.calibration-frame > * {
+  /* Clears the bracket so it frames the panel instead of striking its label. */
+  margin-inline-start: calc(var(--bracket-size) - var(--bracket-inset));
+}
+
 .calibration-frame::before,
 .calibration-frame::after {
   content: "";
   position: absolute;
-  width: 22px;
-  height: 22px;
+  width: var(--bracket-size);
+  height: var(--bracket-size);
   border-color: var(--color-signal-mint);
   pointer-events: none;
 }
@@ -469,6 +493,12 @@ textarea {
   position: relative;
   z-index: 1;
   min-height: 100dvh;
+  /* Reserves the fixed mobile top bar once for the route bar and every band. */
+  padding-top: calc(var(--mobile-top-bar-height) + env(safe-area-inset-top));
+}
+
+.app-shell[data-shell="immersive"] {
+  padding-top: 0;
 }
 
 .app-shell,
@@ -508,8 +538,61 @@ textarea {
 .gesture-surface {
   position: fixed;
   inset: 0;
+  display: grid;
+  place-items: center;
   pointer-events: auto;
   touch-action: none;
+}
+
+/* Shown until the camera feed takes over, so the stage is never a blank field. */
+.ar-stage-placeholder {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: center;
+  max-width: 34ch;
+  padding: var(--gutter);
+  text-align: center;
+  pointer-events: none;
+}
+
+.ar-stage-placeholder-title {
+  margin: 0;
+  color: var(--color-interface-white);
+  font-family: var(--font-display);
+  font-size: var(--text-heading-3);
+  font-weight: 650;
+}
+
+.ar-stage-placeholder-hint {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  line-height: 1.5;
+}
+
+.ar-stage-reticle {
+  width: 96px;
+  height: 96px;
+  border: 2px solid color-mix(in srgb, var(--color-signal-mint) 52%, transparent);
+  border-radius: 50%;
+  animation: ar-stage-reticle-pulse 2.4s var(--ease-standard) infinite;
+}
+
+@keyframes ar-stage-reticle-pulse {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scale(0.94);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Once the session is live the camera feed is the content. */
+.gesture-surface.is-session-active .ar-stage-placeholder {
+  display: none;
 }
 
 .app-header,
@@ -531,7 +614,9 @@ textarea {
   align-items: center;
   gap: var(--space-5);
   min-height: var(--header-height);
-  padding-inline: max(var(--gutter-desktop), calc((100vw - var(--content-wide)) / 2));
+  /* 100%, not 100vw: vw counts the scrollbar and would shift the header off the
+     centred route bar and page inners by half its width. */
+  padding-inline: max(var(--gutter), calc((100% - var(--content-wide)) / 2));
   border-bottom: 1px solid var(--color-line);
   background: color-mix(in srgb, var(--color-spatial-void) 82%, transparent);
   backdrop-filter: blur(18px);
@@ -580,7 +665,7 @@ textarea {
 
 .brand-endorsement {
   color: var(--color-mist-slate);
-  font-size: 10px;
+  font-size: var(--text-label);
   line-height: 1.2;
 }
 
@@ -592,7 +677,7 @@ textarea {
 
 .desktop-nav button,
 .shell-account button {
-  min-height: 44px;
+  min-height: var(--control-height);
   border-color: transparent;
   color: var(--color-mist-slate);
   background: transparent;
@@ -650,11 +735,14 @@ textarea {
 
 /* --- Route bar ----------------------------------------------------------- */
 
+/* Back sits on its own row so the route title starts on the page gutter, in
+   line with the content beneath it rather than indented past a button. */
 .route-bar {
-  display: none;
-  align-items: center;
-  gap: var(--space-4);
-  width: min(var(--content-wide), calc(100% - (2 * var(--gutter-desktop))));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: var(--space-3);
+  width: min(var(--content-wide), calc(100% - (2 * var(--gutter))));
   margin-inline: auto;
   border-bottom: 1px solid var(--color-line);
   padding-block: var(--space-5);
@@ -667,13 +755,25 @@ textarea {
 .route-bar h1 {
   margin: var(--space-1) 0 0;
   color: var(--color-interface-white);
-  font-size: clamp(22px, 2.4vw, 32px);
-  line-height: 1.1;
+  font-size: var(--text-heading-2);
+  line-height: 1.05;
 }
 
 .route-back,
 .immersive-exit {
-  min-height: 44px;
+  min-height: var(--control-height-compact);
+}
+
+/* The mobile top bar already carries Back, so the route bar only shows its own
+   copy once that bar is gone. */
+.route-bar .route-back {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .route-bar .route-back {
+    display: inline-grid;
+  }
 }
 
 /* --- Mobile bars --------------------------------------------------------- */
@@ -687,8 +787,8 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: var(--space-2);
-  min-height: calc(56px + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) var(--gutter-mobile) 0;
+  min-height: calc(var(--mobile-top-bar-height) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) var(--gutter) 0;
   border-bottom: 1px solid var(--color-line);
   background: color-mix(in srgb, var(--color-spatial-void) 88%, transparent);
   backdrop-filter: blur(16px);
@@ -721,6 +821,8 @@ textarea {
 
 .mobile-route-title {
   grid-column: 2;
+  opacity: 0;
+  transition: opacity 160ms var(--ease-standard);
   overflow: hidden;
   color: var(--color-interface-white);
   font-family: var(--font-display);
@@ -736,6 +838,10 @@ textarea {
   max-width: min(34vw, 150px);
 }
 
+.app-shell[data-title-compact="true"] .mobile-route-title {
+  opacity: 1;
+}
+
 .mobile-account-link.is-concealed {
   visibility: hidden;
   pointer-events: none;
@@ -748,7 +854,8 @@ textarea {
   left: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  padding: var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
+  min-height: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
+  padding: var(--space-2) var(--gutter) calc(var(--space-2) + env(safe-area-inset-bottom));
   border-top: 1px solid var(--color-line);
   background: color-mix(in srgb, var(--color-spatial-void) 92%, transparent);
   backdrop-filter: blur(16px);
@@ -793,10 +900,15 @@ textarea {
   width: min(320px, calc(100vw - 24px));
 }
 
+.account-menu-identity {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+}
+
 .create-menu button,
 .account-menu button {
   width: 100%;
-  min-height: 44px;
+  min-height: var(--control-height);
   justify-content: flex-start;
   border-color: transparent;
   color: var(--color-ink);
@@ -864,6 +976,9 @@ textarea {
    veils over the 3D ground, never solid slabs.
    ========================================================================== */
 
+/* Every band is an ordinary block in the document flow: the page is the only
+   scroller, so the mobile URL bar still collapses and no panel grows a second
+   scrollbar that would eat one side's gutter. */
 .landing,
 .auth-panel,
 .speech-panel,
@@ -871,16 +986,26 @@ textarea {
 .model-manager,
 .ar-model-picker {
   position: relative;
+  display: grid;
+  align-content: start;
   min-height: 100dvh;
-  overflow-y: auto;
   /* Clears the fixed mobile top bar and bottom nav. */
-  padding:
-    calc(72px + env(safe-area-inset-top))
-    var(--gutter-mobile)
-    calc(112px + env(safe-area-inset-bottom));
+  padding-block: var(--space-6) var(--band-space-bottom);
+  padding-inline: var(--gutter);
   color: var(--color-ink);
   background: transparent;
   pointer-events: auto;
+}
+
+/* The AR picker floats a place dock above the bottom nav; it needs the extra
+   room, and it is the only band that does. */
+.ar-model-picker {
+  padding-bottom: calc(var(--bottom-nav-height) + 68px + env(safe-area-inset-bottom));
+}
+
+/* Short routes read as unfinished when pinned to the top of a 100dvh band. */
+.auth-panel {
+  align-content: center;
 }
 
 .landing-inner,
@@ -1346,7 +1471,55 @@ textarea {
 }
 
 .auth-form-actions button {
-  min-height: 44px;
+  min-height: var(--control-height);
+}
+
+.auth-account {
+  display: grid;
+  gap: var(--space-5);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  padding: var(--space-6);
+  background: var(--veil-card);
+  box-shadow: var(--shadow-panel);
+}
+
+.auth-account-facts {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.auth-account-facts > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.auth-account-facts dt {
+  color: var(--color-ink-muted);
+  font-family: var(--font-utility);
+  font-size: var(--text-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-account-facts dd {
+  margin: 0;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+
+.auth-account-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  align-items: stretch;
+}
+
+.auth-account-actions button {
+  min-height: var(--control-height);
 }
 
 /* ==========================================================================
@@ -1461,7 +1634,6 @@ textarea {
 }
 
 .speech-transcript-card {
-  min-height: 104px;
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
   padding: var(--space-4);
@@ -1585,6 +1757,27 @@ textarea {
   background: var(--wash-mint);
   font-size: var(--text-small);
   line-height: 1.45;
+}
+
+/* Separates the two ways in, so the column stops alternating between them. */
+.speech-path-divider {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-family: var(--font-utility);
+  font-size: var(--text-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.speech-path-divider::before,
+.speech-path-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-line);
 }
 
 /* ==========================================================================
@@ -1727,6 +1920,32 @@ textarea {
   text-decoration: none;
 }
 
+/* Irreversible actions read as available, not as the panel's headline. */
+.is-destructive {
+  color: var(--color-error-light);
+}
+
+.is-destructive:hover {
+  border-color: color-mix(in srgb, var(--color-error-light) 46%, transparent);
+  color: var(--color-error-light);
+  background: var(--wash-error);
+}
+
+/* Refresh is a utility, not the section's primary action. */
+.admin-dashboard-section-header button {
+  width: auto;
+  justify-self: end;
+  padding-inline: var(--space-4);
+  color: var(--color-ink-muted);
+  background: transparent;
+  font-size: var(--text-small);
+}
+
+.admin-dashboard-section-header button:hover {
+  color: var(--color-ink);
+  background: var(--veil-ink);
+}
+
 /* ==========================================================================
    Camera, upload and photo-to-AR workspaces
    ========================================================================== */
@@ -1744,15 +1963,16 @@ textarea {
   border: 0;
   padding:
     calc(64px + env(safe-area-inset-top))
-    var(--gutter-mobile)
-    calc(88px + env(safe-area-inset-bottom));
+    var(--gutter)
+    calc(var(--space-6) + env(safe-area-inset-bottom));
   color: var(--color-ink);
   background: var(--color-spatial-void);
   pointer-events: auto;
 }
 
 .app-shell[data-shell="standard"] .creation-workspace.fullscreen {
-  padding-top: calc(72px + env(safe-area-inset-top));
+  padding-top: var(--band-space-top);
+  padding-bottom: var(--band-space-bottom);
 }
 
 .creation-stage,
@@ -1787,6 +2007,11 @@ textarea {
   grid-column: 1;
   min-width: 0;
   min-height: 0;
+  max-height: 100%;
+  aspect-ratio: 3 / 4;
+  place-self: center;
+  width: 100%;
+  background: var(--veil-void);
   pointer-events: none;
   overflow: hidden;
   border-radius: var(--radius-control);
@@ -1875,9 +2100,10 @@ textarea {
 }
 
 .upload-drop-zone {
+  position: relative;
   display: grid;
   align-content: center;
-  justify-items: start;
+  justify-items: center;
   gap: var(--space-2);
   min-height: 220px;
   border: 1px dashed var(--color-line-strong);
@@ -1885,6 +2111,20 @@ textarea {
   padding: var(--space-6);
   color: var(--color-ink);
   background: var(--veil-surface);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 140ms var(--ease-standard), background 140ms var(--ease-standard);
+}
+
+.upload-drop-zone:hover,
+.upload-drop-zone.is-dragover {
+  border-color: var(--color-signal-mint);
+  background: var(--wash-mint);
+}
+
+.upload-drop-zone:focus-within {
+  outline: 3px solid var(--color-signal-mint);
+  outline-offset: 3px;
 }
 
 .creation-stage > .upload-drop-zone {
@@ -1908,7 +2148,42 @@ textarea {
   font-size: var(--text-small);
 }
 
-.upload-drop-zone input,
+.upload-drop-zone input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  border: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.upload-drop-zone-cue {
+  display: inline-grid;
+  place-items: center;
+  min-height: var(--control-height);
+  border: 1px solid var(--color-signal-mint);
+  border-radius: var(--radius-control);
+  padding-inline: var(--space-5);
+  color: var(--color-spatial-ink);
+  background: var(--color-signal-mint);
+  font-size: var(--text-body);
+  font-weight: 700;
+}
+
+.upload-drop-zone-file.is-empty {
+  color: var(--color-ink-muted);
+}
+
+.upload-drop-zone-file {
+  color: var(--color-signal-mint);
+  font-family: var(--font-utility);
+  font-size: var(--text-small);
+  overflow-wrap: anywhere;
+}
+
 .target-object-field input {
   width: 100%;
   min-height: var(--control-height);
@@ -1923,7 +2198,7 @@ textarea {
   font-weight: 600;
 }
 
-.target-object-field input {
+.target-object-field > input {
   margin-top: 0;
 }
 
@@ -2065,18 +2340,6 @@ textarea {
    Model collections — library and AR selection
    ========================================================================== */
 
-.model-manager,
-.ar-model-picker {
-  position: fixed;
-  inset: 0;
-  z-index: 9;
-  padding-bottom: calc(164px + env(safe-area-inset-bottom));
-}
-
-.ar-model-picker {
-  z-index: 2;
-}
-
 .model-manager-inner,
 .ar-model-picker-inner {
   display: grid;
@@ -2199,8 +2462,9 @@ textarea {
 
 .model-manager-row {
   display: grid;
-  grid-template-columns: 62px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-3);
+  align-items: center;
   min-width: 0;
   min-height: 76px;
   border: 1px solid var(--color-line);
@@ -2208,8 +2472,22 @@ textarea {
   padding: var(--space-3);
   color: var(--color-ink);
   background: var(--veil-card);
-  cursor: pointer;
   touch-action: manipulation;
+}
+
+.model-manager-open {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .ar-model-card:hover,
@@ -2218,9 +2496,10 @@ textarea {
   background: color-mix(in srgb, var(--color-spatial-surface-raised) 96%, transparent);
 }
 
-.model-manager-row:focus-visible {
+.model-manager-open:focus-visible {
   outline: 3px solid var(--color-signal-mint);
   outline-offset: 3px;
+  border-radius: var(--radius-control);
 }
 
 /* Download state reads as a process, so it carries violet, not a second mint. */
@@ -2301,16 +2580,38 @@ textarea {
 .model-manager-owner {
   display: block;
   width: fit-content;
+  max-width: 100%;
   color: var(--color-ink-muted);
   font-size: var(--text-label);
   line-height: 1.3;
   overflow-wrap: anywhere;
 }
 
+.model-manager-owner {
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .model-manager-details {
   display: grid;
   gap: var(--space-2);
+  justify-items: start;
   min-width: 0;
+}
+
+.model-manager-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* The name leads the card, so it takes the heading step rather than body. */
+.model-manager-name {
+  font-size: var(--text-heading-3);
+  line-height: 1.2;
 }
 
 .model-manager-meta {
@@ -2388,13 +2689,86 @@ textarea {
 
 /* --- Row actions --------------------------------------------------------- */
 
+/* Two direct actions plus one overflow control: three 44px targets, so the
+   tray fits on one row at every width and never orphans a button. */
 .model-manager-actions {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(44px, 1fr));
-  justify-content: end;
+  display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.model-manager-overflow {
+  position: relative;
+}
+
+.model-manager-overflow > summary {
+  display: inline-grid;
+  place-items: center;
+  width: var(--control-height-compact);
+  height: var(--control-height-compact);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-ink);
+  background: var(--veil-surface);
+  list-style: none;
+  cursor: pointer;
+}
+
+.model-manager-overflow > summary::-webkit-details-marker {
+  display: none;
+}
+
+.model-manager-overflow > summary svg {
+  width: 20px;
+  height: 20px;
+}
+
+.model-manager-overflow[open] > summary {
+  border-color: var(--color-line-strong);
+  color: var(--color-signal-mint);
+}
+
+.model-manager-overflow > summary:focus-visible {
+  outline: 3px solid var(--color-signal-mint);
+  outline-offset: 3px;
+}
+
+.model-manager-overflow-menu {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 12;
+  display: grid;
+  gap: 2px;
+  min-width: 200px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  padding: var(--space-2);
+  background: var(--color-spatial-surface-raised);
+  box-shadow: var(--shadow-panel);
+}
+
+.model-manager-menu-button {
+  justify-content: start;
+  min-height: var(--control-height-compact);
+  border: 0;
+  padding-inline: var(--space-3);
+  color: var(--color-ink);
+  background: transparent;
+  font-size: var(--text-small);
+  text-align: left;
+}
+
+.model-manager-menu-button:hover {
+  background: var(--veil-surface);
+}
+
+.model-manager-menu-button.danger {
+  color: var(--color-error-light);
+}
+
+.model-manager-menu-button.is-active {
+  color: var(--color-anchor-gold);
 }
 
 .model-manager-actions button {
@@ -2473,9 +2847,9 @@ textarea {
 
 .ar-model-place-bar {
   position: fixed;
-  right: var(--gutter-mobile);
-  bottom: calc(80px + env(safe-area-inset-bottom));
-  left: var(--gutter-mobile);
+  right: var(--gutter);
+  bottom: calc(var(--bottom-nav-height) + var(--space-3) + env(safe-area-inset-bottom));
+  left: var(--gutter);
   z-index: 5;
   display: flex;
   justify-content: center;
@@ -2499,9 +2873,10 @@ textarea {
 }
 
 .ar-model-place-button:disabled {
-  border-color: var(--color-line);
-  color: var(--color-context-slate);
-  background: var(--veil-ink);
+  border-color: transparent;
+  color: var(--color-disabled-ink);
+  background: var(--color-spatial-surface);
+  box-shadow: none;
 }
 
 /* ==========================================================================
@@ -2617,8 +2992,11 @@ textarea {
   font-size: var(--text-small);
 }
 
+/* Both readouts share one track so neither wraps and the two rows align. */
 .model-preview-lighting-value,
 .model-preview-direction-value {
+  min-width: 4ch;
+  white-space: nowrap;
   color: var(--color-interface-white);
   font-family: var(--font-utility);
   font-variant-numeric: tabular-nums;
@@ -2634,11 +3012,26 @@ textarea {
    outside the brand palette: a mid grey reads every model honestly, light or
    dark, the way an editor scene view does. The grid lives in the scene, not
    here, so it turns with the model as the viewer orbits. */
+/* An object is inspected in a 4:3 window, centred, rather than stretched to
+   whatever shape the panel happens to be. */
 .model-preview-viewport {
   position: relative;
+  justify-self: center;
+  width: 100%;
+  /* Whichever runs out first - the panel's width or its height - caps the
+     stage, so the 4:3 window never spills past either edge. */
+  max-width: min(100%, calc((100dvh - 220px) * 4 / 3));
+  min-width: 0;
   min-height: 0;
+  aspect-ratio: 4 / 3;
+  max-height: 100%;
   border-color: var(--color-border-dark);
   background: var(--preview-ground);
+}
+
+/* Nothing to inspect yet, so the neutral inspection ground stays hidden. */
+.model-preview-viewport.is-empty {
+  background: var(--veil-void);
 }
 
 /* Direct manipulation: the canvas takes pointer input, unlike the page-level
@@ -2767,8 +3160,8 @@ textarea {
 .immersive-bar {
   position: fixed;
   top: max(8px, env(safe-area-inset-top));
-  right: 10px;
-  left: 10px;
+  right: var(--hud-inset);
+  left: var(--hud-inset);
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -2868,8 +3261,8 @@ textarea {
 .immersive-inspector {
   position: fixed;
   top: calc(68px + env(safe-area-inset-top));
-  right: 12px;
-  left: 12px;
+  right: var(--hud-inset);
+  left: var(--hud-inset);
   z-index: 5;
   display: grid;
   gap: var(--space-2);
@@ -3003,9 +3396,9 @@ textarea {
 
 .hud-actions button:disabled,
 .hud-actions button.primary:disabled {
-  border-color: var(--color-border-dark);
-  color: var(--color-context-slate);
-  background: color-mix(in srgb, var(--color-spatial-void) 70%, transparent);
+  border-color: transparent;
+  color: var(--color-disabled-ink);
+  background: var(--color-spatial-surface);
 }
 
 .ar-button-slot {
@@ -3089,7 +3482,7 @@ textarea {
 .model-rail {
   position: fixed;
   right: 0;
-  bottom: calc(max(18px, env(safe-area-inset-bottom)) + 118px);
+  bottom: calc(var(--hud-dock-height, 118px) + var(--space-3) + env(safe-area-inset-bottom));
   left: 0;
   z-index: 4;
   display: flex;
@@ -3097,27 +3490,21 @@ textarea {
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scroll-snap-type: x proximity;
-  padding: 0 12px 2px;
+  padding: 0 calc(var(--hud-inset) + var(--space-2)) 2px;
   pointer-events: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
   touch-action: pan-x;
-}
-
-.model-rail.has-animation-control {
-  bottom: calc(max(18px, env(safe-area-inset-bottom)) + 160px);
-}
-
-.model-rail::-webkit-scrollbar {
-  display: none;
+  /* The rail scrolls past the edge, so the edge fades rather than cutting an
+     item off flush and reading as the end of the list. */
+  mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 28px), transparent 100%);
 }
 
 .model-rail-item {
-  flex: 0 0 76px;
+  flex: 0 0 96px;
   display: grid;
-  grid-template-rows: 48px 2.5em;
+  grid-template-rows: 56px auto;
   gap: var(--space-1);
-  min-width: 76px;
-  min-height: 88px;
+  min-width: 96px;
   border: 1px solid var(--color-border-dark);
   border-radius: var(--radius-control);
   padding: var(--space-2);
@@ -3132,25 +3519,25 @@ textarea {
 
 .model-rail-thumb {
   width: 100%;
-  height: 48px;
+  height: 56px;
   border: 0;
   border-radius: 6px;
 }
 
+/* The clamp and the track must agree, or a partial third line paints through. */
 .model-rail-label {
   display: -webkit-box;
   overflow: hidden;
-  line-height: 1.25;
-  font-size: 10px;
+  max-height: 2.6em;
+  line-height: 1.3;
+  font-size: var(--text-label);
   text-align: center;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
-.app-shell[data-shell="immersive"] .model-rail,
-.app-shell[data-shell="immersive"] .model-rail.has-animation-control {
-  bottom: calc(108px + env(safe-area-inset-bottom));
+.app-shell[data-shell="immersive"] .model-rail {
   justify-content: flex-start;
 }
 
@@ -3167,35 +3554,57 @@ textarea {
 
 .immersive-actions {
   position: fixed;
-  right: 10px;
-  bottom: calc(10px + env(safe-area-inset-bottom));
-  left: 10px;
+  right: var(--hud-inset);
+  bottom: calc(var(--hud-inset) + env(safe-area-inset-bottom));
+  left: var(--hud-inset);
   z-index: 6;
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-start;
   gap: var(--space-2);
   max-width: none;
   margin: 0;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
   border: 1px solid var(--color-border-dark);
   border-radius: var(--radius-card);
   padding: var(--space-2);
   background: color-mix(in srgb, var(--color-spatial-ink) 92%, transparent);
-  scrollbar-width: none;
 }
 
-.immersive-actions::-webkit-scrollbar {
-  display: none;
+/* Priority order, so a narrow screen wraps the least important control first
+   and Place is never the one that moves. */
+.immersive-actions button.hud-action-chip.primary {
+  order: 0;
+}
+
+.immersive-actions button.hud-action-chip {
+  order: 1;
+}
+
+.immersive-actions button.hud-action-chip.danger {
+  order: 2;
+}
+
+.immersive-actions .hud-adjust-tray {
+  order: 3;
+}
+
+.hud-adjust-tray {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .immersive-actions .rotate-control,
 .immersive-actions .animation-control {
-  order: 0;
-  flex: 0 0 min(260px, calc(100vw - 36px));
-  max-width: 300px;
+  flex: 1 1 min(260px, 100%);
+  max-width: 100%;
+}
+
+.immersive-actions button.hud-action-chip.is-open {
+  border-color: var(--color-signal-mint);
+  color: var(--color-signal-mint);
 }
 
 .immersive-actions button.hud-action-chip,
@@ -3347,9 +3756,18 @@ textarea {
   color: var(--color-signal-mint);
 }
 
+/* A failure reads as a failure: error wash, error rule, error ink - not a
+   caption in the same grey as every other hint. */
 .camera-status.is-error,
-.generated-model-status.is-error {
+.generated-model-status.is-error,
+.model-preview-status.is-error,
+.auth-message.is-error,
+.admin-job-message.is-error {
+  border: 1px solid color-mix(in srgb, var(--color-error-light) 46%, transparent);
+  border-radius: var(--radius-control);
+  padding: var(--space-3) var(--space-4);
   color: var(--color-error-light);
+  background: var(--wash-error);
 }
 
 /* ==========================================================================
@@ -3368,11 +3786,28 @@ textarea {
 .admin-account-actions button,
 .admin-job-actions button,
 .admin-job-actions a,
-.model-manager-actions button,
 .model-edit-actions button,
 .model-preview-close,
 .ar-model-place-button {
-  min-height: 44px;
+  min-height: var(--control-height);
+}
+
+/* Compact family: icon trays and the HUD dock, where 44px is the contract. */
+.model-manager-actions button,
+.model-manager-overflow > summary,
+.hud-actions button,
+.model-manager-menu-button {
+  min-height: var(--control-height-compact);
+}
+
+/* Paired actions share a row, so a label that wraps lifts both buttons rather
+   than leaving one short. */
+.auth-form-actions,
+.camera-actions,
+.speech-actions,
+.admin-account-actions,
+.admin-job-actions {
+  align-items: stretch;
 }
 
 .model-manager .model-library-search input,
@@ -3392,21 +3827,21 @@ textarea {
 
 @media (max-width: 767px) {
   .create-menu {
-    right: var(--gutter-mobile);
-    bottom: calc(76px + env(safe-area-inset-bottom));
-    left: var(--gutter-mobile);
+    right: var(--gutter);
+    bottom: calc(var(--bottom-nav-height) + var(--space-2) + env(safe-area-inset-bottom));
+    left: var(--gutter);
     width: auto;
   }
 
   .account-menu {
-    top: calc(56px + env(safe-area-inset-top) + 8px);
+    top: calc(var(--mobile-top-bar-height) + env(safe-area-inset-top) + var(--space-2));
     right: 12px;
     left: 12px;
     width: auto;
   }
 
   .session-notice {
-    top: calc(56px + env(safe-area-inset-top) + 8px);
+    top: calc(var(--mobile-top-bar-height) + env(safe-area-inset-top) + var(--space-2));
   }
 
   .mobile-account-link {
@@ -3417,7 +3852,7 @@ textarea {
   .app-shell[data-route="upload"] .creation-workspace.fullscreen,
   .app-shell[data-route="upload-model"] .creation-workspace.fullscreen {
     grid-template-rows: auto auto;
-    align-content: start;
+    align-content: center;
   }
 
   .app-shell[data-route="upload"] .creation-stage,
@@ -3441,14 +3876,9 @@ textarea {
    ========================================================================== */
 
 @media (min-width: 768px) and (max-width: 1023px) {
-  .app-page-host > section {
-    width: min(760px, 100%);
-    margin-inline: auto;
-  }
-
   .account-menu,
   .session-notice {
-    top: calc(56px + env(safe-area-inset-top) + 8px);
+    top: calc(var(--mobile-top-bar-height) + env(safe-area-inset-top) + var(--space-2));
   }
 
   .account-menu {
@@ -3462,13 +3892,13 @@ textarea {
   }
 
   .create-menu {
-    bottom: calc(76px + env(safe-area-inset-bottom));
+    bottom: calc(var(--bottom-nav-height) + var(--space-2) + env(safe-area-inset-bottom));
   }
 
   .app-shell[data-route="upload"] .creation-workspace.fullscreen,
   .app-shell[data-route="upload-model"] .creation-workspace.fullscreen {
     grid-template-rows: auto auto;
-    align-content: start;
+    align-content: center;
   }
 
   .app-shell[data-route="upload"] .creation-stage,
@@ -3492,14 +3922,8 @@ textarea {
    ========================================================================== */
 
 @media (min-width: 768px) {
-  .landing,
-  .auth-panel,
-  .speech-panel,
-  .admin-dashboard,
-  .model-manager,
-  .ar-model-picker {
-    padding-right: var(--gutter-tablet);
-    padding-left: var(--gutter-tablet);
+  :root {
+    --gutter: var(--gutter-tablet);
   }
 
   .landing-inner {
@@ -3531,25 +3955,13 @@ textarea {
     gap: var(--space-4);
   }
 
-  .model-manager-row.has-preview {
-    grid-template-columns: 74px minmax(0, 1fr) 260px;
-    align-items: center;
-  }
-
   .model-manager-thumbnail {
     width: 74px;
     height: 74px;
   }
 
-  .model-manager-row {
+  .model-manager-open {
     grid-template-columns: 74px minmax(0, 1fr);
-  }
-
-  .model-manager-actions {
-    grid-column: auto;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
   }
 
   .admin-account-actions,
@@ -3583,15 +3995,10 @@ textarea {
     grid-template-columns: minmax(0, 1fr) repeat(3, auto);
   }
 
-  .ar-model-place-bar {
-    right: 16px;
-    left: 16px;
-  }
-
   .create-menu {
-    right: var(--gutter-tablet);
+    right: var(--gutter);
     left: auto;
-    width: min(360px, calc(100vw - 32px));
+    width: min(360px, calc(100% - (2 * var(--gutter))));
   }
 
   .model-preview,
@@ -3621,10 +4028,6 @@ textarea {
     min-width: 380px;
   }
 
-  .creation-workspace.fullscreen {
-    padding-right: var(--gutter-tablet);
-    padding-left: var(--gutter-tablet);
-  }
 }
 
 /* ==========================================================================
@@ -3641,26 +4044,29 @@ textarea {
     display: grid;
   }
 
-  .route-bar {
-    display: flex;
+  :root {
+    --gutter: var(--gutter-desktop);
   }
 
+  /* The header and route bar take their own space in the flow at this width,
+     so bands only carry their own rhythm. */
   .landing,
   .auth-panel,
   .speech-panel,
   .admin-dashboard,
   .model-manager,
   .ar-model-picker {
-    padding-block: var(--space-8) var(--space-9);
-    padding-right: var(--gutter-desktop);
-    padding-left: var(--gutter-desktop);
+    min-height: 0;
+    padding-block: var(--space-6) var(--space-9);
   }
 
-  /* These two are fixed overlays, so they clear the header and route bar
-     themselves rather than scrolling underneath them. */
-  .model-manager,
+  /* Home has no route bar above it, so it opens on its own full rhythm. */
+  .landing {
+    padding-block-start: var(--space-8);
+  }
+
   .ar-model-picker {
-    padding-top: 168px;
+    padding-bottom: calc(var(--space-9) + 68px);
   }
 
   /* Split hero: copy and actions beside the aperture stage. */
@@ -3701,7 +4107,6 @@ textarea {
   .auth-panel-inner {
     grid-template-columns: minmax(0, 5fr) minmax(420px, 7fr);
     gap: var(--space-8);
-    width: min(var(--content-standard), 100%);
   }
 
   .speech-workspace {
@@ -3727,7 +4132,7 @@ textarea {
     overflow: hidden;
     padding:
       calc(var(--header-height) + var(--space-2))
-      max(var(--gutter-desktop), calc((100vw - var(--content-max)) / 2))
+      max(var(--gutter), calc((100% - var(--content-wide)) / 2))
       var(--space-5);
   }
 
@@ -3751,7 +4156,7 @@ textarea {
   }
 
   .ar-model-place-bar {
-    right: max(var(--gutter-desktop), calc((100vw - var(--content-max)) / 2));
+    right: max(var(--gutter), calc((100% - var(--content-wide)) / 2));
     bottom: var(--space-5);
     left: auto;
     justify-content: flex-end;
@@ -3759,24 +4164,24 @@ textarea {
 
   .ar-model-place-button {
     width: min(360px, calc(100vw - 48px));
-    min-height: 44px;
+    min-height: var(--control-height);
   }
 
   /* The nav sits in the centre column of the header grid, so the menu drops
      from the centre rather than from a hard-coded offset. */
   .create-menu {
-    top: var(--header-height);
+    top: calc(var(--header-height) + var(--space-2));
     right: auto;
     bottom: auto;
+    /* Overridden inline on open so the menu hangs from its own trigger. */
     left: 50%;
-    transform: translateX(-50%);
   }
 
   .account-menu {
-    top: 64px;
-    right: max(16px, calc((100vw - var(--content-max)) / 2));
+    top: calc(var(--header-height) + var(--space-2));
+    right: max(var(--gutter), calc((100% - var(--content-wide)) / 2));
     left: auto;
-    width: min(320px, calc(100vw - 24px));
+    width: min(320px, calc(100% - (2 * var(--gutter))));
   }
 
   .session-notice {
@@ -3823,15 +4228,8 @@ textarea {
    ========================================================================== */
 
 @media (min-width: 1440px) {
-  .app-header,
-  .landing,
-  .auth-panel,
-  .speech-panel,
-  .admin-dashboard,
-  .model-manager,
-  .ar-model-picker {
-    padding-right: var(--gutter-wide);
-    padding-left: var(--gutter-wide);
+  :root {
+    --gutter: var(--gutter-wide);
   }
 
   .ar-model-grid {

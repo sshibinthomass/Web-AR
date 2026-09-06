@@ -69,6 +69,7 @@ import {
 } from '../ui/routes';
 import { getGenerateModelApiUrl } from './config';
 import type { ARRuntime, Point2, SceneContext } from './arRuntime';
+import { describeError } from '../ui/errorMessages';
 
 export class WebARApp {
   private arRuntime: ARRuntime | null = null;
@@ -239,7 +240,7 @@ export class WebARApp {
       void this.refreshGeneratedModels();
       void this.prepareMultiObject();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Login failed.';
+      const message = describeError(error, 'Login failed.');
       this.hud?.showAuthMessage(message, true);
     }
   }
@@ -264,7 +265,7 @@ export class WebARApp {
       void this.refreshGeneratedModels();
       void this.prepareMultiObject();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Account creation failed.';
+      const message = describeError(error, 'Account creation failed.');
       this.hud?.showAuthMessage(message, true);
     }
   }
@@ -294,7 +295,7 @@ export class WebARApp {
     try {
       this.hud?.updateAdminAccounts(await listAccounts({ apiUrl, token: this.authToken }));
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not load accounts.';
+      const message = describeError(error, 'Could not load accounts.');
       this.hud?.showAuthMessage(message, true);
     }
   }
@@ -308,7 +309,7 @@ export class WebARApp {
     try {
       this.hud?.updateAdminJobs(await listAdminJobsRequest({ apiUrl, authToken: this.authToken }));
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not load jobs.';
+      const message = describeError(error, 'Could not load jobs.');
       this.hud?.showAdminJobMessage(message, true);
     }
   }
@@ -324,7 +325,7 @@ export class WebARApp {
       await this.refreshAdminJobs();
       this.hud?.showAdminJobMessage(`Retry queued for ${jobId}.`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not retry job.';
+      const message = describeError(error, 'Could not retry job.');
       this.hud?.showAdminJobMessage(message, true);
     }
   }
@@ -340,7 +341,7 @@ export class WebARApp {
       await this.refreshAdminJobs();
       this.hud?.showAdminJobMessage(`Cleaned ${result.cleaned} orphaned preview${result.cleaned === 1 ? '' : 's'}.`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not clean failed previews.';
+      const message = describeError(error, 'Could not clean failed previews.');
       this.hud?.showAdminJobMessage(message, true);
     }
   }
@@ -355,7 +356,7 @@ export class WebARApp {
       await approveAccountRequest({ apiUrl, email, token: this.authToken });
       await this.refreshAdminAccounts();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not approve account.';
+      const message = describeError(error, 'Could not approve account.');
       this.hud?.showAuthMessage(message, true);
     }
   }
@@ -370,7 +371,7 @@ export class WebARApp {
       await removeAccountRequest({ apiUrl, email, token: this.authToken });
       await this.refreshAdminAccounts();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not remove account.';
+      const message = describeError(error, 'Could not remove account.');
       this.hud?.showAuthMessage(message, true);
     }
   }
@@ -492,7 +493,7 @@ export class WebARApp {
       this.hud?.markModelDownloaded(modelOption.id);
       this.hud?.update(this.appState.mode, `${modelOption.label} ready. Tap Place to add it to this layout.`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown model loading error.';
+      const message = describeError(error, 'Unknown model loading error.');
       this.appState.modelLoaded = false;
       this.hud?.updateModelReady(false);
       if (shouldMarkDownload) {
@@ -565,7 +566,7 @@ export class WebARApp {
       if (options.isCurrent && !options.isCurrent()) {
         return;
       }
-      const message = error instanceof Error ? error.message : 'Unknown model loading error.';
+      const message = describeError(error, 'Unknown model loading error.');
       this.appState.modelLoaded = false;
       this.hud?.updateModelReady(false);
       if (options.selectedModelId && shouldMarkDownload) {
@@ -608,8 +609,11 @@ export class WebARApp {
       if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
         return;
       }
-      const message = error instanceof Error ? error.message : 'Camera permission was not granted.';
-      this.hud?.updateCameraStatus(`Camera unavailable: ${message}`, false);
+      const message = describeError(
+        error,
+        'The camera could not start. Allow camera access in your browser site settings, then try again.',
+      );
+      this.hud?.updateCameraStatus(message, false, true);
     }
   }
 
@@ -642,7 +646,7 @@ export class WebARApp {
       if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
         return;
       }
-      const message = error instanceof Error ? error.message : 'Could not capture image.';
+      const message = describeError(error, 'Could not capture image.');
       this.hud?.updateCameraStatus(`Capture failed: ${message}`, false);
     }
   }
@@ -786,7 +790,7 @@ export class WebARApp {
       if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
         return;
       }
-      const message = error instanceof Error ? error.message : 'Unknown generation error.';
+      const message = describeError(error, 'Unknown generation error.');
       this.hud?.updateCameraStatus(`Generation failed: ${message}`, true);
     }
   }
@@ -831,7 +835,7 @@ export class WebARApp {
       if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
         return;
       }
-      const message = error instanceof Error ? error.message : 'GPT extraction failed.';
+      const message = describeError(error, 'GPT extraction failed.');
       this.hud?.updateCameraStatus(`GPT extraction failed: ${message}`, true);
     }
   }
@@ -890,7 +894,7 @@ export class WebARApp {
       if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
         return;
       }
-      const message = error instanceof Error ? error.message : 'Full Flow failed.';
+      const message = describeError(error, 'Full Flow failed.');
       this.hud?.showFullFlowError(`Full Flow failed: ${message}`);
     } finally {
       if (this.photoGenerationTransitionEpoch === mediaOperationEpoch) {
@@ -955,7 +959,7 @@ export class WebARApp {
       if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
         return;
       }
-      const message = error instanceof Error ? error.message : 'Dynamic flow failed.';
+      const message = describeError(error, 'Dynamic flow failed.');
       this.hud?.showFullFlowError(`Dynamic flow failed: ${message}`);
     } finally {
       if (this.photoGenerationTransitionEpoch === mediaOperationEpoch) {
@@ -985,7 +989,7 @@ export class WebARApp {
       this.speechRecordingSession = await startAudioRecording();
       this.hud?.showSpeechRecording();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Microphone permission was not granted.';
+      const message = describeError(error, 'Microphone permission was not granted.');
       this.speechRecordingSession = null;
       this.hud?.showSpeechError(`Microphone unavailable: ${message}`);
     }
@@ -1004,7 +1008,7 @@ export class WebARApp {
       this.speechAudio = await session.stop();
       this.hud?.showSpeechCaptured();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not record speech.';
+      const message = describeError(error, 'Could not record speech.');
       this.speechAudio = null;
       this.hud?.showSpeechError(`Speech recording failed: ${message}`);
     }
@@ -1039,7 +1043,7 @@ export class WebARApp {
       void this.refreshGeneratedModels();
       void this.watchSpeechGenerationJob(job);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Speech to 3D failed.';
+      const message = describeError(error, 'Speech to 3D failed.');
       this.hud?.showSpeechError(`Speech generation failed: ${message}`);
     }
   }
@@ -1071,7 +1075,7 @@ export class WebARApp {
       void this.refreshGeneratedModels();
       void this.watchSpeechGenerationJob(job);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Text to 3D failed.';
+      const message = describeError(error, 'Text to 3D failed.');
       this.hud?.showSpeechError(`Text generation failed: ${message}`);
     }
   }
@@ -1107,7 +1111,7 @@ export class WebARApp {
         void this.pollSpeechGenerationJob(job, watchToken);
       }, this.speechJobPollDelayMs);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not check speech generation status.';
+      const message = describeError(error, 'Could not check speech generation status.');
       this.hud?.showSpeechError(`Speech generation status failed: ${message}`);
     }
   }
@@ -1267,7 +1271,7 @@ export class WebARApp {
       this.pendingUploadModelFile = file;
       this.hud?.updateUploadModelStatus(`${file.name} ready to store. Press Store Model to save it.`, true);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not upload model.';
+      const message = describeError(error, 'Could not upload model.');
       this.pendingUploadModelFile = null;
       this.hud?.updateUploadModelStatus(`Model upload failed: ${message}`, false);
     }
@@ -1304,7 +1308,7 @@ export class WebARApp {
       await this.loadSelectedModel(storedModel.id);
       void this.refreshGeneratedModels();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not store model.';
+      const message = describeError(error, 'Could not store model.');
       this.hud?.updateUploadModelStatus(`Store failed: ${message}`, true);
     }
   }
@@ -1329,7 +1333,7 @@ export class WebARApp {
     const modelOption = this.availableModels.find((model) => model.id === modelId);
     const previewViewport = this.hud?.modelPreviewViewport;
     if (!modelOption || !previewViewport) {
-      this.hud?.showModelPreviewError('Model preview is unavailable.');
+      this.hud?.showModelPreviewError('Preview is unavailable in this browser.');
       return;
     }
 
@@ -1351,11 +1355,11 @@ export class WebARApp {
       this.hud?.updateModelPreviewAnimationOptions(result.animations, result.animations.length > 0 ? 0 : -1);
       this.hud?.showModelPreviewReady();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown model preview error.';
+      const message = describeError(error, 'This model could not be opened. It may still be uploading.');
       if (shouldMarkDownload) {
         this.hud?.markModelDownloadFailed(modelId);
       }
-      this.hud?.showModelPreviewError(`Preview failed: ${message}`);
+      this.hud?.showModelPreviewError(message);
     }
   }
 
@@ -1398,7 +1402,7 @@ export class WebARApp {
       if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
         return;
       }
-      const message = error instanceof Error ? error.message : 'Could not prepare uploaded image.';
+      const message = describeError(error, 'Could not prepare uploaded image.');
       this.hud?.updateCameraStatus(`Upload failed: ${message}`, false);
     }
   }
@@ -1418,7 +1422,7 @@ export class WebARApp {
       await this.refreshGeneratedModels();
       this.hud?.updateModelManagerStatus('Model renamed.');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not rename model.';
+      const message = describeError(error, 'Could not rename model.');
       this.hud?.updateModelManagerStatus(`Rename failed: ${message}`);
     }
   }
@@ -1438,7 +1442,7 @@ export class WebARApp {
       await this.refreshGeneratedModels();
       this.hud?.updateModelManagerStatus('Model deleted.');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not delete model.';
+      const message = describeError(error, 'Could not delete model.');
       this.hud?.updateModelManagerStatus(`Delete failed: ${message}`);
     }
   }
@@ -1457,7 +1461,7 @@ export class WebARApp {
       await this.refreshGeneratedModels();
       this.hud?.updateModelManagerStatus(visibility === 'public' ? 'Model is public.' : 'Model is private.');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not update visibility.';
+      const message = describeError(error, 'Could not update visibility.');
       this.hud?.updateModelManagerStatus(`Visibility update failed: ${message}`);
     }
   }
@@ -1483,7 +1487,7 @@ export class WebARApp {
       await this.refreshGeneratedModels();
       this.hud?.updateModelManagerStatus(`Thumbnail updated (${Math.max(1, Math.ceil(thumbnail.bytes / 1024))} KB).`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not update thumbnail.';
+      const message = describeError(error, 'Could not update thumbnail.');
       this.hud?.updateModelManagerStatus(`Thumbnail update failed: ${message}`);
     }
   }

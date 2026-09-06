@@ -195,7 +195,21 @@ export class ApplicationShell {
       this.createMenu.appendChild(button);
     }
 
+    // ROUTES is the only place a destination is named. The tab bar takes the
+    // short form because its cells are ~85px wide on a small phone; every
+    // other surface takes the full title.
+    for (const button of this.root.querySelectorAll<HTMLElement>('.desktop-nav [data-nav-route]')) {
+      const route = button.dataset.navRoute as HudRoute;
+      button.textContent = ROUTES[route].title;
+    }
+    for (const button of this.root.querySelectorAll<HTMLElement>('.mobile-bottom-nav [data-nav-route]')) {
+      const route = button.dataset.navRoute as HudRoute;
+      button.textContent = ROUTES[route].shortTitle;
+    }
+
     this.root.addEventListener('click', (event) => this.handleClick(event));
+    this.syncCompactTitle();
+    window.addEventListener('scroll', () => this.syncCompactTitle(), { passive: true });
     this.root.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') {
         return;
@@ -220,7 +234,7 @@ export class ApplicationShell {
     this.root.dataset.route = route;
     this.setShell(meta.shell);
     this.routeTitle.textContent = meta.title;
-    this.mobileRouteTitle.textContent = meta.shortTitle;
+    this.mobileRouteTitle.textContent = meta.title;
     this.immersiveTitle.textContent = meta.title;
     this.immersiveStatus.textContent = meta.initialStatus;
     const concealMobileAccount = route === 'login';
@@ -247,11 +261,39 @@ export class ApplicationShell {
       }
     }
 
+    // Account and Admin have no nav entry of their own, so without this the
+    // whole navigation reads as unselected on those routes.
+    for (const trigger of this.accountTriggers) {
+      if (meta.section === 'account') {
+        trigger.setAttribute('aria-current', 'page');
+      } else {
+        trigger.removeAttribute('aria-current');
+      }
+    }
+
     for (const backButton of this.root.querySelectorAll<HTMLButtonElement>('.route-back')) {
       backButton.hidden = route === 'home';
     }
     this.closeCreateMenu();
     this.closeAccountMenu();
+    this.syncCompactTitle();
+  }
+
+  /**
+   * The route bar carries the page title in the content; the mobile top bar
+   * carries a compact copy. Only one of the two is ever visible, so a phone
+   * never shows the same title twice.
+   */
+  private syncCompactTitle(): void {
+    const heading = this.root.querySelector<HTMLElement>('.route-bar .calibration-heading');
+    const headingVisible = Boolean(heading) && heading!.getBoundingClientRect().height > 0;
+    const scrolledPast = headingVisible
+      && heading!.getBoundingClientRect().bottom <= this.mobileTopBarHeight();
+    this.root.dataset.titleCompact = String(!headingVisible || scrolledPast);
+  }
+
+  private mobileTopBarHeight(): number {
+    return this.root.querySelector<HTMLElement>('.mobile-top-bar')?.getBoundingClientRect().height || 0;
   }
 
   setImmersiveMode(isImmersive: boolean): void {
@@ -309,7 +351,27 @@ export class ApplicationShell {
     this.createMenu.hidden = false;
     this.createTrigger.setAttribute('aria-expanded', 'true');
     this.mobileCreateTrigger.setAttribute('aria-expanded', 'true');
+    this.anchorCreateMenu(opener);
     this.createMenu.querySelector<HTMLButtonElement>('button')?.focus();
+  }
+
+  /**
+   * On desktop the menu hangs from the edge of the control that opened it,
+   * clamped to the page gutter. Below that it is a full-width sheet and the
+   * stylesheet owns its position.
+   */
+  private anchorCreateMenu(opener: HTMLButtonElement): void {
+    const isSheet = this.createTrigger.getBoundingClientRect().width === 0;
+    if (isSheet) {
+      this.createMenu.style.left = '';
+      return;
+    }
+
+    const gutter = parseFloat(getComputedStyle(this.root).getPropertyValue('--gutter')) || 20;
+    const openerRect = opener.getBoundingClientRect();
+    const menuWidth = this.createMenu.getBoundingClientRect().width;
+    const maxLeft = document.documentElement.clientWidth - menuWidth - gutter;
+    this.createMenu.style.left = `${Math.round(Math.max(gutter, Math.min(openerRect.left, maxLeft)))}px`;
   }
 
   private handleClick(event: MouseEvent): void {

@@ -230,7 +230,7 @@ describe('ApplicationShell', () => {
     shell.setRoute('camera');
 
     expect(host.querySelector('.app-shell')?.getAttribute('data-shell')).toBe('immersive');
-    expect(host.querySelector('.immersive-title')?.textContent).toBe('Camera capture');
+    expect(host.querySelector('.immersive-title')?.textContent).toBe('Camera to 3D');
     expect(host.querySelector('.app-header')?.getAttribute('aria-hidden')).toBe('true');
 
     host.querySelector<HTMLButtonElement>('.immersive-exit')?.click();
@@ -298,6 +298,11 @@ describe('ApplicationShell', () => {
     expect(mobileAccountLink.hasAttribute('aria-hidden')).toBe(false);
     expect(mobileAccountLink.tabIndex).toBe(0);
     expect(host.querySelector('.app-route-title')?.textContent).toBe('Admin');
+    // Account routes have no nav entry of their own, so the account trigger
+    // carries the current marker instead of leaving the nav unselected.
+    expect(mobileAccountLink.getAttribute('aria-current')).toBe('page');
+
+    shell.setRoute('models');
     expect(mobileAccountLink.hasAttribute('aria-current')).toBe(false);
   });
 });

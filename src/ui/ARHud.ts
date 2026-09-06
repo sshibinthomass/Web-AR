@@ -5,6 +5,7 @@ import type { AuthUser } from '../services/authClient';
 import type { AdminJobEntry } from '../services/generatedModelClient';
 import { ApplicationShell } from './ApplicationShell';
 import { apertureLogoUrl, arveniloLockupUrl } from './brandAssets';
+import { getAccountDisplayName } from './accountIdentity';
 import { openDialog } from './dialog';
 import { HashRouter } from './HashRouter';
 import { modelCollectionsEqual } from './modelCollections';
@@ -83,7 +84,8 @@ type ModelActionIcon =
   | 'visibility-public'
   | 'visibility-private'
   | 'edit'
-  | 'delete';
+  | 'delete'
+  | 'overflow';
 type SpeechProcessStage =
   | 'speech_input'
   | 'detecting_speech'
@@ -106,6 +108,7 @@ export interface ARHudOptions {
 export class ARHud {
   readonly overlay: HTMLElement;
   readonly gestureSurface: HTMLElement;
+  private arStagePlaceholder!: HTMLElement;
   readonly arButtonSlot: HTMLElement;
   readonly cameraPreviewVideo: HTMLVideoElement;
   readonly cameraPreviewImage: HTMLImageElement;
@@ -113,6 +116,8 @@ export class ARHud {
 
   private readonly landing: HTMLElement;
   private readonly authPanel: HTMLElement;
+  private authAccountCard!: HTMLElement;
+  private authForm!: HTMLFormElement;
   private readonly authMessage: HTMLElement;
   private readonly authEmailInput: HTMLInputElement;
   private readonly authPasswordInput: HTMLInputElement;
@@ -184,6 +189,8 @@ export class ARHud {
   private readonly animationControl: HTMLLabelElement;
   private readonly animationSelect: HTMLSelectElement;
   private readonly rotateControl: HTMLLabelElement;
+  private adjustTray!: HTMLElement;
+  private adjustToggle!: HTMLButtonElement;
   private rotateInput!: HTMLInputElement;
   private readonly addLayoutObjectButton: HTMLButtonElement;
   private readonly deleteLayoutObjectButton: HTMLButtonElement;
@@ -308,21 +315,21 @@ export class ARHud {
         'Explore in AR',
         'Browse saved models or begin a spatial placement session.',
         [
-          this.createModeAction(this.createButton('Single-Object AR', '', () => this.navigateTo('ar')), 'AR'),
-          this.createModeAction(this.createButton('Model Library', '', () => this.navigateTo('models')), '3D'),
-          this.createModeAction(this.createButton('Multi-Object AR', '', () => this.navigateTo('multi-object')), '3D'),
+          this.createRouteAction('ar', 'AR'),
+          this.createRouteAction('models', '3D'),
+          this.createRouteAction('multi-object', '3D'),
         ],
       ),
       this.createModeGroup(
         'Create a model',
         'Use a photo, description, voice recording, or existing GLB.',
         [
-          this.createModeAction(this.createButton('Camera to 3D', '', () => this.navigateTo('camera')), 'CAM'),
-          this.createModeAction(this.createButton('Image to 3D', '', () => this.navigateTo('upload')), 'IMG'),
-          this.createModeAction(this.createButton('Upload 3D Model', '', () => this.navigateTo('upload-model')), 'GLB'),
-          this.createModeAction(this.createButton('Text or Voice to 3D', '', () => this.navigateTo('speech')), 'MIC'),
-          this.createModeAction(this.createButton('Photo to AR', '', () => this.navigateTo('full-flow')), 'AI'),
-          this.createModeAction(this.createButton('AI-Enhanced Photo to AR', '', () => this.navigateTo('dynamic')), 'DYN'),
+          this.createRouteAction('camera', 'CAM'),
+          this.createRouteAction('upload', 'IMG'),
+          this.createRouteAction('upload-model', 'GLB'),
+          this.createRouteAction('speech', 'MIC'),
+          this.createRouteAction('full-flow', 'AI'),
+          this.createRouteAction('dynamic', 'DYN'),
         ],
       ),
     );
@@ -339,9 +346,20 @@ export class ARHud {
           <h2>Bring digital objects into the world around you.</h2>
           <p>Sign in to create models, manage your library, and continue protected creation workflows.</p>
         </aside>
+        <section class="auth-account surface hidden" aria-label="Signed in account">
+          <div class="auth-panel-header">
+            <h2>You are signed in</h2>
+            <p class="auth-account-summary"></p>
+          </div>
+          <dl class="auth-account-facts">
+            <div><dt>Email</dt><dd class="auth-account-email"></dd></div>
+            <div><dt>Role</dt><dd class="auth-account-role"></dd></div>
+          </dl>
+          <div class="auth-account-actions"></div>
+        </section>
         <form class="auth-form surface">
           <div class="auth-panel-header">
-            <h2>Login</h2>
+            <h2>Sign in</h2>
             <p class="auth-message">Sign in with an approved account, or create one for admin approval.</p>
           </div>
           <label class="field">
@@ -367,6 +385,12 @@ export class ARHud {
     this.authNameLabel = this.authNameInput.closest('label') as HTMLLabelElement;
     this.authSignInButton = this.createButton('Sign in', 'primary', () => this.handleLoginClick());
     this.authSignupButton = this.createButton('Create account', '', () => this.handleSignupClick());
+    this.authAccountCard = this.authPanel.querySelector<HTMLElement>('.auth-account')!;
+    this.authForm = this.authPanel.querySelector<HTMLFormElement>('.auth-form')!;
+    this.authPanel.querySelector<HTMLElement>('.auth-account-actions')?.append(
+      this.createButton('Go to my models', 'primary', () => this.navigateTo('models')),
+      this.createButton('Log out', '', () => this.handlers.onLogout()),
+    );
     this.authPanel.querySelector<HTMLElement>('.auth-form-actions')?.append(
       this.authSignInButton,
       this.authSignupButton,
@@ -387,7 +411,6 @@ export class ARHud {
     this.adminDashboard.innerHTML = `
       <div class="admin-dashboard-inner">
         <div class="admin-dashboard-header">
-          <h2>Admin</h2>
           <p>Approve accounts and watch background generation jobs.</p>
         </div>
         <div class="admin-workspace">
@@ -434,7 +457,6 @@ export class ARHud {
     this.speechPanel.innerHTML = `
       <div class="speech-panel-inner">
         <div class="speech-panel-header">
-          <h2>Text or Voice to 3D</h2>
           <p class="speech-status">Type a description or push to talk, then generate a 3D-ready image and model.</p>
         </div>
         <div class="speech-workspace">
@@ -450,10 +472,12 @@ export class ARHud {
               ></textarea>
             </label>
             <p id="speechPromptHint" class="field-hint">Name the object, material, color, and defining shape.</p>
-            <div class="speech-actions"></div>
+            <div class="speech-actions speech-actions-text"></div>
+            <p class="speech-path-divider"><span>or describe it out loud</span></p>
+            <div class="speech-actions speech-actions-voice"></div>
           </section>
           <aside class="speech-progress surface">
-            <div class="speech-visualizer" aria-hidden="true">
+            <div class="speech-visualizer hidden" aria-hidden="true">
               <span></span><span></span><span></span><span></span><span></span>
             </div>
             <div class="speech-transcript-card">
@@ -498,12 +522,17 @@ export class ARHud {
         this.setSpeechStage('speech_input');
       }
     });
-    this.speechPanel.querySelector<HTMLElement>('.speech-actions')?.append(
+    this.speechPanel.querySelector<HTMLElement>('.speech-actions-text')?.append(
       this.speechTextGenerateButton,
+    );
+    this.speechPanel.querySelector<HTMLElement>('.speech-actions-voice')?.append(
       this.speechRecordButton,
       this.speechStopButton,
       this.speechGenerateButton,
     );
+    // Only the step the recording is actually at is offered.
+    this.speechStopButton.hidden = true;
+    this.speechGenerateButton.hidden = true;
     shell.appendChild(this.speechPanel);
 
     this.modelManager = document.createElement('section');
@@ -512,11 +541,9 @@ export class ARHud {
     modelManagerInner.className = 'model-manager-inner';
     const modelManagerHeader = document.createElement('div');
     modelManagerHeader.className = 'model-manager-header';
-    const modelManagerTitle = document.createElement('h2');
-    modelManagerTitle.textContent = 'Models';
     const modelManagerDescription = document.createElement('p');
-    modelManagerDescription.textContent = 'Manage generated models and uploaded GLBs from the dropdown.';
-    modelManagerHeader.append(modelManagerTitle, modelManagerDescription);
+    modelManagerDescription.textContent = 'Manage generated models and uploaded GLBs.';
+    modelManagerHeader.append(modelManagerDescription);
     const modelManagerControls = this.createModelLibraryControls('modelSearch', 'modelFilter');
     this.modelSearchInput = modelManagerControls.searchInput;
     this.modelFilterSelect = modelManagerControls.filterSelect;
@@ -555,7 +582,7 @@ export class ARHud {
             <label class="model-preview-control model-preview-direction">
               <span>Direction</span>
               <input class="model-preview-direction-input" type="range" min="0" max="355" step="5" value="45" aria-label="Preview light direction">
-              <output class="model-preview-direction-value">45 deg</output>
+              <output class="model-preview-direction-value">45°</output>
             </label>
           </div>
           <button class="model-preview-close" type="button">Close preview</button>
@@ -589,6 +616,16 @@ export class ARHud {
 
     this.gestureSurface = document.createElement('div');
     this.gestureSurface.className = 'gesture-surface hidden';
+    // Before a session starts this region is the camera feed's placeholder.
+    // Left empty it reads as a failed screen rather than one that is waiting.
+    this.gestureSurface.innerHTML = `
+      <div class="ar-stage-placeholder">
+        <div class="ar-stage-reticle" aria-hidden="true"></div>
+        <p class="ar-stage-placeholder-title">Point at the floor</p>
+        <p class="ar-stage-placeholder-hint">Move the phone slowly until the turquoise ring settles, then tap Place.</p>
+      </div>
+    `;
+    this.arStagePlaceholder = this.gestureSurface.querySelector<HTMLElement>('.ar-stage-placeholder')!;
     this.overlay.appendChild(this.gestureSurface);
 
     this.statusPanel = document.createElement('section');
@@ -641,13 +678,17 @@ export class ARHud {
           <img class="camera-preview hidden" alt="Selected object preview">
         </div>
         <label class="upload-image-field upload-drop-zone hidden">
-          <span>Choose an image</span>
+          <span>Drag an image here</span>
           <small id="imageUploadHint">PNG, JPG, or WebP with one clearly visible object.</small>
+          <span class="upload-drop-zone-cue">Choose an image</span>
+          <span class="upload-drop-zone-file" data-empty="No file chosen yet."></span>
           <input name="uploadImage" type="file" accept="image/png,image/jpeg,image/webp" aria-describedby="imageUploadHint">
         </label>
         <label class="upload-model-field upload-drop-zone hidden">
-          <span>Choose a GLB model</span>
+          <span>Drag a GLB here</span>
           <small id="modelUploadHint">Use a binary .glb file ready for AR placement.</small>
+          <span class="upload-drop-zone-cue">Choose a model</span>
+          <span class="upload-drop-zone-file" data-empty="No file chosen yet."></span>
           <input name="uploadModel" type="file" accept=".glb,model/gltf-binary" aria-describedby="modelUploadHint">
         </label>
       </div>
@@ -687,6 +728,8 @@ export class ARHud {
     this.uploadModelInput = cameraPanel.querySelector<HTMLInputElement>('input[name="uploadModel"]')!;
     this.targetObjectLabel = cameraPanel.querySelector<HTMLElement>('.target-object-field')!;
     this.targetObjectInput = cameraPanel.querySelector<HTMLInputElement>('input[name="targetObject"]')!;
+    this.wireDropZone(this.uploadImageField, this.uploadImageInput);
+    this.wireDropZone(this.uploadModelField, this.uploadModelInput);
     this.uploadImageInput.addEventListener('change', () => {
       const file = this.uploadImageInput.files?.[0];
       if (file) {
@@ -727,8 +770,6 @@ export class ARHud {
     const arModelPickerHeading = document.createElement('header');
     arModelPickerHeading.className = 'ar-picker-heading calibration-heading';
     arModelPickerHeading.innerHTML = `
-      <span class="calibration-label">Placement library</span>
-      <h2>Choose a model</h2>
       <p>Select one model, then continue to AR placement.</p>
     `;
     const arModelControls = this.createModelLibraryControls('arModelSearch', 'arModelFilter');
@@ -743,11 +784,16 @@ export class ARHud {
     arModelPlaceBar.appendChild(this.arPlaceButton);
     arModelPickerInner.append(arModelPickerHeading, arModelControls.root, this.arModelList, arModelPlaceBar);
     this.arModelPicker.appendChild(arModelPickerInner);
-    this.overlay.appendChild(this.arModelPicker);
+    // Place in AR is a standard route, so its picker belongs in the page host
+    // with the other pages and scrolls with the document, not the XR overlay.
+    this.appShell.pageHost.appendChild(this.arModelPicker);
 
     this.hudActions = document.createElement('div');
     this.hudActions.className = 'hud-actions hidden';
     this.overlay.appendChild(this.hudActions);
+    // The dock wraps, so its height is not knowable in CSS. Publishing it lets
+    // the model rail sit above it without hard-coded offsets.
+    this.observeDockHeight();
 
     this.arButtonSlot = document.createElement('div');
     this.arButtonSlot.className = 'ar-button-slot hidden';
@@ -766,12 +812,24 @@ export class ARHud {
     this.addLayoutObjectButton.classList.add('layout-action', 'hidden');
     this.deleteLayoutObjectButton.classList.add('layout-action', 'hidden');
 
+    // Fine adjustments live in a tray behind one chip. Kept inline they consume
+    // a fixed 260px of a phone-width bar and push the mode's own actions off
+    // the screen edge.
+    this.adjustTray = document.createElement('div');
+    this.adjustTray.className = 'hud-adjust-tray';
+    this.adjustTray.id = 'hudAdjustTray';
+    this.adjustTray.hidden = true;
+    this.adjustTray.append(this.animationControl, this.rotateControl);
+    this.adjustToggle = this.createHudActionButton('Adjust', 'Adjust', '', () => this.toggleAdjustTray());
+    this.adjustToggle.setAttribute('aria-expanded', 'false');
+    this.adjustToggle.setAttribute('aria-controls', 'hudAdjustTray');
+
     this.hudActions.append(
-      this.animationControl,
-      this.rotateControl,
       this.placeButton,
       this.resetScaleButton,
       this.resetButton,
+      this.adjustToggle,
+      this.adjustTray,
     );
     this.renderModelRail();
     this.renderARModelPicker();
@@ -907,6 +965,13 @@ export class ARHud {
   update(mode: AppMode, customMessage?: string): void {
     this.statusPanel.classList.toggle('is-error', mode === 'unsupported');
     this.statusMessage.textContent = customMessage ?? this.messageForMode(mode);
+    // Once tracking has produced a surface the camera feed is the content, so
+    // the waiting placeholder steps aside.
+    this.arStagePlaceholder.classList.toggle('hidden', mode === 'loading' || mode === 'unsupported');
+    this.gestureSurface.classList.toggle(
+      'is-session-active',
+      mode === 'readyToPlace' || mode === 'placed' || mode === 'editing',
+    );
 
     const hasPlacedObject = mode === 'placed' || mode === 'editing';
     this.placeButton.disabled = !this.modelReady || (mode !== 'scanning' && mode !== 'readyToPlace');
@@ -955,8 +1020,9 @@ export class ARHud {
     this.updateARPlaceButton();
   }
 
-  updateCameraStatus(message: string, canGenerate: boolean): void {
+  updateCameraStatus(message: string, canGenerate: boolean, isError = false): void {
     this.cameraStatusMessage.textContent = message;
+    this.cameraStatusMessage.classList.toggle('is-error', isError);
     this.generateButton.disabled = !canGenerate;
     if (!this.submitButton.classList.contains('hidden')) {
       this.submitButton.disabled = !canGenerate;
@@ -964,49 +1030,60 @@ export class ARHud {
     this.syncCameraActionLayout();
   }
 
+  /**
+   * The voice path is a sequence, so it offers one step at a time instead of a
+   * column of three buttons where two are always greyed out.
+   */
+  private setSpeechVoiceStep(step: 'idle' | 'recording' | 'captured' | 'working'): void {
+    this.speechRecordButton.hidden = step === 'recording';
+    this.speechRecordButton.disabled = step === 'working';
+    this.speechRecordButton.textContent = step === 'captured' ? 'Record again' : 'Record description';
+
+    this.speechStopButton.hidden = step !== 'recording';
+    this.speechStopButton.disabled = false;
+
+    this.speechGenerateButton.hidden = step !== 'captured';
+    this.speechGenerateButton.disabled = false;
+  }
+
   showSpeechReady(message = 'Type a description or push to talk, then generate a 3D-ready image and model.'): void {
     this.speechStatusMessage.textContent = message;
     this.speechVisualizer.classList.remove('is-listening', 'is-working');
+    this.speechVisualizer.classList.add('hidden');
     this.speechBackgroundNote.classList.add('hidden');
     this.setSpeechStage(null);
-    this.speechRecordButton.disabled = false;
-    this.speechStopButton.disabled = true;
-    this.speechGenerateButton.disabled = true;
+    this.setSpeechVoiceStep('idle');
     this.speechTranscriptMessage.textContent = 'No request entered yet.';
   }
 
   showSpeechRecording(): void {
     this.speechStatusMessage.textContent = 'Listening...';
     this.speechVisualizer.classList.add('is-listening');
-    this.speechVisualizer.classList.remove('is-working');
+    this.speechVisualizer.classList.remove('is-working', 'hidden');
     this.speechBackgroundNote.classList.add('hidden');
     this.setSpeechStage('speech_input');
     this.speechTranscriptMessage.textContent = 'Recording speech for a 3D model request.';
-    this.speechRecordButton.disabled = true;
-    this.speechStopButton.disabled = false;
-    this.speechGenerateButton.disabled = true;
+    this.setSpeechVoiceStep('recording');
   }
 
   showSpeechCaptured(): void {
     this.speechStatusMessage.textContent = 'Audio captured. Generate when ready.';
     this.speechVisualizer.classList.remove('is-listening', 'is-working');
+    this.speechVisualizer.classList.add('hidden');
     this.speechBackgroundNote.classList.add('hidden');
     this.setSpeechStage('speech_input');
     this.speechTranscriptMessage.textContent = 'Audio captured. Speech will appear after detection.';
-    this.speechRecordButton.disabled = false;
-    this.speechStopButton.disabled = true;
-    this.speechGenerateButton.disabled = false;
+    this.setSpeechVoiceStep('captured');
   }
 
   showSpeechDetected(transcript: string): void {
     this.speechStatusMessage.textContent = 'Speech detected. Generate the 3D model when ready.';
     this.speechVisualizer.classList.remove('is-listening', 'is-working');
+    this.speechVisualizer.classList.add('hidden');
     this.speechBackgroundNote.classList.add('hidden');
     this.setSpeechStage('detecting_speech');
     this.speechTranscriptMessage.textContent = transcript || 'Speech recorded.';
-    this.speechRecordButton.disabled = false;
-    this.speechStopButton.disabled = true;
-    this.speechGenerateButton.disabled = !transcript;
+    this.setSpeechVoiceStep(transcript ? 'captured' : 'idle');
   }
 
   showSpeechDetecting(requestText?: string): void {
@@ -1016,76 +1093,72 @@ export class ARHud {
       : 'Detecting speech and shaping the request for 3D generation...';
     this.speechVisualizer.classList.remove('is-listening');
     this.speechVisualizer.classList.add('is-working');
+    this.speechVisualizer.classList.remove('hidden');
     this.speechBackgroundNote.classList.add('hidden');
     this.setSpeechStage('detecting_speech');
     if (normalizedRequest) {
       this.speechTranscriptMessage.textContent = normalizedRequest;
     }
     this.speechTextGenerateButton.disabled = true;
-    this.speechRecordButton.disabled = true;
-    this.speechStopButton.disabled = true;
-    this.speechGenerateButton.disabled = true;
+    this.setSpeechVoiceStep('working');
   }
 
   showSpeechGeneratingImage(transcript?: string): void {
     this.speechStatusMessage.textContent = 'Speech detected. Generating a clean image for 3D reconstruction...';
     this.speechVisualizer.classList.remove('is-listening');
     this.speechVisualizer.classList.add('is-working');
+    this.speechVisualizer.classList.remove('hidden');
     this.speechBackgroundNote.classList.add('hidden');
     this.setSpeechStage('generating_image');
     if (transcript?.trim()) {
       this.speechTranscriptMessage.textContent = transcript.trim();
     }
-    this.speechRecordButton.disabled = true;
-    this.speechStopButton.disabled = true;
-    this.speechGenerateButton.disabled = true;
+    this.setSpeechVoiceStep('working');
   }
 
   showSpeechBackgroundJob(job: { label?: string; transcript?: string; stage?: SpeechProcessStage }): void {
     this.speechStatusMessage.textContent = `${job.label ?? 'Speech model'} is generating in the background.`;
     this.speechVisualizer.classList.remove('is-listening');
     this.speechVisualizer.classList.add('is-working');
+    this.speechVisualizer.classList.remove('hidden');
     this.speechBackgroundNote.classList.remove('hidden');
     this.setSpeechStage(job.stage ?? 'generating_3d');
     if (job.transcript?.trim()) {
       this.speechTranscriptMessage.textContent = job.transcript.trim();
     }
-    this.speechRecordButton.disabled = false;
-    this.speechStopButton.disabled = true;
-    this.speechGenerateButton.disabled = true;
+    this.setSpeechVoiceStep('idle');
   }
 
   showSpeechCompleted(job: { label?: string; transcript?: string }): void {
     this.speechStatusMessage.textContent = `${job.label ?? 'Speech-generated object'} is ready. Opening AR View...`;
     this.speechVisualizer.classList.remove('is-listening', 'is-working');
+    this.speechVisualizer.classList.add('hidden');
     this.speechBackgroundNote.classList.add('hidden');
     this.setSpeechStage('completed');
     if (job.transcript?.trim()) {
       this.speechTranscriptMessage.textContent = job.transcript.trim();
     }
-    this.speechRecordButton.disabled = false;
-    this.speechStopButton.disabled = true;
-    this.speechGenerateButton.disabled = true;
+    this.setSpeechVoiceStep('idle');
   }
 
   showSpeechGenerating(message = 'Generating a 3D-ready image and model from speech.'): void {
     this.speechStatusMessage.textContent = message;
     this.speechVisualizer.classList.remove('is-listening');
     this.speechVisualizer.classList.add('is-working');
+    this.speechVisualizer.classList.remove('hidden');
     this.speechBackgroundNote.classList.add('hidden');
     this.setSpeechStage('generating_image');
-    this.speechRecordButton.disabled = true;
-    this.speechStopButton.disabled = true;
-    this.speechGenerateButton.disabled = true;
+    this.setSpeechVoiceStep('working');
   }
 
   showSpeechError(message: string): void {
     this.speechStatusMessage.textContent = message;
     this.speechVisualizer.classList.remove('is-listening', 'is-working');
+    this.speechVisualizer.classList.add('hidden');
     this.setSpeechStage('failed');
-    this.speechRecordButton.disabled = false;
-    this.speechStopButton.disabled = true;
-    this.speechGenerateButton.disabled = this.speechTranscriptMessage.textContent === 'No speech recorded yet.';
+    this.setSpeechVoiceStep(
+      this.speechTranscriptMessage.textContent === 'No speech recorded yet.' ? 'idle' : 'captured',
+    );
   }
 
   showLiveCameraPreview(route: CameraCaptureRoute = 'camera'): void {
@@ -1354,6 +1427,8 @@ export class ARHud {
   showModelPreviewLoading(modelLabel: string): void {
     this.modelPreviewTitle.textContent = modelLabel;
     this.modelPreviewStatus.textContent = 'Loading preview...';
+    this.modelPreviewStatus.classList.remove('is-error');
+    this.modelPreviewViewport.classList.add('is-empty');
     this.modelPreviewViewport.replaceChildren();
     this.updateModelPreviewAnimationOptions([], -1);
     this.updateModelPreviewLightingLabel();
@@ -1364,6 +1439,8 @@ export class ARHud {
 
   showModelPreviewReady(): void {
     this.modelPreviewStatus.textContent = 'Preview ready.';
+    this.modelPreviewStatus.classList.remove('is-error');
+    this.modelPreviewViewport.classList.remove('is-empty');
   }
 
   updateModelPreviewAnimationOptions(options: AnimationOption[], selectedIndex: number): void {
@@ -1387,6 +1464,8 @@ export class ARHud {
 
   showModelPreviewError(message: string): void {
     this.modelPreviewStatus.textContent = message;
+    this.modelPreviewStatus.classList.add('is-error');
+    this.modelPreviewViewport.classList.add('is-empty');
     this.modelPreview.classList.remove('hidden');
     this.openModelPreviewDialog();
   }
@@ -1524,23 +1603,16 @@ export class ARHud {
     this.router.navigate('login', 'replace');
   }
 
+  /**
+   * Named from ROUTES, so the prompt calls the destination what the button the
+   * user just pressed called it - not an internal codename like "Full Flow".
+   */
   private loginMessageForRoute(route: HudRoute): string {
-    switch (route) {
-      case 'camera':
-        return 'Sign in to use Camera.';
-      case 'upload':
-        return 'Sign in to use Upload Image.';
-      case 'upload-model':
-        return 'Sign in to use Upload Model.';
-      case 'full-flow':
-        return 'Sign in to use Full Flow.';
-      case 'dynamic':
-        return 'Sign in to use Dynamic.';
-      case 'speech':
-        return 'Sign in to use Text or Voice to 3D.';
-      default:
-        return 'Sign in with an approved account.';
+    const meta = ROUTES[route];
+    if (!meta.requiresAuth) {
+      return 'Sign in with an approved account.';
     }
+    return `Sign in to use ${meta.title}.`;
   }
 
   private applyRoute(route: HudRoute): void {
@@ -1903,7 +1975,7 @@ export class ARHud {
   }
 
   private updateModelPreviewDirectionLabel(): void {
-    const degrees = `${this.parseModelPreviewLightDirectionDegrees()} deg`;
+    const degrees = `${this.parseModelPreviewLightDirectionDegrees()}°`;
     this.modelPreviewDirectionValue.value = degrees;
     this.modelPreviewDirectionValue.textContent = degrees;
     this.modelPreviewDirectionInput.setAttribute('aria-valuetext', degrees);
@@ -2060,88 +2132,83 @@ export class ARHud {
         .filter(Boolean)
         .join(' ');
       row.dataset.modelId = model.id;
-      row.tabIndex = 0;
-      row.setAttribute('role', 'button');
-      row.setAttribute('aria-label', `Preview ${model.label}`);
-      row.addEventListener('click', (event) => {
-        if (this.isModelManagerControl(event.target)) {
-          return;
-        }
-        this.handlers.onPreviewModel(model.id);
-      });
-      row.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') {
-          return;
-        }
-        if (this.isModelManagerControl(event.target)) {
-          return;
-        }
-        event.preventDefault();
-        this.handlers.onPreviewModel(model.id);
-      });
 
-      row.appendChild(this.createModelThumbnail(model));
+      // The row opens the preview, so it is a real button rather than an
+      // article with role="button" wrapped around six more buttons.
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'model-manager-open';
+      open.setAttribute('aria-label', `Preview ${model.label}`);
+      open.addEventListener('click', () => this.handlers.onPreviewModel(model.id));
+      open.appendChild(this.createModelThumbnail(model));
 
       const details = document.createElement('div');
       details.className = 'model-manager-details';
+
+      // Name first: it is what a person scans a library for.
+      const label = document.createElement('p');
+      label.className = 'model-manager-name';
+      label.textContent = model.label;
+      details.appendChild(label);
+
+      const badges = document.createElement('div');
+      badges.className = 'model-manager-badges';
       const badge = document.createElement('span');
       badge.className = 'model-manager-badge';
       badge.textContent = this.modelBadgeText(modelKind);
-      details.appendChild(badge);
+      badges.appendChild(badge);
 
       if (model.visibility) {
         const visibility = document.createElement('span');
         visibility.className = `model-manager-badge visibility-${model.visibility}`;
         visibility.textContent = model.visibility === 'public' ? 'Public' : 'Private';
-        details.appendChild(visibility);
+        badges.appendChild(visibility);
       }
-
-      if (model.ownerEmail) {
-        const owner = document.createElement('span');
-        owner.className = 'model-manager-owner';
-        owner.textContent = this.ownerLabel(model.ownerEmail);
-        details.appendChild(owner);
-      }
+      details.appendChild(badges);
 
       const meta = document.createElement('div');
       meta.className = 'model-manager-meta';
       meta.append(this.createModelDownloadStatus(model.id), this.createModelSizePill(model));
       details.appendChild(meta);
 
-      const label = document.createElement('p');
-      label.className = 'model-manager-name';
-      label.textContent = model.label;
-      details.appendChild(label);
+      if (model.ownerEmail) {
+        const owner = document.createElement('span');
+        owner.className = 'model-manager-owner';
+        owner.textContent = this.ownerLabel(model.ownerEmail);
+        // Truncated in CSS, so a long address cannot change the row's height.
+        owner.title = this.ownerLabel(model.ownerEmail);
+        details.appendChild(owner);
+      }
 
-      row.appendChild(details);
+      open.appendChild(details);
+      row.appendChild(open);
 
       const actions = document.createElement('div');
       actions.className = 'model-manager-actions';
       actions.append(this.createModelActionButton(`Preview ${model.label}`, 'preview', 'preview', '', () => this.handlers.onPreviewModel(model.id)));
       actions.append(this.createDownloadModelButton(model));
-      actions.append(this.createFavoriteButton(model));
+
+      // Everything past preview and download lives behind one overflow control,
+      // which keeps the tray on one row and takes delete out of thumb range.
+      const menuItems: HTMLButtonElement[] = [this.createFavoriteMenuButton(model)];
       if (canManageModel && model.id.startsWith('generated-') && (isGenerated || isUploaded)) {
         const nextVisibility: ModelVisibility = model.visibility === 'public' ? 'private' : 'public';
-        const visibilityLabel = model.visibility === 'public' ? `Make private ${model.label}` : `Make public ${model.label}`;
-        actions.append(
-          this.createModelActionButton(visibilityLabel, nextVisibility === 'public' ? 'visibility-public' : 'visibility-private', 'visibility', '', () => {
-            this.handlers.onToggleGeneratedModelVisibility(model.id, nextVisibility);
-          }),
+        menuItems.push(
+          this.createModelMenuButton(
+            model.visibility === 'public' ? 'Make private' : 'Make public',
+            'visibility',
+            '',
+            () => this.handlers.onToggleGeneratedModelVisibility(model.id, nextVisibility),
+          ),
         );
       }
       if (canManageModel && canUpdateThumbnail) {
-        actions.append(
-          this.createModelActionButton(`Edit ${model.label}`, 'edit', 'edit', '', () => {
-            this.openModelEditDialog(model);
-          }),
-        );
+        menuItems.push(this.createModelMenuButton('Rename', 'edit', '', () => this.openModelEditDialog(model)));
       }
       if (canManageModel && (isGenerated || isUploaded)) {
-        const deleteButton = this.createModelActionButton(`Delete ${model.label}`, 'delete', 'delete', 'danger', () => {
-          this.openModelDeleteConfirmation(model);
-        });
-        actions.append(deleteButton);
+        menuItems.push(this.createModelMenuButton('Delete', 'delete', 'danger', () => this.openModelDeleteConfirmation(model)));
       }
+      actions.append(this.createOverflowMenu(model.label, menuItems));
       row.appendChild(actions);
 
       this.modelList.appendChild(row);
@@ -2150,7 +2217,86 @@ export class ARHud {
 
   private renderAuthControls(): void {
     this.appShell.setUser(this.currentUser);
+    this.renderAccountState();
     this.renderModelManagerList();
+  }
+
+  /** Signed-in visitors get their account, not an empty credential form. */
+  /** Removing an account is irreversible, so it takes a deliberate second step. */
+  private confirmAccountRemoval(email: string): void {
+    this.openConfirmation({
+      title: 'Remove this account?',
+      message: `${email} loses access immediately. This cannot be undone.`,
+      confirmLabel: 'Remove account',
+      host: this.adminDashboard,
+      onConfirm: () => this.handlers.onRemoveAccount(email),
+    });
+  }
+
+  private openConfirmation(options: {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    host: HTMLElement;
+    onConfirm: () => void;
+  }): void {
+    const dialog = document.createElement('div');
+    dialog.className = 'confirmation-dialog';
+    dialog.innerHTML = `
+      <div class="confirmation-panel">
+        <h3></h3>
+        <p class="confirmation-message"></p>
+        <div class="confirmation-actions">
+          <button type="button" data-action="cancel">Cancel</button>
+          <button class="danger" type="button" data-action="confirm"></button>
+        </div>
+      </div>
+    `;
+    dialog.querySelector('h3')!.textContent = options.title;
+    dialog.querySelector<HTMLElement>('.confirmation-message')!.textContent = options.message;
+    const cancel = dialog.querySelector<HTMLButtonElement>('[data-action="cancel"]')!;
+    const confirm = dialog.querySelector<HTMLButtonElement>('[data-action="confirm"]')!;
+    confirm.textContent = options.confirmLabel;
+    options.host.appendChild(dialog);
+
+    let releaseFocus: () => void = () => undefined;
+    let isClosed = false;
+    const close = (): void => {
+      if (isClosed) {
+        return;
+      }
+      isClosed = true;
+      releaseFocus();
+      dialog.remove();
+    };
+    cancel.addEventListener('click', close);
+    confirm.addEventListener('click', () => {
+      close();
+      options.onConfirm();
+    });
+    releaseFocus = openDialog(dialog, { initialFocus: cancel, onClose: close });
+  }
+
+  private renderAccountState(): void {
+    const user = this.currentUser;
+    const isSignedIn = user?.status === 'active';
+    this.authAccountCard.classList.toggle('hidden', !isSignedIn);
+    this.authForm.classList.toggle('hidden', Boolean(isSignedIn));
+    if (!user) {
+      return;
+    }
+    const summary = this.authPanel.querySelector<HTMLElement>('.auth-account-summary');
+    if (summary) {
+      summary.textContent = `Signed in as ${getAccountDisplayName(user)}.`;
+    }
+    const email = this.authPanel.querySelector<HTMLElement>('.auth-account-email');
+    if (email) {
+      email.textContent = user.email;
+    }
+    const role = this.authPanel.querySelector<HTMLElement>('.auth-account-role');
+    if (role) {
+      role.textContent = user.role === 'admin' ? 'Administrator' : 'Member';
+    }
   }
 
   private renderAdminAccounts(): void {
@@ -2182,7 +2328,11 @@ export class ARHud {
         actions.append(this.createButton('Approve', 'primary', () => this.handlers.onApproveAccount(account.email)));
       }
       if (account.email !== this.currentUser?.email) {
-        actions.append(this.createButton('Remove', 'danger', () => this.handlers.onRemoveAccount(account.email)));
+        actions.append(
+          this.createButton('Remove', 'quiet is-destructive', () => {
+            this.confirmAccountRemoval(account.email);
+          }),
+        );
       }
 
       row.append(details, actions);
@@ -2402,13 +2552,77 @@ export class ARHud {
     this.renderModelRail();
   }
 
+  /**
+   * The zone is the control: it accepts a drop, shows the chosen filename, and
+   * keeps the native input for the keyboard and the file picker.
+   */
+  private wireDropZone(zone: HTMLElement, input: HTMLInputElement): void {
+    const readout = zone.querySelector<HTMLElement>('.upload-drop-zone-file');
+    const showFileName = () => {
+      if (!readout) {
+        return;
+      }
+      const name = input.files?.[0]?.name;
+      readout.textContent = name ?? readout.dataset.empty ?? '';
+      readout.classList.toggle('is-empty', !name);
+    };
+
+    input.addEventListener('change', showFileName);
+    showFileName();
+
+    for (const type of ['dragenter', 'dragover'] as const) {
+      zone.addEventListener(type, (event) => {
+        event.preventDefault();
+        zone.classList.add('is-dragover');
+      });
+    }
+    for (const type of ['dragleave', 'dragend', 'drop'] as const) {
+      zone.addEventListener(type, () => zone.classList.remove('is-dragover'));
+    }
+    zone.addEventListener('drop', (event) => {
+      const dropped = event.dataTransfer?.files?.[0];
+      if (!dropped) {
+        return;
+      }
+      event.preventDefault();
+      const transfer = new DataTransfer();
+      transfer.items.add(dropped);
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  private observeDockHeight(): void {
+    const publish = () => {
+      const isVisible = !this.hudActions.classList.contains('hidden');
+      const height = isVisible ? this.hudActions.getBoundingClientRect().height : 0;
+      this.appShell.root.style.setProperty('--hud-dock-height', `${Math.round(height)}px`);
+    };
+    if (typeof ResizeObserver === 'function') {
+      new ResizeObserver(publish).observe(this.hudActions);
+    }
+    new MutationObserver(publish).observe(this.hudActions, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+    publish();
+  }
+
+  private toggleAdjustTray(): void {
+    const isOpen = this.adjustTray.hidden !== false;
+    this.adjustTray.hidden = !isOpen;
+    this.adjustToggle.setAttribute('aria-expanded', String(isOpen));
+    this.adjustToggle.classList.toggle('is-open', isOpen);
+  }
+
   private showLayoutActionButtons(isVisible: boolean): void {
     const buttons = [this.addLayoutObjectButton, this.deleteLayoutObjectButton];
     if (isVisible) {
       buttons.forEach((button) => {
         button.classList.remove('hidden');
         if (button.parentElement !== this.hudActions) {
-          this.hudActions.appendChild(button);
+          // Before the tray, so the tray keeps the last row to itself.
+          this.hudActions.insertBefore(button, this.adjustTray);
         }
       });
       return;
@@ -2471,19 +2685,66 @@ export class ARHud {
     });
   }
 
-  private createFavoriteButton(model: ModelOption): HTMLButtonElement {
+  private createFavoriteMenuButton(model: ModelOption): HTMLButtonElement {
     const isFavorite = this.favoriteModelIds.has(model.id);
-    const button = this.createModelActionButton(
-      isFavorite ? `Remove favorite ${model.label}` : `Favorite ${model.label}`,
-      isFavorite ? 'favorite-filled' : 'favorite',
+    const button = this.createModelMenuButton(
+      isFavorite ? 'Remove from favourites' : 'Add to favourites',
       'favorite',
       isFavorite ? 'is-active' : '',
-      () => {
-        this.toggleFavorite(model.id);
-      },
+      () => this.toggleFavorite(model.id),
     );
     button.setAttribute('aria-pressed', isFavorite ? 'true' : 'false');
     return button;
+  }
+
+  /** A written menu row, so the action is named rather than left to an icon. */
+  private createModelMenuButton(
+    label: string,
+    action: string,
+    className: string,
+    onClick: () => void,
+  ): HTMLButtonElement {
+    const button = this.createButton(
+      label,
+      ['model-manager-menu-button', className].filter(Boolean).join(' '),
+      onClick,
+    );
+    button.dataset.action = action;
+    button.setAttribute('role', 'menuitem');
+    return button;
+  }
+
+  /**
+   * <details> carries the open state, keyboard handling and Escape for free;
+   * this only adds outside-click dismissal and single-menu-at-a-time.
+   */
+  private createOverflowMenu(modelLabel: string, items: HTMLButtonElement[]): HTMLElement {
+    const menu = document.createElement('details');
+    menu.className = 'model-manager-overflow';
+
+    const summary = document.createElement('summary');
+    summary.setAttribute('aria-label', `More actions for ${modelLabel}`);
+    summary.title = `More actions for ${modelLabel}`;
+    summary.append(this.createIconSvg('overflow'));
+
+    const list = document.createElement('div');
+    list.className = 'model-manager-overflow-menu';
+    list.setAttribute('role', 'menu');
+    list.append(...items);
+    items.forEach((item) => item.addEventListener('click', () => menu.removeAttribute('open')));
+
+    menu.append(summary, list);
+    menu.addEventListener('toggle', () => {
+      if (!menu.open) {
+        return;
+      }
+      for (const other of this.modelList.querySelectorAll<HTMLDetailsElement>('.model-manager-overflow[open]')) {
+        if (other !== menu) {
+          other.removeAttribute('open');
+        }
+      }
+    });
+    return menu;
   }
 
   private createDownloadModelButton(model: ModelOption): HTMLButtonElement {
@@ -2843,10 +3104,6 @@ export class ARHud {
     this.renderModelSelect();
   }
 
-  private isModelManagerControl(target: EventTarget | null): boolean {
-    return target instanceof Element && Boolean(target.closest('button, input, select, textarea, a, label'));
-  }
-
   private generationButtonLabel(): string {
     return isPhotoToARRoute(this.activeRoute)
       ? 'Generate and place'
@@ -2946,6 +3203,16 @@ export class ARHud {
     actionList.append(...actions);
     group.appendChild(actionList);
     return group;
+  }
+
+  /**
+   * Home tiles take their label from ROUTES so a destination is named the same
+   * way here, in the nav, in the create menu and in its own route bar.
+   */
+  private createRouteAction(route: HudRoute, icon: string): HTMLElement {
+    const button = this.createButton(ROUTES[route].title, '', () => this.navigateTo(route));
+    button.dataset.navRoute = route;
+    return this.createModeAction(button, icon);
   }
 
   private createModeAction(button: HTMLButtonElement, icon: string): HTMLElement {
@@ -3082,6 +3349,7 @@ export class ARHud {
       'visibility-private': ['M7 10V8a5 5 0 0 1 10 0v2', 'M7 10h10a2 2 0 0 1 2 2v7H5v-7a2 2 0 0 1 2-2Z'],
       edit: ['M4 20h4.2L19.4 8.8a2.1 2.1 0 0 0-3-3L5.2 17H4v3Z', 'M14.8 7.4l1.8 1.8'],
       delete: ['M4 7h16', 'M9 7V5h6v2', 'M6 7l1 13h10l1-13', 'M10 11v5', 'M14 11v5'],
+      overflow: ['M6 12h.01', 'M12 12h.01', 'M18 12h.01'],
     };
 
     paths[icon].forEach((pathData) => {
@@ -3089,7 +3357,7 @@ export class ARHud {
       path.setAttribute('d', pathData);
       path.setAttribute('fill', icon === 'favorite-filled' ? 'currentColor' : 'none');
       path.setAttribute('stroke', 'currentColor');
-      path.setAttribute('stroke-width', '1.8');
+      path.setAttribute('stroke-width', icon === 'overflow' ? '2.6' : '1.8');
       path.setAttribute('stroke-linecap', 'round');
       path.setAttribute('stroke-linejoin', 'round');
       svg.appendChild(path);
