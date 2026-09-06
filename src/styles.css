@@ -2462,7 +2462,7 @@ textarea {
 
 .model-manager-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   align-items: center;
   min-width: 0;
@@ -2693,6 +2693,7 @@ textarea {
    tray fits on one row at every width and never orphans a button. */
 .model-manager-actions {
   display: flex;
+  justify-content: flex-end;
   align-items: center;
   gap: var(--space-2);
 }
@@ -3958,6 +3959,11 @@ textarea {
   .model-manager-thumbnail {
     width: 74px;
     height: 74px;
+  }
+
+  /* Wide enough for the tray to sit beside the details without squeezing them. */
+  .model-manager-row {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .model-manager-open {
