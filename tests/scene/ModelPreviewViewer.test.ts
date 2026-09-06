@@ -54,8 +54,11 @@ describe('ModelPreviewViewer', () => {
     expect(controls.enablePan).toBe(false);
     expect(loadedModel.parent).toBeInstanceOf(THREE.Scene);
     const previewScene = loadedModel.parent as THREE.Scene;
+    // Neutral inspection ground, with the grid in the scene so it orbits too.
     expect(previewScene.background).toBeInstanceOf(THREE.Color);
-    expect((previewScene.background as THREE.Color).getHex()).toBe(0xffffff);
+    expect((previewScene.background as THREE.Color).getHex()).toBe(0x3c3c3c);
+    const previewGrid = previewScene.children.find((child) => child.name === 'Preview ground grid');
+    expect(previewGrid).toBeInstanceOf(THREE.GridHelper);
     expect(loadedMesh.castShadow).toBe(true);
     expect(loadedMesh.receiveShadow).toBe(true);
     const shadowFloor = previewScene.children.find((child) => child.name === 'Preview soft shadow floor') as THREE.Mesh | undefined;

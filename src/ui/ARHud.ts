@@ -1,3 +1,4 @@
+import type { ApertureStage } from '../scene/ApertureStage';
 import type { AppMode } from '../state/AppState';
 import type { ModelOption, ModelVisibility } from '../app/models';
 import type { AuthUser } from '../services/authClient';
@@ -218,6 +219,8 @@ export class ARHud {
   private readonly router: HashRouter;
   private readonly appShell: ApplicationShell;
   private readonly routeRestoring: HTMLElement;
+  private apertureStage: ApertureStage | null = null;
+  private apertureStageVisible = false;
   private readonly routeViews: HTMLElement[] = [];
   private authResolved: boolean;
   private pendingRoute: HudRoute | null = null;
@@ -297,6 +300,7 @@ export class ARHud {
     this.landing.querySelector<HTMLButtonElement>('.home-primary-action')?.addEventListener('click', () => {
       this.appShell.openCreateMenu();
     });
+    this.loadApertureStage(this.landing.querySelector<HTMLElement>('.webxr-aperture-stage')!);
     const modePicker = document.createElement('div');
     modePicker.className = 'mode-picker';
     modePicker.append(
@@ -1661,6 +1665,21 @@ export class ARHud {
     this.showLayoutActionButtons(false);
   }
 
+  /**
+   * The aperture engine is decorative, and three.js is a large dependency, so
+   * it loads after the hero copy and actions are already on screen.
+   */
+  private loadApertureStage(host: HTMLElement): void {
+    void import('../scene/ApertureStage')
+      .then(({ ApertureStage }) => {
+        this.apertureStage = new ApertureStage(host);
+        this.apertureStage.setVisible(this.apertureStageVisible);
+      })
+      .catch(() => {
+        // The static CSS aperture composition remains as the fallback.
+      });
+  }
+
   private prepareRoute(route: HudRoute, previousRoute: HudRoute | null): void {
     this.cancelFullFlowReconstruction();
     this.cameraPanel.classList.toggle('photo-to-ar-immersive', route === 'full-flow');
@@ -1674,6 +1693,8 @@ export class ARHud {
     this.hideAllRouteViews();
     this.resetImmersiveState();
     this.appShell.setRoute(route);
+    this.apertureStageVisible = route === 'home';
+    this.apertureStage?.setVisible(this.apertureStageVisible);
     this.routeRestoring.classList.add('hidden');
     this.clearFullFlowModelOption();
     if (route !== 'ar') {

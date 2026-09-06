@@ -39,7 +39,7 @@ describe('WebXRify brand assets', () => {
     const indexHtml = read('index.html').toString('utf8');
     expect(indexHtml).toContain('<title>WebXRify by Arvenilo</title>');
     expect(indexHtml).toContain('name="application-name" content="WebXRify by Arvenilo"');
-    expect(indexHtml).toContain('name="theme-color" content="#F4FBFA"');
+    expect(indexHtml).toContain('name="theme-color" content="#020A0C"');
     expect(indexHtml).toContain('/src/assets/brand/00-arvenilo-master-transparent-logo.png');
 
     const packageJson = JSON.parse(read('package.json').toString('utf8')) as {

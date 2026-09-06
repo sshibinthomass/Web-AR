@@ -39,12 +39,22 @@ export interface ModelPreviewResult {
   animations: ModelPreviewAnimationOption[];
 }
 
+/**
+ * The preview stage is a neutral inspection ground rather than a brand surface:
+ * a mid grey reads every model honestly, light or dark, the way an editor
+ * scene view does.
+ */
+const previewStage = {
+  ground: 0x3c3c3c,
+  gridLine: 0x5a5a5a,
+} as const;
+
 const basePreviewLighting = {
   hemisphere: 1.5,
   ambient: 0.45,
   key: 2.2,
   rim: 0.95,
-  shadowOpacity: 0.22,
+  shadowOpacity: 0.3,
 } as const;
 
 export type ModelPreviewViewerOptions = {
@@ -75,6 +85,7 @@ export class ModelPreviewViewer {
   private activeAnimationIndex = -1;
   private lastFrameTime: number | null = null;
   private shadowFloor: THREE.Mesh | null = null;
+  private previewGrid: THREE.GridHelper | null = null;
   private previewLighting: PreviewLighting | null = null;
   private lightingIntensity = 1;
   private lightDirectionDegrees = 45;
@@ -103,7 +114,7 @@ export class ModelPreviewViewer {
     this.requestVersion = version;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xffffff);
+    scene.background = new THREE.Color(previewStage.ground);
     const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
     const renderer = this.createRenderer();
     const controls = this.createControls(camera, renderer.domElement);
@@ -148,11 +159,14 @@ export class ModelPreviewViewer {
       const bounds = prepareModelForPreview(loadedModel);
       const shadowFloor = createShadowFloor(bounds);
       this.shadowFloor = shadowFloor;
+      const previewGrid = createPreviewGrid(bounds);
+      this.previewGrid = previewGrid;
       keyLight.target.position.copy(getBoundsCenter(bounds));
       configurePreviewShadowCamera(keyLight, bounds);
       this.configureLightDirectionBounds(bounds);
       scene.add(loadedModel);
       scene.add(shadowFloor);
+      scene.add(previewGrid);
       this.applyLightingIntensity();
       this.applyLightDirection();
       this.frameCameraToModel(loadedModel, bounds);
@@ -203,6 +217,15 @@ export class ModelPreviewViewer {
       const materials = Array.isArray(this.shadowFloor.material) ? this.shadowFloor.material : [this.shadowFloor.material];
       materials.forEach((material) => material.dispose());
       this.shadowFloor = null;
+    }
+
+    if (this.previewGrid) {
+      this.previewGrid.geometry.dispose();
+      const gridMaterials = Array.isArray(this.previewGrid.material)
+        ? this.previewGrid.material
+        : [this.previewGrid.material];
+      gridMaterials.forEach((material) => material.dispose());
+      this.previewGrid = null;
     }
 
     this.scene?.clear();
@@ -407,7 +430,7 @@ function createDefaultRenderer(): PreviewRenderer {
   renderer.toneMappingExposure = 1.04;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.setClearColor(0xffffff, 1);
+  renderer.setClearColor(previewStage.ground, 1);
   return renderer;
 }
 
@@ -448,8 +471,10 @@ function createShadowFloor(bounds: THREE.Box3): THREE.Mesh {
   const maxDimension = Math.max(size.x, size.z, size.y, 1);
   const floorGeometry = new THREE.PlaneGeometry(maxDimension * 3.2, maxDimension * 3.2);
   const floorMaterial = new THREE.ShadowMaterial({
-    color: 0x0f766e,
-    opacity: 0.22,
+    // Neutral, so the contact shadow reads as shadow on the grey ground rather
+    // than as a coloured mat under the model.
+    color: 0x000000,
+    opacity: 0.3,
     transparent: true,
   });
   const floor = new THREE.Mesh(floorGeometry, floorMaterial);
@@ -458,6 +483,25 @@ function createShadowFloor(bounds: THREE.Box3): THREE.Mesh {
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(center.x, bounds.min.y - Math.max(maxDimension * 0.018, 0.01), center.z);
   return floor;
+}
+
+/**
+ * A ground grid on the model's floor plane. It lives in the scene rather than
+ * behind the canvas so it turns with the model while the viewer orbits.
+ */
+function createPreviewGrid(bounds: THREE.Box3): THREE.GridHelper {
+  const center = getBoundsCenter(bounds);
+  const size = getBoundsSize(bounds);
+  const maxDimension = Math.max(size.x, size.z, size.y, 1);
+  const grid = new THREE.GridHelper(maxDimension * 8, 24, previewStage.gridLine, previewStage.gridLine);
+  grid.name = 'Preview ground grid';
+  const material = grid.material as THREE.Material;
+  material.transparent = true;
+  material.opacity = 0.5;
+  material.depthWrite = false;
+  // Sits just under the shadow floor so the two planes never z-fight.
+  grid.position.set(center.x, bounds.min.y - Math.max(maxDimension * 0.024, 0.014), center.z);
+  return grid;
 }
 
 function configurePreviewShadowCamera(light: THREE.DirectionalLight, bounds: THREE.Box3): void {

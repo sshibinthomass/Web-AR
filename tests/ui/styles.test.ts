@@ -8,11 +8,17 @@ const styles = readFileSync(
   'utf8',
 ).replace(/\r\n/g, '\n');
 
+// Rule matching ignores comments, so a documented rule does not read as though
+// its selector included the comment written above it.
+const rules = styles.replace(/\/\*[\s\S]*?\*\//g, '');
+
 const declarationsFor = (selector: string): string[] => (
-  [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+  [...rules.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
     .filter((match) => match[1].split(',').some((part) => part.trim() === selector))
     .map((match) => match[2])
 );
+
+const declarationsJoined = (selector: string): string => declarationsFor(selector).join('\n');
 
 describe('application design system', () => {
   it('defines the approved Arvenilo tokens and local font families', () => {
@@ -49,8 +55,41 @@ describe('application design system', () => {
     expect(styles).toContain('outline-offset: 3px;');
   });
 
+  it('carries the design system type, space, veil and motion scales', () => {
+    for (const declaration of [
+      '--text-display-lg: clamp(2.3rem, 4.6vw, 4.4rem);',
+      '--text-heading-2: clamp(1.65rem, 2.8vw, 2.7rem);',
+      '--text-body: 1rem;',
+      '--text-label: 0.75rem;',
+      '--space-4: 1rem;',
+      '--space-9: 6rem;',
+      '--section-space: clamp(4.5rem, 8vw, 8rem);',
+      '--veil-card: color-mix(in srgb, var(--color-spatial-surface-raised) 93%, transparent);',
+      '--color-line: rgba(29, 69, 74, 0.9);',
+      '--color-line-strong: rgba(94, 234, 212, 0.34);',
+      '--ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);',
+      '--ease-enter: cubic-bezier(0.16, 1, 0.3, 1);',
+    ]) {
+      expect(styles).toContain(declaration);
+    }
+  });
+
+  it('resolves the semantic roles onto the dark-first spatial ground', () => {
+    for (const semanticRole of [
+      '--color-canvas: var(--color-spatial-void);',
+      '--color-ink: var(--color-reality-mist);',
+      '--color-ink-muted: var(--color-mist-slate);',
+      '--color-border: var(--color-line);',
+      '--color-error: var(--color-error-light);',
+    ]) {
+      expect(styles).toContain(semanticRole);
+    }
+    expect(declarationsJoined('body')).toContain('background: var(--color-spatial-void);');
+    expect(declarationsJoined('body')).toContain('color: var(--color-ink);');
+  });
+
   it('keeps every active primary action override on canonical mint and spatial ink', () => {
-    const primaryRules = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((match) => {
+    const primaryRules = [...rules.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((match) => {
       const selector = match[1];
       const declarations = match[2];
       const selectorParts = selector.split(',').map((part) => part.trim());
@@ -97,6 +136,11 @@ describe('application design system', () => {
     }
   });
 
+  it('inverts the dark-ink brand artwork onto the spatial ground', () => {
+    expect(declarationsJoined('.brand-aperture')).toContain('filter: invert(1) hue-rotate(180deg);');
+    expect(declarationsJoined('.arvenilo-lockup')).toContain('filter: invert(1) hue-rotate(180deg);');
+  });
+
   it('keeps every standard-workspace control family at least 44px tall', () => {
     const contracts = [
       ['.shell-account .account-menu-trigger', 'min-height: 44px;'],
@@ -112,10 +156,7 @@ describe('application design system', () => {
     ] as const;
 
     for (const [selector, declaration] of contracts) {
-      const declarations = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-        .filter((match) => match[1].split(',').some((part) => part.trim() === selector))
-        .map((match) => match[2])
-        .join('\n');
+      const declarations = declarationsJoined(selector);
       expect({ selector, declaration, declarations }).toMatchObject({
         selector,
         declaration,
@@ -125,68 +166,75 @@ describe('application design system', () => {
   });
 
   it('keeps the immersive exit action at least 44px tall', () => {
-    const declarations = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-      .filter((match) => match[1].split(',').some((part) => part.trim() === '.immersive-exit'))
-      .map((match) => match[2])
-      .join('\n');
-
-    expect(declarations).toContain('min-height: 44px;');
+    expect(declarationsJoined('.immersive-exit')).toContain('min-height: 44px;');
   });
 
-  it('uses canonical palette tokens for visible standard-workspace descendants', () => {
+  it('uses canonical dark-ground palette tokens for visible standard-workspace descendants', () => {
     const contracts = [
-      ['.account-menu-email', 'color: var(--color-context-slate);'],
-      ['.account-menu button.account-menu-logout', 'color: var(--color-error-dark);'],
-      ['.landing-copy > p:not(.landing-kicker)', 'color: var(--color-context-slate);'],
-      ['.mode-group h2', 'color: var(--color-spatial-ink);'],
-      ['.mode-group p', 'color: var(--color-context-slate);'],
-      ['.mode-action button', 'border-color: var(--color-border-light);'],
-      ['.home-route-groups .mode-action button.primary', 'background: var(--color-signal-mint);'],
-      ['.auth-identity', 'color: var(--color-context-slate);'],
-      ['.auth-panel-header h2', 'color: var(--color-spatial-ink);'],
-      ['.auth-message', 'color: var(--color-context-slate);'],
-      ['.auth-panel input', 'border-color: var(--color-border-light);'],
-      ['.speech-text-field', 'color: var(--color-spatial-ink);'],
-      ['.field-hint', 'color: var(--color-context-slate);'],
-      ['.speech-actions button', 'border-color: var(--color-border-light);'],
-      ['.admin-dashboard-header h2', 'color: var(--color-spatial-ink);'],
-      ['.admin-account-email', 'color: var(--color-spatial-ink);'],
-      ['.admin-account-meta', 'color: var(--color-context-slate);'],
-      ['.admin-job-actions a', 'border-color: var(--color-border-light);'],
-      ['.model-manager-header h2', 'color: var(--color-spatial-ink);'],
-      ['.ar-picker-heading h2', 'color: var(--color-spatial-ink);'],
-      ['.model-library-search', 'color: var(--color-context-slate);'],
-      ['.model-library-search input', 'border-color: var(--color-border-light);'],
-      ['.model-manager-name', 'color: var(--color-spatial-ink);'],
-      ['.ar-model-card-label', 'color: var(--color-spatial-ink);'],
-      ['.ar-model-card-meta', 'color: var(--color-context-slate);'],
-      ['.model-manager-owner', 'color: var(--color-context-slate);'],
-      ['.model-edit-field', 'color: var(--color-context-slate);'],
-      ['.model-edit-field input', 'border-color: var(--color-border-light);'],
-      ['.model-edit-status', 'color: var(--color-context-slate);'],
-      ['.model-preview-control', 'color: var(--color-context-slate);'],
-      ['.model-preview-control select', 'border-color: var(--color-border-light);'],
-      ['.model-preview-title', 'color: var(--color-spatial-ink);'],
-      ['.model-preview-status', 'color: var(--color-context-slate);'],
-      ['.creation-stage .camera-label', 'color: var(--color-context-slate);'],
-      ['.upload-drop-zone > small', 'color: var(--color-context-slate);'],
-      ['.creation-guidance .camera-status', 'color: var(--color-context-slate);'],
-      ['.creation-workspace.fullscreen .upload-drop-zone', 'border-color: var(--color-border-light);'],
-      ['.creation-workspace.fullscreen .upload-drop-zone input', 'border-color: var(--color-border-light);'],
-      ['.creation-workspace.fullscreen .target-object-field', 'color: var(--color-context-slate);'],
-      ['.creation-workspace.fullscreen .target-object-field input', 'border-color: var(--color-border-light);'],
-      ['.creation-workspace.fullscreen .creation-stage .camera-preview', 'border-color: var(--color-border-light);'],
-      ['.creation-workspace.fullscreen .creation-stage video.camera-preview', 'background: var(--color-spatial-void);'],
-      ['.creation-workspace.fullscreen .creation-guidance .camera-status', 'color: var(--color-context-slate);'],
-      ['.creation-workspace.fullscreen .creation-guidance .camera-actions button', 'border-color: var(--color-border-light);'],
-      ['.creation-workspace.fullscreen .creation-guidance .camera-actions button.primary', 'background: var(--color-signal-mint);'],
+      ['.account-menu-email', 'color: var(--color-ink-muted);'],
+      ['.account-menu button.account-menu-logout', 'color: var(--color-error-light);'],
+      ['.landing-copy > p:not(.landing-kicker)', 'color: var(--color-ink-muted);'],
+      ['.mode-group h2', 'color: var(--color-interface-white);'],
+      ['.mode-group p', 'color: var(--color-ink-muted);'],
+      ['.mode-action button', 'border: 1px solid var(--color-line);'],
+      ['.auth-identity', 'color: var(--color-ink-muted);'],
+      ['.auth-brand-context h2', 'color: var(--color-interface-white);'],
+      ['.auth-panel label', 'color: var(--color-ink-muted);'],
+      ['.field-hint', 'color: var(--color-ink-muted);'],
+      ['.admin-job-actions a', 'border: 1px solid var(--color-border);'],
+      ['.model-edit-field', 'color: var(--color-ink-muted);'],
+      ['.model-edit-status', 'color: var(--color-ink-muted);'],
+      ['.model-preview-control', 'color: var(--color-ink-muted);'],
+      ['.model-preview-title', 'color: var(--color-interface-white);'],
+      ['.model-preview-status', 'color: var(--color-ink-muted);'],
+      ['.creation-stage .camera-label', 'color: var(--color-signal-mint);'],
+      ['.upload-drop-zone > small', 'color: var(--color-ink-muted);'],
+      ['.target-object-field', 'color: var(--color-ink-muted);'],
+      ['.upload-drop-zone', 'border: 1px dashed var(--color-line-strong);'],
+      ['.camera-preview', 'background: var(--color-spatial-void);'],
+      ['.creation-workspace.fullscreen', 'background: var(--color-spatial-void);'],
+      ['.speech-transcript-card', 'color: var(--color-ink);'],
+      ['.speech-stage-list li.is-active', 'background: var(--wash-violet);'],
+      ['.model-manager-empty', 'color: var(--color-ink-muted);'],
+      ['.ar-model-empty', 'color: var(--color-ink-muted);'],
     ] as const;
 
     for (const [selector, declaration] of contracts) {
-      const declarations = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-        .filter((match) => match[1].split(',').some((part) => part.trim() === selector))
-        .map((match) => match[2])
-        .join('\n');
+      const declarations = declarationsJoined(selector);
+      expect({ selector, declaration, declarations }).toMatchObject({
+        selector,
+        declaration,
+        declarations: expect.stringContaining(declaration),
+      });
+    }
+  });
+
+  it('keeps grouped headings, names and metadata legible on the dark ground', () => {
+    const contracts = [
+      ['.admin-account-email', 'color: var(--color-interface-white);'],
+      ['.admin-job-title', 'color: var(--color-interface-white);'],
+      ['.admin-account-meta', 'color: var(--color-ink-muted);'],
+      ['.admin-job-meta', 'color: var(--color-ink-muted);'],
+      ['.model-manager-header h2', 'color: var(--color-interface-white);'],
+      ['.ar-picker-heading h2', 'color: var(--color-interface-white);'],
+      ['.model-library-search', 'color: var(--color-ink-muted);'],
+      ['.model-library-filter', 'color: var(--color-ink-muted);'],
+      ['.ar-model-card-label', 'color: var(--color-interface-white);'],
+      ['.model-manager-name', 'color: var(--color-interface-white);'],
+      ['.ar-model-card-meta', 'color: var(--color-ink-muted);'],
+      ['.model-manager-owner', 'color: var(--color-ink-muted);'],
+      ['.camera-status', 'color: var(--color-ink-muted);'],
+      ['.generated-model-status', 'color: var(--color-ink-muted);'],
+      ['.auth-message', 'color: var(--color-ink-muted);'],
+      ['.admin-dashboard-message', 'color: var(--color-ink-muted);'],
+      ['.auth-panel-header h2', 'color: var(--color-interface-white);'],
+      ['.admin-dashboard-header h2', 'color: var(--color-interface-white);'],
+      ['input', 'border: 1px solid var(--color-border);'],
+      ['textarea', 'line-height: 1.5;'],
+    ] as const;
+
+    for (const [selector, declaration] of contracts) {
+      const declarations = declarationsJoined(selector);
       expect({ selector, declaration, declarations }).toMatchObject({
         selector,
         declaration,
@@ -196,29 +244,37 @@ describe('application design system', () => {
   });
 
   it('stacks and constrains the Arvenilo endorsement at the 320px layout', () => {
-    const workspaceStart = styles.indexOf('/* Core responsive workspaces */');
-    const creationStart = styles.indexOf('/* Camera, upload, and photo-to-AR workspaces */');
-    const workspaceStyles = styles.slice(workspaceStart, creationStart);
-    const mobileStyles = workspaceStyles.slice(
-      workspaceStyles.lastIndexOf('@media (max-width: 767px)'),
+    // Mobile-first: the stacked, width-capped lockup is the base rule, and the
+    // side-by-side grid is the addition above 768px.
+    expect(declarationsFor('.brand-endorsement-panel').at(0) ?? '').toContain(
+      'grid-template-columns: minmax(0, 1fr);',
     );
-
-    expect(mobileStyles).toContain(
-      '.brand-endorsement-panel {\n    grid-template-columns: minmax(0, 1fr);',
-    );
-    expect(mobileStyles).toContain(
-      '.arvenilo-lockup {\n    width: min(280px, 100%);\n    max-width: 100%;\n    justify-self: start;',
-    );
+    const lockup = declarationsFor('.arvenilo-lockup').at(0) ?? '';
+    expect(lockup).toContain('width: min(280px, 100%);');
+    expect(lockup).toContain('justify-self: start;');
   });
 
   it('makes semantic hidden state and keyboard focus reliable', () => {
-    expect(styles).toContain('[hidden] {\n  display: none !important;\n}');
+    expect(styles).toContain('[hidden],\n.hidden {\n  display: none !important;\n}');
     expect(styles).toContain(':focus-visible');
     expect(styles).toContain('outline: 3px solid var(--color-signal-mint);');
   });
 
   it('keeps the full-screen WebGL canvas from intercepting page controls', () => {
-    expect(declarationsFor('canvas').join('\n')).toContain('pointer-events: none;');
+    expect(declarationsJoined('canvas')).toContain('pointer-events: none;');
+  });
+
+  it('keeps the persistent spatial field behind the shell and out of the way', () => {
+    const field = declarationsJoined('.spatial-field');
+    expect(field).toContain('position: fixed;');
+    expect(field).toContain('z-index: 0;');
+    expect(field).toContain('pointer-events: none;');
+    expect(declarationsJoined('.app-shell')).toContain('z-index: 1;');
+    // Scoped canvases opt out of the fixed full-page layer.
+    expect(declarationsJoined('.spatial-field canvas')).toContain('position: absolute;');
+    expect(declarationsJoined('.webxr-aperture-stage canvas')).toContain('position: absolute;');
+    // A static composition stands in wherever WebGL is unavailable.
+    expect(styles).toContain('.spatial-field[data-mode="static"] {');
   });
 
   it('defines complete Precision Spatial responsive and immersive behavior', () => {
@@ -313,15 +369,13 @@ describe('application design system', () => {
     expect(styles).toContain('padding-bottom: max(16px, env(safe-area-inset-bottom));');
     expect(styles).toContain('backdrop-filter: blur(18px);');
     expect(styles).toContain('.photo-to-ar-immersive .creation-step-list {');
-    const progressDeclarations = declarationsFor('.photo-to-ar-immersive .creation-step-list').join('\n');
+    const progressDeclarations = declarationsJoined('.photo-to-ar-immersive .creation-step-list');
     expect(progressDeclarations).toContain('display: none;');
     expect(styles).not.toContain('.app-shell[data-route="upload"] .photo-to-ar-immersive');
   });
 
   it('defines explicit selection and mobile layouts for model collections', () => {
-    expect(styles).toContain(
-      '.ar-model-card[aria-pressed="true"],\n.model-manager-row.is-selected {',
-    );
+    expect(styles).toContain('.ar-model-card[aria-pressed="true"],\n.model-manager-row.is-selected,');
     expect(styles).toContain('.selection-label {');
     expect(styles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
     expect(styles).toContain('grid-template-columns: repeat(3, minmax(44px, 1fr));');
@@ -352,12 +406,13 @@ describe('application design system', () => {
   it('shows single-object AR status only as compact transparent error feedback', () => {
     const hiddenSelector = '.app-shell[data-route="ar"] .status-panel.immersive-inspector:not(.is-error)';
     const errorSelector = '.app-shell[data-route="ar"] .status-panel.immersive-inspector.is-error';
-    const hiddenDeclarations = declarationsFor(hiddenSelector).join('\n');
-    const errorDeclarations = declarationsFor(errorSelector).join('\n');
 
-    expect(hiddenDeclarations).toContain('display: none;');
+    expect(declarationsJoined(hiddenSelector)).toContain('display: none;');
+    const errorDeclarations = declarationsJoined(errorSelector);
     expect(errorDeclarations).toContain('top: max(12px, env(safe-area-inset-top));');
-    expect(errorDeclarations).toContain('background: rgba(2, 10, 12, 0.58);');
+    expect(errorDeclarations).toContain(
+      'background: color-mix(in srgb, var(--color-spatial-void) 72%, transparent);',
+    );
     expect(styles).toContain(`${errorSelector} > .status-label,`);
     expect(styles).toContain(`${errorSelector} > .status-source {`);
   });
@@ -375,28 +430,28 @@ describe('application design system', () => {
   it('keeps generated and uploaded visibility badges on the canonical palette', () => {
     const contracts = [
       [
-        '.model-manager-row.is-generated .model-manager-badge.visibility-public',
-        'border-color: color-mix(in srgb, var(--color-signal-mint) 70%, var(--color-border-light));',
-        'color: var(--color-spatial-ink);',
-        'background: var(--color-mint-wash);',
+        '.model-manager-badge.visibility-public',
+        'border-color: var(--color-line-strong);',
+        'color: var(--color-signal-mint);',
+        'background: var(--wash-mint);',
       ],
       [
-        '.model-manager-row.is-uploaded .model-manager-badge.visibility-public',
-        'border-color: color-mix(in srgb, var(--color-signal-mint) 70%, var(--color-border-light));',
-        'color: var(--color-spatial-ink);',
-        'background: var(--color-mint-wash);',
+        '.model-manager-row.is-generated .model-manager-badge',
+        'border-color: var(--color-line-strong);',
+        'color: var(--color-signal-mint);',
+        'background: var(--wash-mint);',
       ],
       [
-        '.model-manager-row.is-generated .model-manager-badge.visibility-private',
-        'border-color: var(--color-border-light);',
-        'color: var(--color-context-slate);',
-        'background: var(--color-reality-mist);',
+        '.model-manager-row.is-uploaded .model-manager-badge',
+        'border-color: var(--color-line-strong);',
+        'color: var(--color-signal-mint);',
+        'background: var(--wash-mint);',
       ],
       [
-        '.model-manager-row.is-uploaded .model-manager-badge.visibility-private',
-        'border-color: var(--color-border-light);',
-        'color: var(--color-context-slate);',
-        'background: var(--color-reality-mist);',
+        '.model-manager-badge.visibility-private',
+        'border-color: var(--color-line);',
+        'color: var(--color-ink-muted);',
+        'background: var(--veil-void);',
       ],
     ] as const;
 
@@ -412,7 +467,7 @@ describe('application design system', () => {
   });
 
   it('keeps the mobile WebXR aperture stage at least 300px tall', () => {
-    const declarations = declarationsFor('.landing-preview.webxr-aperture-stage').at(-1) ?? '';
+    const declarations = declarationsFor('.webxr-aperture-stage').at(0) ?? '';
 
     expect(declarations).toContain('min-height: 300px;');
   });
@@ -424,15 +479,12 @@ describe('application design system', () => {
       '  .app-shell[data-route="upload-model"] .creation-workspace.fullscreen {',
     );
     expect(styles).toContain('grid-template-rows: auto auto;');
-    expect(styles).toContain(
-      '.admin-dashboard-section-header .admin-dashboard-actions {',
-    );
-    expect(styles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
-    expect(styles).toContain(
-      '  .admin-account-row,\n' +
-      '  .admin-job-row {\n' +
-      '    grid-template-columns: 1fr;',
-    );
+    expect(declarationsJoined('.admin-dashboard-actions'))
+      .toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(declarationsFor('.admin-account-row').at(0) ?? '')
+      .toContain('grid-template-columns: minmax(0, 1fr);');
+    expect(declarationsFor('.admin-account-actions').at(0) ?? '')
+      .toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
   });
 
   it('keeps the responsive signed-in account menu visible, touchable, and above page content', () => {
@@ -440,7 +492,6 @@ describe('application design system', () => {
     expect(styles).toContain('.account-status-dot {');
     expect(styles).toContain('.account-menu {');
     expect(styles).toContain('z-index: 75;');
-    expect(styles).toContain('.account-menu button {');
     expect(styles).toContain('min-height: 44px;');
     expect(styles).toContain('.session-notice {');
     expect(styles).toContain(

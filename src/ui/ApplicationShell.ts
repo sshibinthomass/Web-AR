@@ -1,3 +1,4 @@
+import type { SpatialField } from '../scene/SpatialField';
 import type { AuthUser } from '../services/authClient';
 import { getAccountDisplayName } from './accountIdentity';
 import { apertureLogoUrl } from './brandAssets';
@@ -22,6 +23,9 @@ export class ApplicationShell {
   readonly root: HTMLElement;
   readonly pageHost: HTMLElement;
   readonly overlay: HTMLElement;
+
+  private spatialField: SpatialField | null = null;
+  private spatialFieldActive = false;
 
   private readonly routeTitle: HTMLElement;
   private readonly mobileRouteTitle: HTMLElement;
@@ -160,6 +164,7 @@ export class ApplicationShell {
       <div class="xr-overlay"></div>
     `;
     host.appendChild(this.root);
+    this.loadSpatialField(host);
 
     this.pageHost = this.root.querySelector<HTMLElement>('.app-page-host')!;
     this.overlay = this.root.querySelector<HTMLElement>('.xr-overlay')!;
@@ -398,8 +403,26 @@ export class ApplicationShell {
     }
   }
 
+  /**
+   * The field is decorative, and three.js is a large dependency, so it loads
+   * after the shell rather than blocking the first render.
+   */
+  private loadSpatialField(host: HTMLElement): void {
+    void import('../scene/SpatialField')
+      .then(({ SpatialField }) => {
+        this.spatialField = new SpatialField(host);
+        this.spatialField.setActive(this.spatialFieldActive);
+      })
+      .catch(() => {
+        // Without the field the shell still renders on the spatial ground.
+      });
+  }
+
   private setShell(shell: 'standard' | 'immersive'): void {
     this.root.dataset.shell = shell;
+    // The field is a page backdrop; immersive AR belongs to the camera feed.
+    this.spatialFieldActive = shell === 'standard';
+    this.spatialField?.setActive(this.spatialFieldActive);
     this.root.querySelector<HTMLElement>('.app-header')!.setAttribute(
       'aria-hidden',
       String(shell === 'immersive'),
