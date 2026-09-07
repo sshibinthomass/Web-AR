@@ -15,7 +15,11 @@ const technicalPatterns: RegExp[] = [
   /networkerror/i,
   /load failed/i,
   /\b(?:type|range|reference|syntax)error\b/i,
-  /\bundefined\b|\bnull\b/i,
+  // Interpreter phrasing only. The bare words appear in messages a person can
+  // act on ("the model returned null bytes"), so matching them swallowed those.
+  /\b(?:undefined|null) is not\b/i,
+  /\bof (?:undefined|null)\b/i,
+  /\bcannot read propert(?:y|ies)\b/i,
   /\bat\s+\w+\s+\(/,
   /^https?:\/\//i,
   /\bhttp\s*[45]\d\d\b/i,

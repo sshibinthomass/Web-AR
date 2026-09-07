@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      // 5182 rather than Vite's 5173: both are in the Worker's CORS allowlist
+      // (worker/src/index.ts defaultAllowedOrigins), and 5173 is often taken.
+      "name": "webxrify-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "5182", "--strictPort"],
+      "port": 5182,
+      "url": "http://127.0.0.1:5182",
+      "autoPort": false
+    }
+  ]
+}
