@@ -23,5 +23,22 @@
       "binding": "MODEL_BUCKET",
       "bucket_name": "web-ar-model-assets"
     }
+  ],
+  // Serialises the read-modify-write on the user index. Live Durable Objects
+  // of this class already exist in production, so the class name and the v1
+  // migration tag must match what was deployed.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MUTATION_COORDINATOR",
+        "class_name": "MutationCoordinator"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["MutationCoordinator"]
+    }
   ]
 }

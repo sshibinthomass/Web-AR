@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import worker, { handleGenerateModelRequest, handleScheduledPendingJobs, type WorkerEnv } from '../../worker/src/index';
+import worker, {
+  handleGenerateModelRequest,
+  handleScheduledPendingJobs,
+  MutationCoordinator,
+  type DurableObjectNamespace,
+  type WorkerEnv,
+} from '../../worker/src/index';
 
 function createEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
   return {
@@ -16,7 +22,41 @@ function createEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
     OPENAI_API_KEY: 'openai-key',
     PUBLIC_MODEL_ORIGIN: 'https://web-ar-model-assets.pages.dev',
     MODEL_BUCKET: createMemoryBucket().bucket,
+    MUTATION_COORDINATOR: createMemoryMutationCoordinatorNamespace(),
     ...overrides,
+  };
+}
+
+function createMemoryMutationCoordinatorNamespace(): DurableObjectNamespace {
+  const coordinators = new Map<string, MutationCoordinator>();
+  return {
+    idFromName: (name: string) => name,
+    get: (id: unknown) => {
+      const key = String(id);
+      let coordinator = coordinators.get(key);
+      if (!coordinator) {
+        const values = new Map<string, unknown>();
+        let queue = Promise.resolve();
+        coordinator = new MutationCoordinator({
+          storage: {
+            get: async <T>(storageKey: string) => values.get(storageKey) as T | undefined,
+            put: async (storageKey: string, value: unknown) => {
+              values.set(storageKey, value);
+            },
+            delete: async (storageKey: string) => {
+              values.delete(storageKey);
+            },
+          },
+          blockConcurrencyWhile: <T>(operation: () => Promise<T>) => {
+            const result = queue.then(operation);
+            queue = result.then(() => undefined, () => undefined);
+            return result;
+          },
+        });
+        coordinators.set(key, coordinator);
+      }
+      return coordinator;
+    },
   };
 }
 
@@ -524,6 +564,27 @@ describe('handleGenerateModelRequest', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  it('fails closed when the auth mutation coordinator binding is missing', async () => {
+    const response = await handleGenerateModelRequest(
+      new Request('https://worker.example/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'maker@example.com',
+          password: 'maker-password-123',
+          name: 'Maker',
+        }),
+      }),
+      createEnv({ MUTATION_COORDINATOR: undefined }),
+      { fetch: vi.fn(), now: () => new Date('2026-07-16T12:00:00Z') },
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: 'Secure mutation coordination is unavailable.',
     });
   });
 

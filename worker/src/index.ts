@@ -31,6 +31,7 @@ export interface WorkerEnv {
   OPENAI_IMAGE_MODEL?: string;
   PUBLIC_MODEL_ORIGIN?: string;
   MODEL_BUCKET: ModelBucket;
+  MUTATION_COORDINATOR?: DurableObjectNamespace;
 }
 
 interface ScheduledEvent {
@@ -40,6 +41,97 @@ interface ScheduledEvent {
 
 interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
+}
+
+export interface DurableObjectNamespace {
+  idFromName(name: string): unknown;
+  get(id: unknown): {
+    fetch(request: Request): Promise<Response>;
+  };
+}
+
+export interface DurableObjectState {
+  storage: {
+    get<T>(key: string): Promise<T | undefined>;
+    put(key: string, value: unknown): Promise<void>;
+    delete(key: string): Promise<void>;
+  };
+  blockConcurrencyWhile<T>(operation: () => Promise<T>): Promise<T>;
+}
+
+type MutationLeaseRequest =
+  | { action: 'acquire'; leaseId: string; ttlMs: number }
+  | { action: 'release'; leaseId: string };
+
+/**
+ * Serialises the read-modify-write on the user index.
+ *
+ * Two concurrent signups both read the index, both append, and the second
+ * write loses the first account. One lease per scope closes that window.
+ * Live Durable Objects of this class exist in production, so the class must
+ * keep its name and storage keys.
+ */
+export class MutationCoordinator {
+  constructor(private readonly state: DurableObjectState) {}
+
+  async fetch(request: Request): Promise<Response> {
+    if (request.method !== 'POST') {
+      return mutationCoordinatorResponse({ error: 'Only POST requests are supported.' }, 405);
+    }
+
+    let body: MutationLeaseRequest;
+    try {
+      body = await request.json() as MutationLeaseRequest;
+    } catch {
+      return mutationCoordinatorResponse({ error: 'Request body must be valid JSON.' }, 400);
+    }
+    if (!body || (body.action !== 'acquire' && body.action !== 'release') || !validLeaseId(body.leaseId)) {
+      return mutationCoordinatorResponse({ error: 'Valid mutation lease fields are required.' }, 400);
+    }
+
+    return this.state.blockConcurrencyWhile(async () => {
+      const activeLeaseId = await this.state.storage.get<string>('lease_id');
+      const expiresAt = await this.state.storage.get<number>('lease_expires_at') ?? 0;
+      const now = Date.now();
+      const leaseActive = Boolean(activeLeaseId && expiresAt > now);
+
+      if (body.action === 'release') {
+        if (!leaseActive || activeLeaseId !== body.leaseId) {
+          return mutationCoordinatorResponse({ released: false }, 409);
+        }
+        await Promise.all([
+          this.state.storage.delete('lease_id'),
+          this.state.storage.delete('lease_expires_at'),
+        ]);
+        return mutationCoordinatorResponse({ released: true });
+      }
+
+      if (!Number.isFinite(body.ttlMs) || body.ttlMs <= 0) {
+        return mutationCoordinatorResponse({ error: 'ttlMs must be a positive number.' }, 400);
+      }
+      if (leaseActive && activeLeaseId !== body.leaseId) {
+        return mutationCoordinatorResponse({ acquired: false }, 409);
+      }
+
+      const ttlMs = Math.min(30_000, Math.max(1000, Math.trunc(body.ttlMs)));
+      await Promise.all([
+        this.state.storage.put('lease_id', body.leaseId),
+        this.state.storage.put('lease_expires_at', now + ttlMs),
+      ]);
+      return mutationCoordinatorResponse({ acquired: true });
+    });
+  }
+}
+
+function mutationCoordinatorResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function validLeaseId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,120}$/.test(value);
 }
 
 interface GenerateModelDeps {
@@ -1226,11 +1318,6 @@ async function handleSignupRequest(request: Request, env: WorkerEnv, deps: Gener
     return jsonResponse({ error: 'Password must be at least 8 characters.' }, 400);
   }
 
-  const index = await readUsersIndex(env);
-  if (index.users.some((user) => user.email === email)) {
-    return jsonResponse({ error: 'Account already exists.' }, 409);
-  }
-
   const now = deps.now();
   const isAdmin = email === getAdminEmail(env);
   const salt = randomBase64UrlBytes(16);
@@ -1247,19 +1334,28 @@ async function handleSignupRequest(request: Request, env: WorkerEnv, deps: Gener
     approved_by: isAdmin ? email : undefined,
   };
 
-  await writeUsersIndex(env, { users: [...index.users, user] });
+  // The duplicate check and the write have to share one lease, or two
+  // concurrent signups both pass the check and the second write wins.
+  return withMutationLease(env, 'auth', async () => {
+    const index = await readUsersIndex(env);
+    if (index.users.some((storedUser) => storedUser.email === email)) {
+      return jsonResponse({ error: 'Account already exists.' }, 409);
+    }
 
-  if (user.status !== 'active') {
-    return jsonResponse({ user: toPublicUser(user) }, 201);
-  }
+    await writeUsersIndex(env, { users: [...index.users, user] });
 
-  return jsonResponse(
-    {
-      user: toPublicUser(user),
-      token: await createSessionToken(user, env, now),
-    },
-    201,
-  );
+    if (user.status !== 'active') {
+      return jsonResponse({ user: toPublicUser(user) }, 201);
+    }
+
+    return jsonResponse(
+      {
+        user: toPublicUser(user),
+        token: await createSessionToken(user, env, now),
+      },
+      201,
+    );
+  });
 }
 
 async function handleLoginRequest(request: Request, env: WorkerEnv, deps: GenerateModelDeps): Promise<Response> {
@@ -1330,27 +1426,31 @@ async function handleAccountUpdateRequest(
     return jsonResponse({ error: 'status must be active or pending.' }, 400);
   }
 
-  const index = await readUsersIndex(env);
-  const userIndex = index.users.findIndex((user) => user.email === email);
-  if (userIndex === -1) {
-    return jsonResponse({ error: 'Account not found.' }, 404);
-  }
+  const status = body.value.status;
 
-  const now = deps.now();
-  const existingUser = index.users[userIndex];
-  const nextUser: StoredUser = {
-    ...existingUser,
-    role: existingUser.email === getAdminEmail(env) ? 'admin' : existingUser.role,
-    status: body.value.status,
-    updated_at: now.toISOString(),
-    approved_at: body.value.status === 'active' ? existingUser.approved_at ?? now.toISOString() : undefined,
-    approved_by: body.value.status === 'active' ? existingUser.approved_by ?? adminUser.email : undefined,
-  };
-  const users = [...index.users];
-  users[userIndex] = nextUser;
-  await writeUsersIndex(env, { users });
+  return withMutationLease(env, 'auth', async () => {
+    const index = await readUsersIndex(env);
+    const userIndex = index.users.findIndex((user) => user.email === email);
+    if (userIndex === -1) {
+      return jsonResponse({ error: 'Account not found.' }, 404);
+    }
 
-  return jsonResponse({ user: toPublicUser(nextUser) });
+    const now = deps.now();
+    const existingUser = index.users[userIndex];
+    const nextUser: StoredUser = {
+      ...existingUser,
+      role: existingUser.email === getAdminEmail(env) ? 'admin' : existingUser.role,
+      status,
+      updated_at: now.toISOString(),
+      approved_at: status === 'active' ? existingUser.approved_at ?? now.toISOString() : undefined,
+      approved_by: status === 'active' ? existingUser.approved_by ?? adminUser.email : undefined,
+    };
+    const users = [...index.users];
+    users[userIndex] = nextUser;
+    await writeUsersIndex(env, { users });
+
+    return jsonResponse({ user: toPublicUser(nextUser) });
+  });
 }
 
 async function handleAccountRemovalRequest(env: WorkerEnv, email: string, adminUser: StoredUser): Promise<Response> {
@@ -1358,14 +1458,16 @@ async function handleAccountRemovalRequest(env: WorkerEnv, email: string, adminU
     return jsonResponse({ error: 'Admins cannot remove their own account.' }, 400);
   }
 
-  const index = await readUsersIndex(env);
-  const nextUsers = index.users.filter((user) => user.email !== email);
-  if (nextUsers.length === index.users.length) {
-    return jsonResponse({ error: 'Account not found.' }, 404);
-  }
+  return withMutationLease(env, 'auth', async () => {
+    const index = await readUsersIndex(env);
+    const nextUsers = index.users.filter((user) => user.email !== email);
+    if (nextUsers.length === index.users.length) {
+      return jsonResponse({ error: 'Account not found.' }, 404);
+    }
 
-  await writeUsersIndex(env, { users: nextUsers });
-  return jsonResponse({ deleted: true, email });
+    await writeUsersIndex(env, { users: nextUsers });
+    return jsonResponse({ deleted: true, email });
+  });
 }
 
 async function handleUploadedModelRequest(
@@ -2475,6 +2577,49 @@ async function writeUsersIndex(env: WorkerEnv, index: UsersIndex): Promise<void>
       role: user.email === getAdminEmail(env) ? 'admin' : user.role,
     })),
   });
+}
+
+async function withMutationLease(
+  env: WorkerEnv,
+  scope: 'auth',
+  operation: () => Promise<Response>,
+): Promise<Response> {
+  if (!env.MUTATION_COORDINATOR) {
+    return jsonResponse({ error: 'Secure mutation coordination is unavailable.' }, 503);
+  }
+
+  const leaseId = randomBase64UrlBytes(18);
+  const stub = env.MUTATION_COORDINATOR.get(env.MUTATION_COORDINATOR.idFromName(scope));
+  let acquired = false;
+  try {
+    const acquireResponse = await stub.fetch(new Request('https://mutation-coordinator.internal/lease', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'acquire', leaseId, ttlMs: 30_000 }),
+    }));
+    if (acquireResponse.status === 409) {
+      return jsonResponse({ error: 'Another secure mutation is already in progress.' }, 409);
+    }
+    if (!acquireResponse.ok) {
+      return jsonResponse({ error: 'Secure mutation coordination is unavailable.' }, 503);
+    }
+    acquired = true;
+    return await operation();
+  } catch {
+    return jsonResponse({ error: 'Secure mutation coordination is unavailable.' }, 503);
+  } finally {
+    if (acquired) {
+      try {
+        await stub.fetch(new Request('https://mutation-coordinator.internal/lease', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'release', leaseId }),
+        }));
+      } catch {
+        // The lease expires on its own after a short timeout.
+      }
+    }
+  }
 }
 
 async function readRevokedSessionsIndex(env: WorkerEnv): Promise<RevokedSessionsIndex> {
