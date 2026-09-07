@@ -6,7 +6,7 @@ import type { SelectionFeedbackController } from '../interaction/SelectionFeedba
 import type { HitTestManager } from '../xr/HitTestManager';
 import type { AnchorManager } from '../xr/AnchorManager';
 import type { EstimatedLightingController } from '../xr/EstimatedLightingController';
-import { MODEL_OPTIONS, type ModelOption } from './models';
+import type { ModelOption } from './models';
 import {
   captureVideoFrame,
   imageFileToCapturedImage,
@@ -114,7 +114,7 @@ export class WebARApp {
   private gestureMovedTarget = false;
   private readonly pendingReanchorTargets = new Set<Three.Group>();
   private lastHudMode = this.appState.mode;
-  private availableModels = [...MODEL_OPTIONS];
+  private availableModels: ModelOption[] = [];
   private generatedModelOptions: ModelOption[] = [];
   private uploadedModelOptions: ModelOption[] = [];
   private pendingUploadModelFile: File | null = null;
@@ -127,7 +127,7 @@ export class WebARApp {
 
   async start(): Promise<void> {
     this.authToken = loadAuthToken();
-    this.hud = new ARHud(this.root, MODEL_OPTIONS, {
+    this.hud = new ARHud(this.root, [], {
       onPlace: () => this.placeAtLatestHit(),
       onEdit: () => this.setEditing(),
       onReset: () => this.resetObject(),
@@ -192,7 +192,7 @@ export class WebARApp {
   }
 
   private async restoreSession(): Promise<void> {
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
     if (!this.authToken) {
       return;
     }
@@ -221,7 +221,7 @@ export class WebARApp {
   }
 
   private async login(email: string, password: string): Promise<void> {
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
     this.hud?.showAuthMessage('Signing in...');
 
     try {
@@ -246,7 +246,7 @@ export class WebARApp {
   }
 
   private async signup(email: string, password: string, name: string): Promise<void> {
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
     this.hud?.showAuthMessage('Creating account...');
 
     try {
@@ -272,7 +272,7 @@ export class WebARApp {
 
   private async logout(): Promise<void> {
     const token = this.authToken;
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
     this.authToken = null;
     this.currentUser = null;
     clearAuthToken();
@@ -291,7 +291,7 @@ export class WebARApp {
       return;
     }
 
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
     try {
       this.hud?.updateAdminAccounts(await listAccounts({ apiUrl, token: this.authToken }));
     } catch (error) {
@@ -305,7 +305,7 @@ export class WebARApp {
       return;
     }
 
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
     try {
       this.hud?.updateAdminJobs(await listAdminJobsRequest({ apiUrl, authToken: this.authToken }));
     } catch (error) {
@@ -319,7 +319,7 @@ export class WebARApp {
       return;
     }
 
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
     try {
       await retryAdminJobRequest({ apiUrl, jobId, authToken: this.authToken });
       await this.refreshAdminJobs();
@@ -335,7 +335,7 @@ export class WebARApp {
       return;
     }
 
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
     try {
       const result = await cleanupFailedJobArtifactsRequest({ apiUrl, authToken: this.authToken });
       await this.refreshAdminJobs();
@@ -351,7 +351,7 @@ export class WebARApp {
       return;
     }
 
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
     try {
       await approveAccountRequest({ apiUrl, email, token: this.authToken });
       await this.refreshAdminAccounts();
@@ -366,7 +366,7 @@ export class WebARApp {
       return;
     }
 
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
     try {
       await removeAccountRequest({ apiUrl, email, token: this.authToken });
       await this.refreshAdminAccounts();
@@ -374,6 +374,11 @@ export class WebARApp {
       const message = describeError(error, 'Could not remove account.');
       this.hud?.showAuthMessage(message, true);
     }
+  }
+
+  /** Read per call: tests stub import.meta.env after this module is imported. */
+  private generateModelApiUrl(): string {
+    return getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
   }
 
   private requireAuthToken(message: string): string | null {
@@ -666,7 +671,7 @@ export class WebARApp {
       }
 
       const result = await segmentObject({
-        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        apiUrl: this.generateModelApiUrl(),
         imageBase64: preparedImage.imageBase64,
         imageMimeType: preparedImage.imageMimeType,
         authToken: this.authToken,
@@ -767,7 +772,7 @@ export class WebARApp {
 
     try {
       const job = await startGeneratedModelJob({
-        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        apiUrl: this.generateModelApiUrl(),
         imageBase64: capturedImage.imageBase64,
         imageMimeType: capturedImage.imageMimeType,
         targetObject,
@@ -814,7 +819,7 @@ export class WebARApp {
 
     try {
       const extractedImage = await extractImageFor3D({
-        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        apiUrl: this.generateModelApiUrl(),
         imageBase64: capturedImage.imageBase64,
         imageMimeType: capturedImage.imageMimeType,
         targetObject,
@@ -863,7 +868,7 @@ export class WebARApp {
       this.hud?.showFullFlowLoading('Building your 3D object in Modal.');
 
       const generatedModel = await generateModelFromImage({
-        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        apiUrl: this.generateModelApiUrl(),
         imageBase64: capturedImage.imageBase64,
         imageMimeType: capturedImage.imageMimeType,
         targetObject,
@@ -928,7 +933,7 @@ export class WebARApp {
       this.hud?.showFullFlowLoading('Generating a dynamic image, then building your 3D object in Modal.');
 
       const generatedModel = await generateModelFromImage({
-        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        apiUrl: this.generateModelApiUrl(),
         imageBase64: capturedImage.imageBase64,
         imageMimeType: capturedImage.imageMimeType,
         targetObject,
@@ -1033,7 +1038,7 @@ export class WebARApp {
 
     try {
       const job = await startSpeechModelJob({
-        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        apiUrl: this.generateModelApiUrl(),
         audioBase64: recordedAudio.audioBase64,
         audioMimeType: recordedAudio.audioMimeType,
         authToken,
@@ -1067,7 +1072,7 @@ export class WebARApp {
 
     try {
       const job = await startTextModelJob({
-        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        apiUrl: this.generateModelApiUrl(),
         text: normalizedText,
         authToken,
       });
@@ -1206,7 +1211,7 @@ export class WebARApp {
   }
 
   private async refreshGeneratedModels(): Promise<void> {
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
 
     try {
       const generatedModels = await listGeneratedModels({ apiUrl, authToken: this.authToken });
@@ -1293,7 +1298,7 @@ export class WebARApp {
 
     try {
       const storedModel = await storeUploadedModelRequest({
-        apiUrl: getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL),
+        apiUrl: this.generateModelApiUrl(),
         file,
         authToken,
       });
@@ -1324,7 +1329,7 @@ export class WebARApp {
   }
 
   private syncAvailableModels(): void {
-    this.availableModels = [...MODEL_OPTIONS, ...this.generatedModelOptions, ...this.uploadedModelOptions];
+    this.availableModels = [...this.generatedModelOptions, ...this.uploadedModelOptions];
     this.hud?.updateGeneratedModels(this.generatedModelOptions);
     this.hud?.updateUploadedModels(this.uploadedModelOptions);
   }
@@ -1413,7 +1418,7 @@ export class WebARApp {
       return;
     }
 
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
 
     this.hud?.updateModelManagerStatus('Renaming model...');
 
@@ -1433,7 +1438,7 @@ export class WebARApp {
       return;
     }
 
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
 
     this.hud?.updateModelManagerStatus('Deleting model...');
 
@@ -1453,7 +1458,7 @@ export class WebARApp {
       return;
     }
 
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
     this.hud?.updateModelManagerStatus('Updating visibility...');
 
     try {
@@ -1472,7 +1477,7 @@ export class WebARApp {
       return;
     }
 
-    const apiUrl = getGenerateModelApiUrl(import.meta.env.VITE_GENERATE_MODEL_API_URL);
+    const apiUrl = this.generateModelApiUrl();
 
     this.hud?.updateModelManagerStatus('Compressing thumbnail...');
 
@@ -1492,7 +1497,11 @@ export class WebARApp {
     }
   }
 
-  private setCapturedImagePreview(blob: Blob, mediaOperationEpoch?: number): void {
+  private setImagePreview(
+    blob: Blob,
+    mediaOperationEpoch: number | undefined,
+    show: (hud: ARHud, url: string) => void,
+  ): void {
     if (mediaOperationEpoch === undefined) {
       this.beginCapturedMediaOperation();
     } else if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
@@ -1500,29 +1509,21 @@ export class WebARApp {
     }
     this.clearCapturedImagePreview(false);
     this.capturedImagePreviewUrl = URL.createObjectURL(blob);
-    this.hud?.showCapturedImagePreview(this.capturedImagePreviewUrl);
+    if (this.hud) {
+      show(this.hud, this.capturedImagePreviewUrl);
+    }
+  }
+
+  private setCapturedImagePreview(blob: Blob, mediaOperationEpoch?: number): void {
+    this.setImagePreview(blob, mediaOperationEpoch, (hud, url) => hud.showCapturedImagePreview(url));
   }
 
   private setExtractedImagePreview(blob: Blob, mediaOperationEpoch?: number): void {
-    if (mediaOperationEpoch === undefined) {
-      this.beginCapturedMediaOperation();
-    } else if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
-      return;
-    }
-    this.clearCapturedImagePreview(false);
-    this.capturedImagePreviewUrl = URL.createObjectURL(blob);
-    this.hud?.showExtractedImageReady(this.capturedImagePreviewUrl);
+    this.setImagePreview(blob, mediaOperationEpoch, (hud, url) => hud.showExtractedImageReady(url));
   }
 
   private setUploadedImagePreview(blob: Blob, mediaOperationEpoch?: number): void {
-    if (mediaOperationEpoch === undefined) {
-      this.beginCapturedMediaOperation();
-    } else if (!this.isCurrentCapturedMediaOperation(mediaOperationEpoch)) {
-      return;
-    }
-    this.clearCapturedImagePreview(false);
-    this.capturedImagePreviewUrl = URL.createObjectURL(blob);
-    this.hud?.showUploadedImagePreview(this.capturedImagePreviewUrl);
+    this.setImagePreview(blob, mediaOperationEpoch, (hud, url) => hud.showUploadedImagePreview(url));
   }
 
   private clearCapturedImagePreview(
@@ -2018,60 +2019,40 @@ export class WebARApp {
     }
   }
 
-  private requireScene(): SceneContext {
-    if (!this.sceneContext) {
-      throw new Error('Scene has not been created.');
+  private required<T>(value: T | null, what: string): T {
+    if (!value) {
+      throw new Error(`${what} has not been created.`);
     }
 
-    return this.sceneContext;
+    return value;
+  }
+
+  private requireScene(): SceneContext {
+    return this.required(this.sceneContext, 'Scene');
   }
 
   private requireHud(): ARHud {
-    if (!this.hud) {
-      throw new Error('HUD has not been created.');
-    }
-
-    return this.hud;
+    return this.required(this.hud, 'HUD');
   }
 
   private requireARRuntime(): ARRuntime {
-    if (!this.arRuntime) {
-      throw new Error('AR runtime has not been loaded.');
-    }
-
-    return this.arRuntime;
+    return this.required(this.arRuntime, 'AR runtime');
   }
 
   private requireTransformController(): ObjectTransformController {
-    if (!this.transformController) {
-      throw new Error('Transform controller has not been created.');
-    }
-
-    return this.transformController;
+    return this.required(this.transformController, 'Transform controller');
   }
 
   private requireMotionController(): SpatialMotionController {
-    if (!this.motionController) {
-      throw new Error('Motion controller has not been created.');
-    }
-
-    return this.motionController;
+    return this.required(this.motionController, 'Motion controller');
   }
 
   private requireLayoutSceneManager(): InstanceType<ARRuntime['LayoutSceneManager']> {
-    if (!this.layoutSceneManager) {
-      throw new Error('Layout scene manager has not been created.');
-    }
-
-    return this.layoutSceneManager;
+    return this.required(this.layoutSceneManager, 'Layout scene manager');
   }
 
   private requireClock(): Three.Clock {
-    if (!this.clock) {
-      throw new Error('Render clock has not been created.');
-    }
-
-    return this.clock;
+    return this.required(this.clock, 'Render clock');
   }
 }
 

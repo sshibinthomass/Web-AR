@@ -1,4 +1,5 @@
-import { blobToBase64, type MediaDevicesProvider } from './cameraCapture';
+import { blobToBase64 } from '../utils/base64';
+import type { MediaDevicesProvider } from './cameraCapture';
 
 export interface RecordedAudio {
   audioBase64: string;

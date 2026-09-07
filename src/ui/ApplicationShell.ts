@@ -1,7 +1,7 @@
 import type { SpatialField } from '../scene/SpatialField';
 import type { AuthUser } from '../services/authClient';
 import { getAccountDisplayName } from './accountIdentity';
-import { apertureLogoUrl } from './brandAssets';
+import apertureLogoUrl from '../assets/brand/00-arvenilo-master-transparent-logo.png';
 import { ROUTES, type HudRoute } from './routes';
 
 interface ApplicationShellHandlers {

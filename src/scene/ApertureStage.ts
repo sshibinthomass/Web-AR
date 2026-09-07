@@ -1,10 +1,12 @@
 import * as THREE from 'three';
-import { createBackdropRenderer, prefersReducedMotion } from './backdropRenderer';
+import { BACKDROP_COLORS, BackdropLoop, createBackdropRenderer } from './backdropRenderer';
 
-const SIGNAL_MINT = 0x5eead4;
-const ANCHOR_GOLD = 0xf4b942;
-const SPATIAL_INK = 0x081d21;
-const BORDER_DARK = 0x1d454a;
+const {
+  signalMint: SIGNAL_MINT,
+  anchorGold: ANCHOR_GOLD,
+  spatialInk: SPATIAL_INK,
+  borderDark: BORDER_DARK,
+} = BACKDROP_COLORS;
 
 /**
  * The Aperture Engine: the dimensional reading of the Arvenilo aperture.
@@ -20,16 +22,14 @@ export class ApertureStage {
   private readonly assembly = new THREE.Group();
   private readonly object = new THREE.Group();
   private readonly signalPoint: THREE.Mesh;
-  private readonly reducedMotion: boolean;
   private readonly resizeObserver: ResizeObserver | null = null;
+  private readonly loop = new BackdropLoop((time) => this.render(time));
 
-  private frameId: number | null = null;
   private visible = false;
 
   private readonly handleVisibilityChange = () => this.syncFrameLoop();
 
   constructor(private readonly host: HTMLElement) {
-    this.reducedMotion = prefersReducedMotion();
     this.renderer = createBackdropRenderer();
     this.signalPoint = new THREE.Mesh(
       new THREE.SphereGeometry(0.07, 20, 20),
@@ -61,7 +61,7 @@ export class ApertureStage {
   }
 
   dispose(): void {
-    this.stopFrameLoop();
+    this.loop.stop();
     this.resizeObserver?.disconnect();
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     this.renderer?.dispose();
@@ -134,7 +134,7 @@ export class ApertureStage {
     floorMaterial.opacity = 0.3;
     this.scene.add(floor);
 
-    if (this.reducedMotion) {
+    if (this.loop.reducedMotion) {
       // Static composed state: layers already converged, object already through.
       this.object.position.set(0, 0, 0.9);
     } else {
@@ -143,31 +143,7 @@ export class ApertureStage {
   }
 
   private syncFrameLoop(): void {
-    if (!this.renderer || !this.visible || document.visibilityState === 'hidden') {
-      this.stopFrameLoop();
-      return;
-    }
-
-    if (this.reducedMotion) {
-      this.render(0);
-      return;
-    }
-
-    if (this.frameId === null) {
-      this.frameId = window.requestAnimationFrame((time) => this.tick(time));
-    }
-  }
-
-  private stopFrameLoop(): void {
-    if (this.frameId !== null) {
-      window.cancelAnimationFrame(this.frameId);
-      this.frameId = null;
-    }
-  }
-
-  private tick(time: number): void {
-    this.frameId = window.requestAnimationFrame((next) => this.tick(next));
-    this.render(time);
+    this.loop.sync(Boolean(this.renderer) && this.visible);
   }
 
   private render(time: number): void {
@@ -175,7 +151,7 @@ export class ApertureStage {
       return;
     }
 
-    if (!this.reducedMotion) {
+    if (!this.loop.reducedMotion) {
       const seconds = time / 1000;
       // The camera holds still; the layers and the object are what move.
       this.assembly.rotation.z = Math.sin(seconds * 0.24) * 0.06;

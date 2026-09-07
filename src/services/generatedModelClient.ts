@@ -1,4 +1,6 @@
 import type { ModelOption, ModelVisibility } from '../app/models';
+import { arrayBufferToBase64 } from '../utils/base64';
+import { modelLabelFromFileName } from '../app/uploadedModels';
 import type { CompressedThumbnail } from '../capture/thumbnailCompression';
 
 export interface GenerateModelInput {
@@ -611,7 +613,7 @@ export async function storeUploadedModel({
     headers: jsonHeaders(authToken),
     body: JSON.stringify({
       file_name: file.name,
-      label: uploadedModelLabel(file.name),
+      label: modelLabelFromFileName(file.name),
       model_mime_type: file.type || 'model/gltf-binary',
       model_base64: arrayBufferToBase64(await file.arrayBuffer()),
     }),
@@ -684,49 +686,6 @@ export async function generateModelFromImage({
   }
 
   return parseGeneratedModelResult(body);
-}
-
-export async function generateModelFromSpeech({
-  apiUrl,
-  audioBase64,
-  audioMimeType,
-  authToken,
-  fetchImpl = fetch,
-  pollIntervalMs = 5000,
-  maxPolls = 180,
-}: GenerateSpeechModelInput): Promise<GeneratedModelResult> {
-  if (!apiUrl) {
-    throw new Error('Worker API URL is not configured.');
-  }
-
-  if (!audioBase64.trim()) {
-    throw new Error('Record speech before generating a 3D model.');
-  }
-
-  const response = await fetchImpl(speechGenerateUrlFromGenerateUrl(apiUrl), {
-    method: 'POST',
-    headers: jsonHeaders(authToken),
-    body: JSON.stringify({
-      audio_base64: audioBase64,
-      audio_mime_type: audioMimeType || 'audio/webm',
-    }),
-  });
-
-  const body = (await response.json()) as WorkerJobResponse | WorkerErrorResponse;
-  if (!response.ok) {
-    throw new Error('error' in body && body.error ? body.error : `Speech generation failed with HTTP ${response.status}.`);
-  }
-
-  if (!('job_id' in body) || !body.status_url) {
-    throw new Error('Worker response did not include a speech generation job.');
-  }
-
-  const result = await pollGeneratedModel(body.status_url, fetchImpl, pollIntervalMs, maxPolls, authToken);
-  return {
-    ...result,
-    transcript: body.transcript,
-    prompt: body.prompt,
-  };
 }
 
 async function pollGeneratedModel(
@@ -845,28 +804,33 @@ function authHeaders(authToken?: string | null): Record<string, string> {
   return authToken ? { Authorization: `Bearer ${authToken}` } : {};
 }
 
+/** Appends a path to the worker base, e.g. `/generate-3d` -> `/generate-3d/speech`. */
+function generateSubUrl(apiUrl: string, suffix: string): string {
+  return apiUrl.replace(/\/+$/, '').replace(/\/generate-3d$/, `/generate-3d/${suffix}`);
+}
+
 function extractImageUrlFromGenerateUrl(apiUrl: string): string {
   return apiUrl.replace(/\/generate-3d\/?$/, '/extract-image');
 }
 
 function generateModelUrlForPipeline(apiUrl: string, generationPipeline: GenerationPipeline): string {
   if (generationPipeline === 'openai-to-3d') {
-    return apiUrl.replace(/\/+$/, '').replace(/\/generate-3d$/, '/generate-3d/openai');
+    return generateSubUrl(apiUrl, 'openai');
   }
 
   if (generationPipeline === 'dynamic') {
-    return apiUrl.replace(/\/+$/, '').replace(/\/generate-3d$/, '/generate-3d/dynamic');
+    return generateSubUrl(apiUrl, 'dynamic');
   }
 
   return apiUrl;
 }
 
 function speechGenerateUrlFromGenerateUrl(apiUrl: string): string {
-  return apiUrl.replace(/\/+$/, '').replace(/\/generate-3d$/, '/generate-3d/speech');
+  return generateSubUrl(apiUrl, 'speech');
 }
 
 function textGenerateUrlFromGenerateUrl(apiUrl: string): string {
-  return apiUrl.replace(/\/+$/, '').replace(/\/generate-3d$/, '/generate-3d/text');
+  return generateSubUrl(apiUrl, 'text');
 }
 
 function mapGeneratedModelEntry(model: WorkerGeneratedModelEntry): ModelOption {
@@ -921,19 +885,7 @@ function generatedModelItemUrl(apiUrl: string, modelId: string): string {
   return `${apiUrl.replace(/\/+$/, '')}/models/${encodeURIComponent(workerModelId)}`;
 }
 
-function uploadedModelLabel(fileName: string): string {
-  return fileName.replace(/\.glb$/i, '').trim() || 'Uploaded model';
-}
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
-  }
-  return btoa(binary);
-}
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {

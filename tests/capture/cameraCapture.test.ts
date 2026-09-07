@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_CAPTURE_IMAGE_MIME_TYPE,
   DEFAULT_CAPTURE_MAX_DIMENSION,
-  blobToBase64,
   getCaptureDimensions,
   imageFileToCapturedImage,
   startCameraPreview,
   stopCameraPreview,
 } from '../../src/capture/cameraCapture';
+import { blobToBase64 } from '../../src/utils/base64';
 
 describe('cameraCapture', () => {
   it('converts a Blob to base64 without the data URL prefix', async () => {

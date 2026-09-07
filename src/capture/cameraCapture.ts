@@ -1,3 +1,5 @@
+import { blobToBase64 } from '../utils/base64';
+
 export interface MediaDevicesProvider {
   mediaDevices: Pick<MediaDevices, 'getUserMedia'>;
 }
@@ -80,18 +82,6 @@ export async function imageFileToCapturedImage(file: File): Promise<CapturedImag
   };
 }
 
-export async function blobToBase64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = '';
-  const chunkSize = 0x8000;
-
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    const chunk = bytes.slice(index, index + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-
-  return btoa(binary);
-}
 
 export function getCaptureDimensions(
   sourceWidth: number,

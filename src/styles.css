@@ -418,9 +418,6 @@ textarea {
 /* Corner brackets: a boundary that can become interactive. */
 .calibration-frame {
   position: relative;
-}
-
-.calibration-frame {
   --bracket-size: 22px;
   --bracket-inset: 12px;
 }
@@ -3251,11 +3248,9 @@ textarea {
 .status-panel.camera-active > .status-label,
 .status-panel.camera-active > .status-message,
 .status-panel.camera-active > .status-source,
-.status-panel.camera-active > .model-picker,
 .status-panel.ar-picker-active > .status-label,
 .status-panel.ar-picker-active > .status-message,
-.status-panel.ar-picker-active > .status-source,
-.status-panel.ar-picker-active > .model-picker {
+.status-panel.ar-picker-active > .status-source {
   display: none;
 }
 
@@ -3318,24 +3313,6 @@ textarea {
   color: var(--color-error-light);
   font-size: var(--text-small);
   line-height: 1.4;
-}
-
-.model-picker {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-  color: var(--color-mist-slate);
-  font-family: var(--font-utility);
-  font-size: var(--text-label);
-}
-
-.model-picker select {
-  min-width: 0;
-  min-height: 44px;
-  font-family: var(--font-text);
-  font-size: var(--text-small);
 }
 
 /* --- HUD actions --------------------------------------------------------- */

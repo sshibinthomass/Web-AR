@@ -1,9 +1,7 @@
 import * as THREE from 'three';
-import { createBackdropRenderer, prefersReducedMotion } from './backdropRenderer';
+import { BACKDROP_COLORS, BackdropLoop, createBackdropRenderer } from './backdropRenderer';
 
-const SIGNAL_MINT = 0x5eead4;
-const ANCHOR_GOLD = 0xf4b942;
-const BORDER_DARK = 0x1d454a;
+const { signalMint: SIGNAL_MINT, anchorGold: ANCHOR_GOLD, borderDark: BORDER_DARK } = BACKDROP_COLORS;
 
 /** Pointer parallax stays inside the 2-3 degree limit the design system sets. */
 const MAX_PARALLAX_RADIANS = THREE.MathUtils.degToRad(2.5);
@@ -71,9 +69,8 @@ export class SpatialField {
   private readonly camera = new THREE.PerspectiveCamera(58, 1, 0.1, 80);
   private readonly lattice: THREE.Points | null;
   private readonly signalPoint: THREE.Mesh | null;
-  private readonly reducedMotion: boolean;
+  private readonly loop = new BackdropLoop((time) => this.render(time));
 
-  private frameId: number | null = null;
   private active = false;
   private pointerX = 0;
   private pointerY = 0;
@@ -92,7 +89,6 @@ export class SpatialField {
     this.root.hidden = true;
     host.prepend(this.root);
 
-    this.reducedMotion = prefersReducedMotion();
     this.renderer = createBackdropRenderer();
 
     if (!this.renderer) {
@@ -126,7 +122,7 @@ export class SpatialField {
   }
 
   dispose(): void {
-    this.stopFrameLoop();
+    this.loop.stop();
     window.removeEventListener('resize', this.handleResize);
     window.removeEventListener('pointermove', this.handlePointerMove);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
@@ -135,33 +131,7 @@ export class SpatialField {
   }
 
   private syncFrameLoop(): void {
-    const shouldRun = this.active && document.visibilityState !== 'hidden';
-    if (!this.renderer || !shouldRun) {
-      this.stopFrameLoop();
-      return;
-    }
-
-    // Reduced motion keeps the composed state: render once, then hold.
-    if (this.reducedMotion) {
-      this.render(0);
-      return;
-    }
-
-    if (this.frameId === null) {
-      this.frameId = window.requestAnimationFrame((time) => this.tick(time));
-    }
-  }
-
-  private stopFrameLoop(): void {
-    if (this.frameId !== null) {
-      window.cancelAnimationFrame(this.frameId);
-      this.frameId = null;
-    }
-  }
-
-  private tick(time: number): void {
-    this.frameId = window.requestAnimationFrame((next) => this.tick(next));
-    this.render(time);
+    this.loop.sync(Boolean(this.renderer) && this.active);
   }
 
   private render(time: number): void {
@@ -169,12 +139,12 @@ export class SpatialField {
       return;
     }
 
-    if (this.lattice && !this.reducedMotion) {
+    if (this.lattice && !this.loop.reducedMotion) {
       this.lattice.rotation.y = time * 0.000045;
       this.lattice.position.y = Math.sin(time * 0.00016) * 0.16;
     }
 
-    if (this.signalPoint && !this.reducedMotion) {
+    if (this.signalPoint && !this.loop.reducedMotion) {
       const material = this.signalPoint.material as THREE.MeshBasicMaterial;
       material.opacity = 0.72 + Math.sin(time * 0.0018) * 0.18;
     }

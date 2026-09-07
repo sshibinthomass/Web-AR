@@ -696,7 +696,6 @@ describe('ARHud', () => {
     const statusPanel = root.querySelector('.status-panel');
     const cameraPanel = root.querySelector('.camera-panel');
     const hudActions = root.querySelector('.hud-actions');
-    const modelPicker = root.querySelector('.model-picker');
     const arModelPicker = root.querySelector('.ar-model-picker');
     const modelRail = root.querySelector('.model-rail');
     const modelCards = [...root.querySelectorAll<HTMLButtonElement>('.ar-model-card')];
@@ -709,7 +708,6 @@ describe('ARHud', () => {
     expect(cameraPanel?.classList.contains('hidden')).toBe(true);
     expect(hudActions?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(true);
-    expect(modelPicker?.classList.contains('hidden')).toBe(true);
     expect(arModelPicker?.classList.contains('hidden')).toBe(false);
     expect(modelRail?.classList.contains('hidden')).toBe(true);
     expect(root.querySelector('.app-route-title')?.textContent).toBe('Place in AR');
@@ -1897,8 +1895,7 @@ describe('ARHud', () => {
     expect(root.querySelector('.hud-actions')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.gesture-surface')?.classList.contains('hidden')).toBe(false);
     expect(root.querySelector('.ar-model-picker')?.classList.contains('hidden')).toBe(true);
-    expect(root.querySelector<HTMLSelectElement>('.model-picker select')?.value)
-      .toBe('full-flow-generated-object');
+    expect(root.querySelector('.model-rail-item.is-selected')?.textContent).toContain('Generated object');
   });
 
   it('starts AR from the GPT-assisted Full Flow generate tap after extraction', () => {
@@ -2118,7 +2115,6 @@ describe('ARHud', () => {
     });
 
     expect(window.location.hash).toBe('#/ar');
-    expect(root.querySelector<HTMLSelectElement>('.model-picker select')?.value).toBe('full-flow-generated-object');
     expect(root.querySelector('.model-rail-item.is-selected')?.textContent).toContain('Generated object');
     expect(startArCamera).not.toHaveBeenCalled();
   });

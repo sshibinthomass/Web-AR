@@ -13,7 +13,7 @@ export function createUploadedModelOption(file: File, objectUrl: string, timesta
   };
 }
 
-function modelLabelFromFileName(fileName: string): string {
+export function modelLabelFromFileName(fileName: string): string {
   const withoutExtension = fileName.replace(/\.glb$/i, '').trim();
   return withoutExtension || 'Uploaded model';
 }

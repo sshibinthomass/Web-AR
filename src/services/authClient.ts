@@ -50,6 +50,30 @@ interface UsersResponse {
 
 const authTokenStorageKey = 'web-ar-auth-token';
 
+/** Every auth endpoint answers with `{ ...payload, error? }`, so one reader covers all of them. */
+async function authRequest<T extends { error?: string }>(
+  fetchImpl: typeof fetch,
+  apiUrl: string,
+  path: string,
+  failure: string,
+  init?: RequestInit,
+): Promise<T> {
+  const response = await fetchImpl(`${authBaseUrl(apiUrl)}${path}`, init);
+  const body = (await response.json()) as T;
+  if (!response.ok) {
+    throw new Error(body.error ?? `${failure} failed with HTTP ${response.status}.`);
+  }
+  return body;
+}
+
+function bearer(token: string): Record<string, string> {
+  return { Authorization: `Bearer ${token}` };
+}
+
+function jsonBearer(token: string): Record<string, string> {
+  return { ...bearer(token), 'Content-Type': 'application/json' };
+}
+
 export async function signup({
   apiUrl,
   email,
@@ -57,7 +81,7 @@ export async function signup({
   name,
   fetchImpl = fetch,
 }: SignupInput): Promise<AuthSession> {
-  const response = await fetchImpl(`${authBaseUrl(apiUrl)}/signup`, {
+  const body = await authRequest<AuthResponse>(fetchImpl, apiUrl, '/signup', 'Auth request', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -66,19 +90,16 @@ export async function signup({
       ...(name?.trim() ? { name: name.trim() } : {}),
     }),
   });
-  return parseAuthSessionResponse(response);
+  return toAuthSession(body);
 }
 
 export async function login({ apiUrl, email, password, fetchImpl = fetch }: LoginInput): Promise<AuthSession> {
-  const response = await fetchImpl(`${authBaseUrl(apiUrl)}/login`, {
+  const body = await authRequest<AuthResponse>(fetchImpl, apiUrl, '/login', 'Auth request', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      email: email.trim().toLowerCase(),
-      password,
-    }),
+    body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
   });
-  return parseAuthSessionResponse(response);
+  return toAuthSession(body);
 }
 
 export async function getCurrentUser({ apiUrl, token, fetchImpl = fetch }: TokenInput): Promise<AuthUser | null> {
@@ -86,9 +107,7 @@ export async function getCurrentUser({ apiUrl, token, fetchImpl = fetch }: Token
     return null;
   }
 
-  const response = await fetchImpl(`${authBaseUrl(apiUrl)}/session`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await fetchImpl(`${authBaseUrl(apiUrl)}/session`, { headers: bearer(token) });
   if (response.status === 401) {
     return null;
   }
@@ -107,37 +126,31 @@ export async function logout({ apiUrl, token, fetchImpl = fetch }: TokenInput): 
     return;
   }
 
-  const response = await fetchImpl(`${authBaseUrl(apiUrl)}/logout`, {
+  await authRequest(fetchImpl, apiUrl, '/logout', 'Logout', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: bearer(token),
   });
-  const body = (await response.json()) as { error?: string };
-  if (!response.ok) {
-    throw new Error(body.error ?? `Logout failed with HTTP ${response.status}.`);
-  }
 }
 
 export async function listAccounts({ apiUrl, token, fetchImpl = fetch }: TokenInput): Promise<AuthUser[]> {
-  const response = await fetchImpl(`${authBaseUrl(apiUrl)}/users`, {
-    headers: { Authorization: `Bearer ${token}` },
+  const body = await authRequest<UsersResponse>(fetchImpl, apiUrl, '/users', 'Account list', {
+    headers: bearer(token),
   });
-  const body = (await response.json()) as UsersResponse;
-  if (!response.ok) {
-    throw new Error(body.error ?? `Account list failed with HTTP ${response.status}.`);
-  }
   return body.users ?? [];
 }
 
 export async function approveAccount({ apiUrl, email, token, fetchImpl = fetch }: AccountInput): Promise<AuthUser> {
-  const response = await fetchImpl(`${authBaseUrl(apiUrl)}/users/${encodeURIComponent(email.trim().toLowerCase())}`, {
-    method: 'PATCH',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: 'active' }),
-  });
-  const body = (await response.json()) as AuthResponse;
-  if (!response.ok) {
-    throw new Error(body.error ?? `Account approval failed with HTTP ${response.status}.`);
-  }
+  const body = await authRequest<AuthResponse>(
+    fetchImpl,
+    apiUrl,
+    `/users/${encodeURIComponent(email.trim().toLowerCase())}`,
+    'Account approval',
+    {
+      method: 'PATCH',
+      headers: jsonBearer(token),
+      body: JSON.stringify({ status: 'active' }),
+    },
+  );
   if (!body.user) {
     throw new Error('Worker response did not include the approved account.');
   }
@@ -145,14 +158,13 @@ export async function approveAccount({ apiUrl, email, token, fetchImpl = fetch }
 }
 
 export async function removeAccount({ apiUrl, email, token, fetchImpl = fetch }: AccountInput): Promise<void> {
-  const response = await fetchImpl(`${authBaseUrl(apiUrl)}/users/${encodeURIComponent(email.trim().toLowerCase())}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const body = (await response.json()) as { error?: string };
-  if (!response.ok) {
-    throw new Error(body.error ?? `Account removal failed with HTTP ${response.status}.`);
-  }
+  await authRequest(
+    fetchImpl,
+    apiUrl,
+    `/users/${encodeURIComponent(email.trim().toLowerCase())}`,
+    'Account removal',
+    { method: 'DELETE', headers: bearer(token) },
+  );
 }
 
 export function saveAuthToken(token: string): void {
@@ -167,18 +179,11 @@ export function clearAuthToken(): void {
   window.localStorage.removeItem(authTokenStorageKey);
 }
 
-async function parseAuthSessionResponse(response: Response): Promise<AuthSession> {
-  const body = (await response.json()) as AuthResponse;
-  if (!response.ok) {
-    throw new Error(body.error ?? `Auth request failed with HTTP ${response.status}.`);
-  }
+function toAuthSession(body: AuthResponse): AuthSession {
   if (!body.user) {
     throw new Error('Worker response did not include a user.');
   }
-  return {
-    user: body.user,
-    token: body.token ?? null,
-  };
+  return { user: body.user, token: body.token ?? null };
 }
 
 function authBaseUrl(apiUrl: string): string {
@@ -186,5 +191,5 @@ function authBaseUrl(apiUrl: string): string {
   if (!trimmed) {
     throw new Error('Worker API URL is not configured.');
   }
-  return trimmed.replace(/\/generate-3d(?:\/openai)?$/, '') + '/auth';
+  return trimmed.replace(/\/generate-3d$/, '') + '/auth';
 }

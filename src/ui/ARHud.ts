@@ -4,7 +4,8 @@ import type { ModelOption, ModelVisibility } from '../app/models';
 import type { AuthUser } from '../services/authClient';
 import type { AdminJobEntry } from '../services/generatedModelClient';
 import { ApplicationShell } from './ApplicationShell';
-import { apertureLogoUrl, arveniloLockupUrl } from './brandAssets';
+import apertureLogoUrl from '../assets/brand/00-arvenilo-master-transparent-logo.png';
+import arveniloLockupUrl from '../assets/brand/00-arvenilo-master-transparent.png';
 import { getAccountDisplayName } from './accountIdentity';
 import { openDialog } from './dialog';
 import { HashRouter } from './HashRouter';
@@ -94,6 +95,23 @@ type SpeechProcessStage =
   | 'completed'
   | 'failed';
 
+const FAVORITE_STAR = 'M12 3.6l2.6 5.2 5.7.8-4.1 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4.1-4 5.7-.8L12 3.6Z';
+
+const MODEL_ACTION_ICON_PATHS: Record<ModelActionIcon, string[]> = {
+  preview: [
+    'M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z',
+    'M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z',
+  ],
+  download: ['M12 4v10', 'M8 10l4 4 4-4', 'M5 20h14'],
+  favorite: [FAVORITE_STAR],
+  'favorite-filled': [FAVORITE_STAR],
+  'visibility-public': ['M6 10V8a6 6 0 0 1 11.6-2', 'M7 10h10a2 2 0 0 1 2 2v7H5v-7a2 2 0 0 1 2-2Z'],
+  'visibility-private': ['M7 10V8a5 5 0 0 1 10 0v2', 'M7 10h10a2 2 0 0 1 2 2v7H5v-7a2 2 0 0 1 2-2Z'],
+  edit: ['M4 20h4.2L19.4 8.8a2.1 2.1 0 0 0-3-3L5.2 17H4v3Z', 'M14.8 7.4l1.8 1.8'],
+  delete: ['M4 7h16', 'M9 7V5h6v2', 'M6 7l1 13h10l1-13', 'M10 11v5', 'M14 11v5'],
+  overflow: ['M6 12h.01', 'M12 12h.01', 'M18 12h.01'],
+};
+
 const speechStageOrder: SpeechProcessStage[] = [
   'speech_input',
   'detecting_speech',
@@ -182,7 +200,7 @@ export class ARHud {
   private readonly uploadModelInput: HTMLInputElement;
   private readonly targetObjectLabel: HTMLElement;
   private readonly targetObjectInput: HTMLInputElement;
-  private readonly modelSelect: HTMLSelectElement;
+  private selectedModelId = '';
   private readonly placeButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
   private readonly resetScaleButton: HTMLButtonElement;
@@ -651,23 +669,6 @@ export class ARHud {
     this.fullFlowLoadingRing = this.fullFlowLoading.querySelector<HTMLElement>('.loading-ring')!;
     this.statusPanel.appendChild(this.fullFlowLoading);
 
-    const modelPicker = document.createElement('label');
-    modelPicker.className = 'model-picker hidden';
-    modelPicker.innerHTML = '<span>Model</span>';
-    this.modelSelect = document.createElement('select');
-    this.modelSelect.append(new Option('Select model', '', true, true));
-    modelOptions.forEach((model) => {
-      this.modelSelect.append(new Option(model.label, model.id));
-    });
-    this.modelSelect.addEventListener('change', () => {
-      if (this.modelSelect.value) {
-        this.markModelRecent(this.modelSelect.value);
-        this.handlers.onModelSelect(this.modelSelect.value);
-      }
-    });
-    modelPicker.appendChild(this.modelSelect);
-    this.statusPanel.appendChild(modelPicker);
-
     const cameraPanel = document.createElement('section');
     cameraPanel.className = 'camera-panel creation-workspace hidden';
     cameraPanel.innerHTML = `
@@ -1013,7 +1014,7 @@ export class ARHud {
   }
 
   updateSelectedModel(modelId: string): void {
-    this.modelSelect.value = modelId;
+    this.selectedModelId = modelId;
     this.markModelRecent(modelId);
     this.updateModelRailSelection(modelId);
     this.updateARModelPickerSelection(modelId);
@@ -1590,8 +1591,7 @@ export class ARHud {
   }
 
   private navigateBack(): void {
-    const route = this.activeRoute ?? parseRouteHash(window.location.hash);
-    this.router.back(ROUTES[route].parent);
+    this.router.back('home');
   }
 
   private redirectToLogin(message: string): void {
@@ -1982,15 +1982,9 @@ export class ARHud {
   }
 
   private renderModelSelect(): void {
-    const selectedModelId = this.modelSelect.value;
-    this.modelSelect.replaceChildren(new Option('Select model', '', true, !selectedModelId));
-    this.selectableModelOptions().forEach((model) => {
-      this.modelSelect.append(new Option(model.label, model.id));
-    });
-    if ([...this.modelSelect.options].some((option) => option.value === selectedModelId)) {
-      this.modelSelect.value = selectedModelId;
-    } else {
-      this.modelSelect.value = '';
+    // A selection survives a refresh only while its model is still offered.
+    if (!this.selectableModelOptions().some((model) => model.id === this.selectedModelId)) {
+      this.selectedModelId = '';
     }
     this.renderModelRail();
     this.renderARModelPicker();
@@ -2403,7 +2397,7 @@ export class ARHud {
   }
 
   private renderModelRail(): void {
-    const selectedModelId = this.modelSelect.value;
+    const selectedModelId = this.selectedModelId;
     this.modelRail.replaceChildren();
 
     this.selectableModelOptions().forEach((model) => {
@@ -2422,7 +2416,7 @@ export class ARHud {
       item.setAttribute('aria-pressed', selectedModelId === model.id ? 'true' : 'false');
       item.classList.toggle('is-selected', selectedModelId === model.id);
       item.addEventListener('click', () => {
-        this.modelSelect.value = model.id;
+        this.selectedModelId = model.id;
         this.updateModelRailSelection(model.id);
         this.handlers.onModelSelect(model.id);
       });
@@ -2449,7 +2443,7 @@ export class ARHud {
   }
 
   private renderARModelPicker(): void {
-    const selectedModelId = this.modelSelect.value;
+    const selectedModelId = this.selectedModelId;
     this.arModelList.replaceChildren();
 
     const models = this.filteredModelOptions(this.selectableModelOptions());
@@ -2513,7 +2507,7 @@ export class ARHud {
   }
 
   private selectARModelForPlacement(modelId: string): void {
-    this.modelSelect.value = modelId;
+    this.selectedModelId = modelId;
     this.markModelRecent(modelId);
     this.updateModelRailSelection(modelId);
     this.updateARModelPickerSelection(modelId);
@@ -2646,7 +2640,7 @@ export class ARHud {
   }
 
   private openSelectedModelInAR(): void {
-    if (!this.modelSelect.value || !this.modelReady) {
+    if (!this.selectedModelId || !this.modelReady) {
       return;
     }
 
@@ -2668,7 +2662,7 @@ export class ARHud {
   }
 
   private updateARPlaceButton(): void {
-    const hasSelection = Boolean(this.modelSelect.value);
+    const hasSelection = Boolean(this.selectedModelId);
     this.arPlaceButton.disabled = !hasSelection || !this.modelReady;
     this.arPlaceButton.textContent = hasSelection && this.modelReady
       ? 'Place selected model'
@@ -2757,7 +2751,7 @@ export class ARHud {
           : `Download ${model.label}`;
     const button = this.createModelActionButton(label, 'download', 'download', '', () => {
       this.markModelDownloadStarted(model.id);
-      this.modelSelect.value = model.id;
+      this.selectedModelId = model.id;
       this.updateModelRailSelection(model.id);
       this.updateARModelPickerSelection(model.id);
       this.handlers.onModelSelect(model.id);
@@ -3337,22 +3331,7 @@ export class ARHud {
     svg.setAttribute('aria-hidden', 'true');
     svg.setAttribute('focusable', 'false');
 
-    const paths: Record<ModelActionIcon, string[]> = {
-      preview: [
-        'M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z',
-        'M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z',
-      ],
-      download: ['M12 4v10', 'M8 10l4 4 4-4', 'M5 20h14'],
-      favorite: ['M12 3.6l2.6 5.2 5.7.8-4.1 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4.1-4 5.7-.8L12 3.6Z'],
-      'favorite-filled': ['M12 3.6l2.6 5.2 5.7.8-4.1 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4.1-4 5.7-.8L12 3.6Z'],
-      'visibility-public': ['M6 10V8a6 6 0 0 1 11.6-2', 'M7 10h10a2 2 0 0 1 2 2v7H5v-7a2 2 0 0 1 2-2Z'],
-      'visibility-private': ['M7 10V8a5 5 0 0 1 10 0v2', 'M7 10h10a2 2 0 0 1 2 2v7H5v-7a2 2 0 0 1 2-2Z'],
-      edit: ['M4 20h4.2L19.4 8.8a2.1 2.1 0 0 0-3-3L5.2 17H4v3Z', 'M14.8 7.4l1.8 1.8'],
-      delete: ['M4 7h16', 'M9 7V5h6v2', 'M6 7l1 13h10l1-13', 'M10 11v5', 'M14 11v5'],
-      overflow: ['M6 12h.01', 'M12 12h.01', 'M18 12h.01'],
-    };
-
-    paths[icon].forEach((pathData) => {
+    MODEL_ACTION_ICON_PATHS[icon].forEach((pathData) => {
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', pathData);
       path.setAttribute('fill', icon === 'favorite-filled' ? 'currentColor' : 'none');

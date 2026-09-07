@@ -92,16 +92,6 @@ export class LayoutSceneManager {
     return true;
   }
 
-  selectObjectAtScreenPoint(point: Point2, canvas: HTMLCanvasElement, camera: THREE.Camera): LayoutObject | null {
-    const hit = this.hitTestObjectAtScreenPoint(point, canvas, camera);
-    if (!hit) {
-      return null;
-    }
-
-    this.selectObject(hit.id);
-    return hit;
-  }
-
   hitTestObjectAtScreenPoint(point: Point2, canvas: HTMLCanvasElement, camera: THREE.Camera): LayoutObject | null {
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) {
@@ -167,24 +157,12 @@ export class LayoutSceneManager {
     this.selectedObjectId = null;
   }
 
+  /** Read-only snapshot of the placed scene. No production caller; the tests
+   * assert placement and transform behaviour through it. */
   exportObjects(): LayoutObject[] {
     return [...this.objects.values()]
       .filter((object) => object.placed)
       .map((object) => this.toLayoutObject(object));
-  }
-
-  importObjects(objects: LayoutObject[], createModel: (object: LayoutObject) => THREE.Group): void {
-    this.clear();
-    objects.forEach((object) => {
-      this.addObject({
-        id: object.id,
-        modelId: object.modelId,
-        modelLabel: object.modelLabel,
-        modelUrl: object.modelUrl,
-        model: createModel(object),
-        transform: object.transform,
-      });
-    });
   }
 
   moveSelectedToFloorPoint(point: THREE.Vector3): boolean {
@@ -313,8 +291,5 @@ function fromLayoutVector(vector: LayoutVector3): THREE.Vector3 {
 }
 
 function createLayoutObjectId(): string {
-  const randomId = typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2);
-  return `object-${randomId}`;
+  return `object-${crypto.randomUUID()}`;
 }

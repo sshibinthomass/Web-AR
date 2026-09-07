@@ -144,11 +144,14 @@ describe('LayoutSceneManager', () => {
     });
     manager.placePendingAt(placementMatrix(2, 0, 0));
 
-    const selected = manager.selectObjectAtScreenPoint(
+    const selected = manager.hitTestObjectAtScreenPoint(
       { x: 50, y: 50 },
       createCanvas(),
       createCamera(),
     );
+    if (selected) {
+      manager.selectObject(selected.id);
+    }
     manager.scaleSelectedBy(2);
     manager.rotateSelectedBy(0.25);
 
@@ -254,7 +257,7 @@ describe('LayoutSceneManager', () => {
     ]);
   });
 
-  it('imports and exports session transforms', () => {
+  it('restores a seeded transform and keeps transforming from it', () => {
     const root = new THREE.Group();
     const manager = new LayoutSceneManager(root);
     const savedObject: LayoutObject = {
@@ -269,7 +272,7 @@ describe('LayoutSceneManager', () => {
       },
     };
 
-    manager.importObjects([savedObject], () => createModel('saved-chair-model'));
+    manager.addObject({ ...savedObject, model: createModel('saved-chair-model') });
     manager.selectObject('saved-chair');
     manager.moveSelectedToFloorPoint(new THREE.Vector3(3, 9, -3));
     manager.scaleSelectedBy(2);
