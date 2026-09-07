@@ -10,10 +10,8 @@
   },
   "vars": {
     "ADMIN_EMAIL": "sshibinthomass@gmail.com",
-    "MODAL_IMAGE_TO_3D_URL": "https://sshibinthomass--trellis-2-4b-fast-trellis2fastmodel-gene-1cf4f3.modal.run",
     "MODAL_IMAGE_TO_3D_START_URL": "https://sshibinthomass--trellis-2-4b-fast-trellis2fastmodel-start-api.modal.run",
     "MODAL_IMAGE_TO_3D_RESULT_URL": "https://sshibinthomass--trellis-2-4b-fast-trellis2fastmodel-result-api.modal.run",
-    "MODAL_OPENAI_TO_3D_URL": "https://sshibinthomass--openai-to-3d-fast-openaiimageto3d-generate-api.modal.run",
     "MODAL_OPENAI_TO_3D_START_URL": "https://sshibinthomass--openai-to-3d-fast-openaiimageto3d-start-api.modal.run",
     "MODAL_OPENAI_TO_3D_RESULT_URL": "https://sshibinthomass--openai-to-3d-fast-openaiimageto3d-result-api.modal.run",
     "MODAL_OBJECT_PREPROCESS_QUALITY_URL": "https://sshibinthomass--object-preprocess-quality-openai-t4-qual-caeb25.modal.run",

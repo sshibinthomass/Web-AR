@@ -19,10 +19,8 @@ export interface WorkerEnv {
   ALLOWED_ORIGINS?: string;
   MODAL_KEY: string;
   MODAL_SECRET: string;
-  MODAL_IMAGE_TO_3D_URL: string;
   MODAL_IMAGE_TO_3D_START_URL: string;
   MODAL_IMAGE_TO_3D_RESULT_URL: string;
-  MODAL_OPENAI_TO_3D_URL: string;
   MODAL_OPENAI_TO_3D_START_URL: string;
   MODAL_OPENAI_TO_3D_RESULT_URL: string;
   MODAL_OBJECT_PREPROCESS_QUALITY_URL?: string;
@@ -217,118 +215,6 @@ interface GeneratedModelsIndex {
   models: GeneratedModelEntry[];
 }
 
-type ImageTargetVisibility = ModelVisibility;
-type ImageTargetAccessMode = 'anyone_with_link' | 'any_signed_in' | 'owner_only' | 'specific_accounts';
-
-type ImageTargetPlacement = {
-  scale: number;
-  offset_x: number;
-  offset_y: number;
-  height: number;
-  rotation_x: number;
-  rotation_y: number;
-  rotation_z: number;
-};
-
-type ImageTargetSpinAxis = 'none' | 'x' | 'y' | 'z';
-type ImageTargetAnimationPreset = 'none' | 'gentle-float' | 'turntable' | 'showcase' | 'sway' | 'pulse' | 'orbit' | 'bounce' | 'custom';
-type ImageTargetAnimationProperty = 'position_x' | 'position_y' | 'position_z' | 'rotation_x' | 'rotation_y' | 'rotation_z' | 'scale';
-type ImageTargetAnimationMotion = 'smooth' | 'triangle' | 'spin';
-
-type ImageTargetAnimationTrack = {
-  property: ImageTargetAnimationProperty;
-  motion: ImageTargetAnimationMotion;
-  amount: number;
-  speed: number;
-  phase: number;
-};
-
-type ImageTargetAnimation = {
-  preset?: ImageTargetAnimationPreset;
-  tracks?: ImageTargetAnimationTrack[];
-  spin_axis?: ImageTargetSpinAxis;
-  spin_speed?: number;
-  bob_height?: number;
-  bob_speed?: number;
-};
-
-type ImageTargetModel = {
-  id: string;
-  label: string;
-  url: string;
-  preview_url?: string;
-};
-
-type ImageTargetText = {
-  value: string;
-  language: 'english' | 'german' | 'tamil';
-  font: string;
-  color: string;
-  fill_mode: 'solid' | 'gradient';
-  gradient_start: string;
-  gradient_end: string;
-  gradient_direction: 'horizontal' | 'vertical' | 'diagonal' | 'depth';
-  side_color: string;
-  depth: number;
-  bevel: number;
-  gloss: number;
-  style_preset: string;
-};
-
-type ImageTargetObjectBase = {
-  id: string;
-  placement: ImageTargetPlacement;
-  animation?: ImageTargetAnimation;
-  group_id?: string;
-  local_placement?: ImageTargetPlacement;
-};
-
-type ImageTargetModelObject = ImageTargetObjectBase & { kind: 'model'; model: ImageTargetModel };
-type ImageTargetTextObject = ImageTargetObjectBase & { kind: 'text'; text: ImageTargetText };
-type ImageTargetObject = ImageTargetModelObject | ImageTargetTextObject;
-
-type ImageTargetGroup = {
-  id: string;
-  label: string;
-  placement: ImageTargetPlacement;
-  animation: ImageTargetAnimation;
-};
-
-type ImageTargetEntry = {
-  id: string;
-  label: string;
-  image_url: string;
-  image_object_key: string;
-  model?: ImageTargetModel;
-  placement?: ImageTargetPlacement;
-  objects: ImageTargetObject[];
-  groups: ImageTargetGroup[];
-  owner_email?: string;
-  visibility?: ImageTargetVisibility;
-  scan_id?: string;
-  access_mode?: ImageTargetAccessMode;
-  allowed_emails?: string[];
-  created_at: string;
-  updated_at: string;
-};
-
-type ImageTargetsIndex = {
-  targets: ImageTargetEntry[];
-};
-
-type ImageTargetRequestBody = {
-  label?: unknown;
-  image_base64?: unknown;
-  image_mime_type?: unknown;
-  model?: unknown;
-  placement?: unknown;
-  objects?: unknown;
-  groups?: unknown;
-  visibility?: unknown;
-  access_mode?: unknown;
-  allowed_emails?: unknown;
-};
-
 interface ScheduledPollResult {
   completed: number;
   failed: number;
@@ -359,23 +245,9 @@ const pendingJobsIndexKey = 'models/generated/jobs/index.json';
 const jobHistoryIndexKey = 'models/generated/jobs/history.json';
 const jobKeyPrefix = 'models/generated/jobs/';
 const speechAudioKeyPrefix = 'models/generated/speech-audio/';
-const imageTargetsIndexKey = 'image-targets/index.json';
-const imageTargetRecordPrefix = 'image-targets/records/';
-const imageTargetImagePrefix = 'image-targets/images/';
-const maxImageTargetBytes = 5 * 1024 * 1024;
 const maxSegmentationImageBytes = 5 * 1024 * 1024;
 const segmentationTimeoutMs = 60_000;
 const allowedSegmentationMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const allowedImageTargetMimeTypes = ['image/png', 'image/jpeg', 'image/webp'] as const;
-const imageTargetTextLanguages = new Set(['english', 'german', 'tamil']);
-const imageTargetTextFonts = new Set([
-  'studio-sans', 'studio-sans-bold', 'studio-serif', 'studio-serif-bold',
-  'droid-serif', 'droid-serif-bold', 'optimer', 'optimer-bold',
-  'helvetiker', 'helvetiker-bold', 'studio-mono', 'tamil-ui',
-]);
-const imageTargetTextFillModes = new Set(['solid', 'gradient']);
-const imageTargetTextGradientDirections = new Set(['horizontal', 'vertical', 'diagonal', 'depth']);
-const imageTargetTextStylePresets = new Set(['blue-shine', 'gold-bevel', 'neon-cyan', 'red-gloss', 'tamil-classic']);
 const usersIndexKey = 'auth/users/index.json';
 const revokedSessionsIndexKey = 'auth/sessions/revoked.json';
 const auditLogIndexKey = 'security/audit/events.json';
@@ -447,10 +319,6 @@ async function routeGenerateModelRequest(
     return serveGeneratedModel(url.pathname.slice(1), env);
   }
 
-  if (request.method === 'GET' && url.pathname.startsWith('/image-targets/images/')) {
-    return serveImageTarget(url.pathname.slice(1), env);
-  }
-
   if (request.method === 'GET' && url.pathname === '/generate-3d/models') {
     const index = await readGeneratedModelsIndex(env);
     const auth = await readOptionalApprovedUser(request, env, deps);
@@ -466,41 +334,6 @@ async function routeGenerateModelRequest(
       return auth;
     }
     return handleUploadedModelRequest(request, env, deps, url, auth.user);
-  }
-
-  const imageTargetScanPrefix = '/generate-3d/image-targets/scan/';
-  if (request.method === 'GET' && url.pathname.startsWith(imageTargetScanPrefix)) {
-    const scanId = decodeURIComponent(url.pathname.slice(imageTargetScanPrefix.length));
-    return handleImageTargetScanRequest(request, env, deps, scanId);
-  }
-
-  if (request.method === 'GET' && url.pathname === '/generate-3d/image-targets') {
-    const index = await readImageTargetsIndex(env);
-    const auth = await readOptionalApprovedUser(request, env, deps);
-    if (auth) {
-      await ensureImageTargetScanIds(env, index, auth.user, deps);
-    }
-    const visibleTargets = index.targets.filter((target) => isImageTargetVisibleToUser(target, auth?.user ?? null));
-    return jsonResponse({
-      targets: visibleTargets.sort((left, right) => right.created_at.localeCompare(left.created_at)),
-    });
-  }
-
-  if (request.method === 'POST' && url.pathname === '/generate-3d/image-targets') {
-    const auth = await requireApprovedUser(request, env, deps);
-    if (auth instanceof Response) {
-      return auth;
-    }
-    return handleImageTargetCreateRequest(request, env, deps, url, auth.user);
-  }
-
-  if (url.pathname.startsWith('/generate-3d/image-targets/')) {
-    const auth = await requireApprovedUser(request, env, deps);
-    if (auth instanceof Response) {
-      return auth;
-    }
-    const targetId = decodeURIComponent(url.pathname.replace('/generate-3d/image-targets/', ''));
-    return handleImageTargetManagementRequest(request, env, deps, url, targetId, auth.user);
   }
 
   if (url.pathname.startsWith('/generate-3d/models/')) {
@@ -1578,96 +1411,9 @@ async function handleUploadedModelRequest(
   };
 
   await env.MODEL_BUCKET.put(objectKey, modelBytes, {
-    httpMetadata: { contentType: normalizeModelMimeType(body.value.model_mime_type) },
+    httpMetadata: { contentType: 'model/gltf-binary' },
   });
   await upsertGeneratedModelEntry(env, entry);
-
-  return jsonResponse(entry, 201);
-}
-
-async function handleImageTargetCreateRequest(
-  request: Request,
-  env: WorkerEnv,
-  deps: GenerateModelDeps,
-  url: URL,
-  user: StoredUser,
-): Promise<Response> {
-  if (!env.MODEL_BUCKET) {
-    return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
-  }
-
-  const body = await readJsonBody<ImageTargetRequestBody>(request);
-  if (!body.ok) {
-    return jsonResponse({ error: body.error }, 400);
-  }
-
-  const imageMimeType = normalizeImageTargetMimeType(body.value.image_mime_type);
-  if (!imageMimeType) {
-    return jsonResponse({ error: 'image_mime_type must be image/png, image/jpeg, or image/webp.' }, 400);
-  }
-
-  if (typeof body.value.image_base64 !== 'string' || body.value.image_base64.length === 0) {
-    return jsonResponse({ error: 'image_base64 is required.' }, 400);
-  }
-
-  const normalizedGroups = normalizeImageTargetGroups(body.value.groups);
-  const imageTargetObjects = normalizeImageTargetObjects(
-    body.value.objects,
-    body.value.model,
-    body.value.placement,
-    normalizedGroups,
-  );
-  if (imageTargetObjects.length === 0) {
-    return jsonResponse({ error: 'objects must include at least one valid model or text object.' }, 400);
-  }
-  const groups = usedImageTargetGroups(normalizedGroups, imageTargetObjects);
-  const firstModel = imageTargetObjects.find(isImageTargetModelObject);
-  const access = normalizeRequestedImageTargetAccess(body.value, user.email, {
-    access_mode: 'owner_only',
-    allowed_emails: [],
-  });
-  if ('error' in access) {
-    return jsonResponse({ error: access.error }, 400);
-  }
-
-  const now = deps.now();
-  const label = normalizeModelLabel(body.value.label) ?? 'Image target';
-  const existingTargets = (await readImageTargetsIndex(env)).targets;
-  const id = createUniqueImageTargetId(existingTargets, now, label);
-  const extension = imageTargetExtension(imageMimeType);
-  const objectKey = `${imageTargetImagePrefix}${id}.${extension}`;
-  const imageBytes = base64ToArrayBuffer(stripDataUrlPrefix(body.value.image_base64));
-  if (imageBytes.byteLength > maxImageTargetBytes) {
-    return jsonResponse({ error: 'Image target uploads must be 5 MB or smaller.' }, 400);
-  }
-
-  const entry: ImageTargetEntry = {
-    id,
-    label,
-    image_url: `${getPublicOrigin(env, url.origin)}/${objectKey}`,
-    image_object_key: objectKey,
-    ...(firstModel ? { model: firstModel.model, placement: firstModel.placement } : {}),
-    objects: imageTargetObjects,
-    groups,
-    owner_email: user.email,
-    visibility: 'private',
-    scan_id: deps.randomUUID?.() ?? crypto.randomUUID(),
-    access_mode: access.access_mode,
-    allowed_emails: access.allowed_emails,
-    created_at: now.toISOString(),
-    updated_at: now.toISOString(),
-  };
-
-  await env.MODEL_BUCKET.put(objectKey, imageBytes, {
-    httpMetadata: { contentType: imageMimeType },
-  });
-  await upsertImageTargetEntry(env, entry);
-  await appendAuditEvent(env, deps, {
-    actor: user.email,
-    action: 'image-target.create',
-    target: id,
-    status: 'ok',
-  });
 
   return jsonResponse(entry, 201);
 }
@@ -1743,215 +1489,6 @@ async function handleGeneratedModelManagementRequest(
   }
 
   return jsonResponse({ error: 'Only PATCH and DELETE requests are supported for generated models.' }, 405);
-}
-
-async function handleImageTargetManagementRequest(
-  request: Request,
-  env: WorkerEnv,
-  deps: GenerateModelDeps,
-  url: URL,
-  targetId: string,
-  user: StoredUser,
-): Promise<Response> {
-  if (!targetId) {
-    return jsonResponse({ error: 'target_id is required.' }, 400);
-  }
-  if (!env.MODEL_BUCKET) {
-    return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
-  }
-
-  if (request.method === 'PATCH') {
-    return updateImageTarget(request, env, deps, url, targetId, user);
-  }
-
-  if (request.method === 'DELETE') {
-    return deleteImageTarget(env, deps, targetId, user);
-  }
-
-  return jsonResponse({ error: 'Only PATCH and DELETE requests are supported for image targets.' }, 405);
-}
-
-async function handleImageTargetScanRequest(
-  request: Request,
-  env: WorkerEnv,
-  deps: GenerateModelDeps,
-  scanId: string,
-): Promise<Response> {
-  if (!scanId) {
-    return jsonResponse({ error: 'Image target not found.' }, 404);
-  }
-  const index = await readImageTargetsIndex(env);
-  const target = index.targets.find((candidate) => candidate.scan_id === scanId);
-  if (!target) {
-    return jsonResponse({ error: 'Image target not found.' }, 404);
-  }
-  if (imageTargetAccessMode(target) === 'anyone_with_link') {
-    return jsonResponse(target);
-  }
-  const auth = await readOptionalApprovedUser(request, env, deps);
-  if (!auth) {
-    return jsonResponse({ error: 'Login required.' }, 401);
-  }
-  if (!canScanImageTarget(target, auth.user)) {
-    return jsonResponse({ error: 'You do not have access to this image target.' }, 403);
-  }
-  return jsonResponse(target);
-}
-
-async function updateImageTarget(
-  request: Request,
-  env: WorkerEnv,
-  deps: GenerateModelDeps,
-  url: URL,
-  targetId: string,
-  user: StoredUser,
-): Promise<Response> {
-  const body = await readJsonBody<ImageTargetRequestBody>(request);
-  if (!body.ok) {
-    return jsonResponse({ error: body.error }, 400);
-  }
-
-  const index = await readImageTargetsIndex(env);
-  const targetIndex = index.targets.findIndex((target) => target.id === targetId);
-  if (targetIndex === -1) {
-    return jsonResponse({ error: 'Image target not found.' }, 404);
-  }
-
-  const existingTarget = index.targets[targetIndex];
-  if (!canManageImageTarget(existingTarget, user)) {
-    return jsonResponse({ error: 'Only the owner or an admin can manage this image target.' }, 403);
-  }
-
-  const requestedGroups = body.value.groups !== undefined
-    ? normalizeImageTargetGroups(body.value.groups)
-    : normalizeImageTargetGroups(existingTarget.groups);
-  const nextObjects = nextImageTargetObjectsForUpdate(existingTarget, body.value, requestedGroups);
-  if (nextObjects.length === 0) {
-    return jsonResponse({ error: 'objects must include at least one valid model or text object.' }, 400);
-  }
-  const nextGroups = usedImageTargetGroups(requestedGroups, nextObjects);
-  const firstModel = nextObjects.find(isImageTargetModelObject);
-  const access = normalizeRequestedImageTargetAccess(
-    body.value,
-    existingTarget.owner_email ?? user.email,
-    {
-      access_mode: imageTargetAccessMode(existingTarget),
-      allowed_emails: normalizeStoredAllowedEmails(existingTarget.allowed_emails, existingTarget.owner_email),
-    },
-  );
-  if ('error' in access) {
-    return jsonResponse({ error: access.error }, 400);
-  }
-  const { model: _existingModel, placement: _existingPlacement, ...existingWithoutAliases } = existingTarget;
-  const now = deps.now();
-  const nextTarget: ImageTargetEntry = {
-    ...existingWithoutAliases,
-    label: normalizeModelLabel(body.value.label) ?? existingTarget.label,
-    ...(firstModel ? { model: firstModel.model, placement: firstModel.placement } : {}),
-    objects: nextObjects,
-    groups: nextGroups,
-    visibility: normalizeModelVisibility(body.value.visibility) ?? existingTarget.visibility ?? 'private',
-    scan_id: existingTarget.scan_id ?? deps.randomUUID?.() ?? crypto.randomUUID(),
-    access_mode: access.access_mode,
-    allowed_emails: access.allowed_emails,
-    updated_at: now.toISOString(),
-  };
-
-  const imageMimeType = normalizeImageTargetMimeType(body.value.image_mime_type);
-  if (body.value.image_mime_type !== undefined && !imageMimeType) {
-    return jsonResponse({ error: 'image_mime_type must be image/png, image/jpeg, or image/webp.' }, 400);
-  }
-  let replacement: { objectKey: string; imageBytes: ArrayBuffer; mimeType: 'image/png' | 'image/jpeg' | 'image/webp' } | undefined;
-  if (typeof body.value.image_base64 === 'string' && body.value.image_base64.length > 0) {
-    if (!imageMimeType) {
-      return jsonResponse({ error: 'image_mime_type is required when image_base64 is provided.' }, 400);
-    }
-    const mimeType = imageMimeType;
-    const imageBytes = base64ToArrayBuffer(stripDataUrlPrefix(body.value.image_base64));
-    if (imageBytes.byteLength > maxImageTargetBytes) {
-      return jsonResponse({ error: 'Image target uploads must be 5 MB or smaller.' }, 400);
-    }
-    const objectKey = replacementImageTargetObjectKey(targetId, mimeType, body.value.image_base64, now);
-    replacement = { objectKey, imageBytes, mimeType };
-    nextTarget.image_object_key = objectKey;
-    nextTarget.image_url = `${getPublicOrigin(env, url.origin)}/${objectKey}`;
-  }
-
-  const recordKey = imageTargetRecordKey(targetId);
-  let previousStoredRecord: ImageTargetEntry | null = null;
-  let recordWritten = false;
-  try {
-    previousStoredRecord = await readJsonObject<ImageTargetEntry | null>(env, recordKey, null);
-    if (replacement) {
-      await env.MODEL_BUCKET.put(replacement.objectKey, replacement.imageBytes, {
-        httpMetadata: { contentType: replacement.mimeType },
-      });
-    }
-    await writeJsonObject(env, recordKey, nextTarget);
-    recordWritten = true;
-    index.targets[targetIndex] = nextTarget;
-    await writeImageTargetsIndex(env, index);
-  } catch {
-    const rollbackTasks: Promise<unknown>[] = [];
-    if (recordWritten) {
-      if (previousStoredRecord) {
-        rollbackTasks.push(writeJsonObject(env, recordKey, previousStoredRecord));
-      } else if (env.MODEL_BUCKET.delete) {
-        rollbackTasks.push(env.MODEL_BUCKET.delete(recordKey));
-      }
-    }
-    if (replacement && env.MODEL_BUCKET.delete) {
-      rollbackTasks.push(env.MODEL_BUCKET.delete(replacement.objectKey));
-    }
-    await Promise.allSettled(rollbackTasks);
-    return jsonResponse({ error: 'Unable to update image target.' }, 500);
-  }
-
-  if (replacement && replacement.objectKey !== existingTarget.image_object_key && env.MODEL_BUCKET.delete) {
-    try {
-      await env.MODEL_BUCKET.delete(existingTarget.image_object_key);
-    } catch {
-      // The versioned replacement is already durable; a stale object can be cleaned up later.
-    }
-  }
-  await appendAuditEvent(env, deps, {
-    actor: user.email,
-    action: 'image-target.update',
-    target: targetId,
-    status: 'ok',
-  });
-
-  return jsonResponse(nextTarget);
-}
-
-async function deleteImageTarget(
-  env: WorkerEnv,
-  deps: GenerateModelDeps,
-  targetId: string,
-  user: StoredUser,
-): Promise<Response> {
-  const index = await readImageTargetsIndex(env);
-  const target = index.targets.find((entry) => entry.id === targetId);
-  if (!target) {
-    return jsonResponse({ error: 'Image target not found.' }, 404);
-  }
-  if (!canManageImageTarget(target, user)) {
-    return jsonResponse({ error: 'Only the owner or an admin can manage this image target.' }, 403);
-  }
-
-  await writeImageTargetsIndex(env, {
-    targets: index.targets.filter((entry) => entry.id !== targetId),
-  });
-  await env.MODEL_BUCKET.delete?.(target.image_object_key);
-  await env.MODEL_BUCKET.delete?.(imageTargetRecordKey(targetId));
-  await appendAuditEvent(env, deps, {
-    actor: user.email,
-    action: 'image-target.delete',
-    target: targetId,
-    status: 'ok',
-  });
-
-  return jsonResponse({ deleted: true, id: targetId });
 }
 
 async function updateGeneratedModel(
@@ -2277,10 +1814,6 @@ function validateEnv(env: WorkerEnv, pipeline?: GenerationPipeline): string | nu
 
   if (!env.OPENAI_API_KEY) {
     return 'OpenAI API key is not configured.';
-  }
-
-  if (!env.MODAL_IMAGE_TO_3D_URL) {
-    return 'Modal endpoint URL is not configured.';
   }
 
   if (!env.MODAL_IMAGE_TO_3D_START_URL || !env.MODAL_IMAGE_TO_3D_RESULT_URL) {
@@ -2717,466 +2250,6 @@ function normalizeModelVisibility(value: unknown): ModelVisibility | null {
   return value === 'public' || value === 'private' ? value : null;
 }
 
-function normalizeImageTargetAccessMode(value: unknown): ImageTargetAccessMode | null {
-  return value === 'anyone_with_link'
-    || value === 'any_signed_in'
-    || value === 'owner_only'
-    || value === 'specific_accounts'
-    ? value
-    : null;
-}
-
-function normalizeStoredAllowedEmails(value: unknown, ownerEmail?: string): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const owner = ownerEmail?.trim().toLowerCase();
-  return [...new Set(value.flatMap((candidate) => {
-    if (typeof candidate !== 'string') {
-      return [];
-    }
-    const email = candidate.trim().toLowerCase();
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email !== owner ? [email] : [];
-  }))];
-}
-
-function imageTargetAccessMode(target: Pick<ImageTargetEntry, 'access_mode' | 'visibility'>): ImageTargetAccessMode {
-  return normalizeImageTargetAccessMode(target.access_mode)
-    ?? (target.visibility === 'public' ? 'anyone_with_link' : 'owner_only');
-}
-
-function normalizeRequestedImageTargetAccess(
-  body: ImageTargetRequestBody,
-  ownerEmail: string,
-  fallback: Pick<Required<ImageTargetEntry>, 'access_mode' | 'allowed_emails'>,
-): Pick<Required<ImageTargetEntry>, 'access_mode' | 'allowed_emails'> | { error: string } {
-  const accessMode = body.access_mode === undefined
-    ? fallback.access_mode
-    : normalizeImageTargetAccessMode(body.access_mode);
-  if (!accessMode) {
-    return { error: 'access_mode is invalid.' };
-  }
-  const allowedEmails = normalizeStoredAllowedEmails(
-    body.allowed_emails === undefined ? fallback.allowed_emails : body.allowed_emails,
-    ownerEmail,
-  );
-  if (body.allowed_emails !== undefined && !Array.isArray(body.allowed_emails)) {
-    return { error: 'allowed_emails must be an array of account emails.' };
-  }
-  if (accessMode === 'specific_accounts' && allowedEmails.length === 0) {
-    return { error: 'specific_accounts requires at least one account email other than the owner.' };
-  }
-  return {
-    access_mode: accessMode,
-    allowed_emails: accessMode === 'specific_accounts' ? allowedEmails : [],
-  };
-}
-
-function normalizeImageTargetMimeType(value: unknown): 'image/png' | 'image/jpeg' | 'image/webp' | null {
-  return typeof value === 'string' && allowedImageTargetMimeTypes.includes(value as 'image/png' | 'image/jpeg' | 'image/webp')
-    ? (value as 'image/png' | 'image/jpeg' | 'image/webp')
-    : null;
-}
-
-function imageTargetExtension(mimeType: 'image/png' | 'image/jpeg' | 'image/webp'): string {
-  if (mimeType === 'image/png') {
-    return 'png';
-  }
-  if (mimeType === 'image/webp') {
-    return 'webp';
-  }
-  return 'jpg';
-}
-
-function replacementImageTargetObjectKey(
-  targetId: string,
-  mimeType: 'image/png' | 'image/jpeg' | 'image/webp',
-  imageBase64: string,
-  now: Date,
-): string {
-  const version = `${now.getTime().toString(36)}-${fnv1aHash(stripDataUrlPrefix(imageBase64))}`;
-  return `${imageTargetImagePrefix}${safeObjectKeyPart(targetId)}-${version}.${imageTargetExtension(mimeType)}`;
-}
-
-function normalizeImageTargetModel(value: unknown): ImageTargetModel | null {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-  const candidate = value as Record<string, unknown>;
-  if (typeof candidate.id !== 'string' || !candidate.id.trim()) {
-    return null;
-  }
-  if (typeof candidate.label !== 'string' || !candidate.label.trim()) {
-    return null;
-  }
-  if (typeof candidate.url !== 'string' || !candidate.url.trim()) {
-    return null;
-  }
-  return {
-    id: candidate.id.trim(),
-    label: candidate.label.trim(),
-    url: candidate.url.trim(),
-    ...(typeof candidate.preview_url === 'string' && candidate.preview_url.trim()
-      ? { preview_url: candidate.preview_url.trim() }
-      : {}),
-  };
-}
-
-function normalizeImageTargetObjects(
-  objectsValue: unknown,
-  legacyModelValue?: unknown,
-  legacyPlacementValue?: unknown,
-  groups: ImageTargetGroup[] = [],
-): ImageTargetObject[] {
-  if (Array.isArray(objectsValue)) {
-    const seenIds = new Set<string>();
-    return objectsValue.flatMap((value, index) => {
-      const object = normalizeImageTargetObject(value, index, groups);
-      if (!object || seenIds.has(object.id)) {
-        return [];
-      }
-      seenIds.add(object.id);
-      return [object];
-    });
-  }
-
-  const legacyModel = normalizeImageTargetModel(legacyModelValue);
-  if (!legacyModel) {
-    return [];
-  }
-
-  return [{
-    kind: 'model',
-    id: 'object-1',
-    model: legacyModel,
-    placement: normalizeImageTargetPlacement(legacyPlacementValue),
-  }];
-}
-
-function normalizeImageTargetObject(
-  value: unknown,
-  index: number,
-  groups: ImageTargetGroup[],
-): ImageTargetObject | null {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  const id = typeof candidate.id === 'string' && candidate.id.trim() ? candidate.id.trim() : `object-${index + 1}`;
-  const placement = normalizeImageTargetPlacement(candidate.placement);
-  const groupId = typeof candidate.group_id === 'string' ? candidate.group_id.trim() : '';
-  const group = groupId ? groups.find((item) => item.id === groupId) : undefined;
-  const groupFields = group && candidate.local_placement && typeof candidate.local_placement === 'object'
-    ? { group_id: group.id, local_placement: normalizeLocalImageTargetPlacement(candidate.local_placement) }
-    : {};
-  const animationFields = candidate.animation
-    ? { animation: normalizeImageTargetAnimation(candidate.animation) }
-    : {};
-
-  if (candidate.kind === 'text') {
-    const text = normalizeImageTargetText(candidate.text);
-    return text ? { kind: 'text', id, text, placement, ...groupFields, ...animationFields } : null;
-  }
-  if (candidate.kind !== undefined && candidate.kind !== 'model') {
-    return null;
-  }
-  const model = normalizeImageTargetModel(candidate.model);
-  if (!model) {
-    return null;
-  }
-
-  return {
-    kind: 'model',
-    id,
-    model,
-    placement,
-    ...groupFields,
-    ...animationFields,
-  };
-}
-
-function imageTargetObjectsFromStoredTarget(target: ImageTargetEntry): ImageTargetObject[] {
-  const groups = normalizeImageTargetGroups(target.groups);
-  const objects = normalizeImageTargetObjects(target.objects, undefined, undefined, groups);
-  if (objects.length > 0) {
-    return objects;
-  }
-
-  return normalizeImageTargetObjects(undefined, target.model, target.placement);
-}
-
-function nextImageTargetObjectsForUpdate(
-  existingTarget: ImageTargetEntry,
-  body: ImageTargetRequestBody,
-  groups: ImageTargetGroup[],
-): ImageTargetObject[] {
-  if (body.objects !== undefined) {
-    return normalizeImageTargetObjects(body.objects, undefined, undefined, groups);
-  }
-
-  const existingObjects = normalizeImageTargetObjects(
-    imageTargetObjectsFromStoredTarget(existingTarget),
-    undefined,
-    undefined,
-    groups,
-  );
-  const firstModelIndex = existingObjects.findIndex(isImageTargetModelObject);
-  if (firstModelIndex === -1) {
-    return existingObjects.length > 0
-      ? existingObjects
-      : normalizeImageTargetObjects(undefined, body.model, body.placement, groups);
-  }
-
-  if (body.model === undefined && body.placement === undefined) {
-    return existingObjects;
-  }
-
-  return existingObjects.map((object, index) => index === firstModelIndex && isImageTargetModelObject(object)
-    ? {
-        ...object,
-        model: normalizeImageTargetModel(body.model) ?? object.model,
-        placement: normalizeImageTargetPlacement(body.placement, object.placement),
-      }
-    : object);
-}
-
-function normalizeImageTargetPlacement(
-  value: unknown,
-  fallback: ImageTargetPlacement = defaultImageTargetPlacement(),
-): ImageTargetPlacement {
-  if (!value || typeof value !== 'object') {
-    return fallback;
-  }
-  const candidate = value as Record<string, unknown>;
-  return {
-    scale: normalizeFinitePlacementNumber(candidate.scale, fallback.scale, 0.1, 5),
-    offset_x: normalizeFinitePlacementNumber(candidate.offset_x, fallback.offset_x, -1, 1),
-    offset_y: normalizeFinitePlacementNumber(candidate.offset_y, fallback.offset_y, -1, 1),
-    height: normalizeFinitePlacementNumber(candidate.height, fallback.height, 0, 1),
-    rotation_x: normalizeImageTargetDegrees(candidate.rotation_x, fallback.rotation_x),
-    rotation_y: normalizeImageTargetDegrees(candidate.rotation_y, fallback.rotation_y),
-    rotation_z: normalizeImageTargetDegrees(candidate.rotation_z, fallback.rotation_z),
-  };
-}
-
-function defaultImageTargetPlacement(): ImageTargetPlacement {
-  return { scale: 1, offset_x: 0, offset_y: 0, height: 0.12, rotation_x: 0, rotation_y: 0, rotation_z: 0 };
-}
-
-function defaultLocalImageTargetPlacement(): ImageTargetPlacement {
-  return { scale: 1, offset_x: 0, offset_y: 0, height: 0, rotation_x: 0, rotation_y: 0, rotation_z: 0 };
-}
-
-function normalizeLocalImageTargetPlacement(value: unknown): ImageTargetPlacement {
-  const fallback = defaultLocalImageTargetPlacement();
-  if (!value || typeof value !== 'object') {
-    return fallback;
-  }
-  const candidate = value as Record<string, unknown>;
-  return {
-    scale: normalizeFinitePlacementNumber(candidate.scale, fallback.scale, 0.1, 5),
-    offset_x: normalizeFinitePlacementNumber(candidate.offset_x, fallback.offset_x, -2, 2),
-    offset_y: normalizeFinitePlacementNumber(candidate.offset_y, fallback.offset_y, -2, 2),
-    height: normalizeFinitePlacementNumber(candidate.height, fallback.height, -2, 2),
-    rotation_x: normalizeImageTargetDegrees(candidate.rotation_x, fallback.rotation_x),
-    rotation_y: normalizeImageTargetDegrees(candidate.rotation_y, fallback.rotation_y),
-    rotation_z: normalizeImageTargetDegrees(candidate.rotation_z, fallback.rotation_z),
-  };
-}
-
-function normalizeFinitePlacementNumber(value: unknown, fallback: number, min: number, max: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return fallback;
-  }
-  return Math.min(max, Math.max(min, value));
-}
-
-function normalizeImageTargetDegrees(value: unknown, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return fallback;
-  }
-  const wrapped = ((((value + 180) % 360) + 360) % 360) - 180;
-  return wrapped === -180 ? 180 : Number(wrapped.toFixed(3));
-}
-
-function normalizeImageTargetAnimation(value: unknown): ImageTargetAnimation {
-  if (!value || typeof value !== 'object') {
-    return defaultImageTargetAnimation();
-  }
-
-  const candidate = value as Record<string, unknown>;
-  if (Array.isArray(candidate.tracks)) {
-    const tracks = candidate.tracks
-      .map(normalizeImageTargetAnimationTrack)
-      .filter((track): track is ImageTargetAnimationTrack => Boolean(track))
-      .slice(0, 16);
-    return {
-      preset: normalizeImageTargetAnimationPreset(candidate.preset) ?? (tracks.length > 0 ? 'custom' : 'none'),
-      tracks,
-      ...(candidate.spin_axis !== undefined ? { spin_axis: normalizeImageTargetSpinAxis(candidate.spin_axis) } : {}),
-      ...(typeof candidate.spin_speed === 'number' ? { spin_speed: normalizeFiniteAnimationNumber(candidate.spin_speed, 0, -6, 6) } : {}),
-      ...(typeof candidate.bob_height === 'number' ? { bob_height: normalizeFiniteAnimationNumber(candidate.bob_height, 0, 0, 1) } : {}),
-      ...(typeof candidate.bob_speed === 'number' ? { bob_speed: normalizeFiniteAnimationNumber(candidate.bob_speed, 0, 0, 8) } : {}),
-    };
-  }
-  return {
-    spin_axis: normalizeImageTargetSpinAxis(candidate.spin_axis),
-    spin_speed: normalizeFiniteAnimationNumber(candidate.spin_speed, 0.22, -6, 6),
-    bob_height: normalizeFiniteAnimationNumber(candidate.bob_height, 0, 0, 1),
-    bob_speed: normalizeFiniteAnimationNumber(candidate.bob_speed, 0, 0, 8),
-  };
-}
-
-function defaultImageTargetAnimation(): ImageTargetAnimation {
-  return { preset: 'none', tracks: [] };
-}
-
-function normalizeImageTargetSpinAxis(value: unknown): ImageTargetSpinAxis {
-  return value === 'none' || value === 'x' || value === 'y' || value === 'z' ? value : 'z';
-}
-
-function normalizeFiniteAnimationNumber(value: unknown, fallback: number, min: number, max: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return fallback;
-  }
-  return Math.min(max, Math.max(min, value));
-}
-
-function normalizeImageTargetAnimationPreset(value: unknown): ImageTargetAnimationPreset | null {
-  return value === 'none' || value === 'gentle-float' || value === 'turntable' || value === 'showcase'
-    || value === 'sway' || value === 'pulse' || value === 'orbit' || value === 'bounce' || value === 'custom'
-    ? value
-    : null;
-}
-
-function normalizeImageTargetAnimationTrack(value: unknown): ImageTargetAnimationTrack | null {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-  const candidate = value as Record<string, unknown>;
-  const property = normalizeImageTargetAnimationProperty(candidate.property);
-  if (!property) {
-    return null;
-  }
-  const requestedMotion = candidate.motion === 'smooth' || candidate.motion === 'triangle' || candidate.motion === 'spin'
-    ? candidate.motion
-    : 'smooth';
-  const motion = requestedMotion === 'spin' && !property.startsWith('rotation_') ? 'smooth' : requestedMotion;
-  const amountBounds = property.startsWith('position_') ? [-2, 2]
-    : property.startsWith('rotation_') ? [-720, 720]
-      : [-0.9, 3];
-  const rawPhase = normalizeFiniteAnimationNumber(candidate.phase, 0, -3600, 3600) % 360;
-  return {
-    property,
-    motion,
-    amount: normalizeFiniteAnimationNumber(candidate.amount, 0, amountBounds[0], amountBounds[1]),
-    speed: normalizeFiniteAnimationNumber(candidate.speed, 0, -4, 4),
-    phase: rawPhase < 0 ? rawPhase + 360 : rawPhase,
-  };
-}
-
-function normalizeImageTargetAnimationProperty(value: unknown): ImageTargetAnimationProperty | null {
-  return value === 'position_x' || value === 'position_y' || value === 'position_z'
-    || value === 'rotation_x' || value === 'rotation_y' || value === 'rotation_z' || value === 'scale'
-    ? value
-    : null;
-}
-
-function normalizeImageTargetGroups(value: unknown): ImageTargetGroup[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const seenIds = new Set<string>();
-  return value.flatMap((item) => {
-    if (!item || typeof item !== 'object') {
-      return [];
-    }
-    const candidate = item as Record<string, unknown>;
-    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
-    const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
-    if (!id || !label || seenIds.has(id)) {
-      return [];
-    }
-    seenIds.add(id);
-    return [{
-      id,
-      label,
-      placement: normalizeImageTargetPlacement(candidate.placement),
-      animation: normalizeImageTargetAnimation(candidate.animation),
-    }];
-  });
-}
-
-function usedImageTargetGroups(groups: ImageTargetGroup[], objects: ImageTargetObject[]): ImageTargetGroup[] {
-  const usedIds = new Set(objects.flatMap((object) => object.group_id ? [object.group_id] : []));
-  return groups.filter((group) => usedIds.has(group.id));
-}
-
-function isImageTargetModelObject(object: ImageTargetObject): object is ImageTargetModelObject {
-  return object.kind === 'model';
-}
-
-function normalizeImageTargetText(value: unknown): ImageTargetText | null {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-  const candidate = value as Record<string, unknown>;
-  const textValue = typeof candidate.value === 'string' ? candidate.value.trim() : '';
-  if (!textValue || [...textValue].length > 512) {
-    return null;
-  }
-  const language = normalizeImageTargetTextEnum(candidate.language, imageTargetTextLanguages, 'english');
-  const font = normalizeImageTargetTextEnum(candidate.font, imageTargetTextFonts, 'studio-sans');
-  const fillMode = normalizeImageTargetTextEnum(candidate.fill_mode, imageTargetTextFillModes, 'solid');
-  const gradientDirection = normalizeImageTargetTextEnum(
-    candidate.gradient_direction,
-    imageTargetTextGradientDirections,
-    'horizontal',
-  );
-  const stylePreset = normalizeImageTargetTextEnum(candidate.style_preset, imageTargetTextStylePresets, 'blue-shine');
-  const color = normalizeImageTargetColor(candidate.color, '#2563eb');
-  const gradientStart = normalizeImageTargetColor(candidate.gradient_start, '#2563eb');
-  const gradientEnd = normalizeImageTargetColor(candidate.gradient_end, '#60a5fa');
-  const sideColor = normalizeImageTargetColor(candidate.side_color, '#1d4ed8');
-  if (!language || !font || !fillMode || !gradientDirection || !stylePreset || !color || !gradientStart || !gradientEnd || !sideColor) {
-    return null;
-  }
-  return {
-    value: textValue,
-    language: language as ImageTargetText['language'],
-    font,
-    color,
-    fill_mode: fillMode as ImageTargetText['fill_mode'],
-    gradient_start: gradientStart,
-    gradient_end: gradientEnd,
-    gradient_direction: gradientDirection as ImageTargetText['gradient_direction'],
-    side_color: sideColor,
-    depth: normalizeFiniteAnimationNumber(candidate.depth, 0.055, 0.02, 0.16),
-    bevel: normalizeFiniteAnimationNumber(candidate.bevel, 0.004, 0, 0.024),
-    gloss: normalizeFiniteAnimationNumber(candidate.gloss, 0.68, 0, 1),
-    style_preset: stylePreset,
-  };
-}
-
-function normalizeImageTargetTextEnum(
-  value: unknown,
-  allowed: Set<string>,
-  fallback: string,
-): string | null {
-  if (value === undefined) {
-    return fallback;
-  }
-  return typeof value === 'string' && allowed.has(value) ? value : null;
-}
-
-function normalizeImageTargetColor(value: unknown, fallback: string): string | null {
-  if (value === undefined) {
-    return fallback;
-  }
-  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : null;
-}
-
 function normalizeEmail(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -3305,40 +2378,6 @@ function canManageGeneratedModel(model: GeneratedModelEntry, user: StoredUser): 
   return Boolean(model.owner_email && model.owner_email === user.email);
 }
 
-function isImageTargetVisibleToUser(target: ImageTargetEntry, user: StoredUser | null): boolean {
-  if (user?.role === 'admin') {
-    return true;
-  }
-  if ((target.visibility ?? 'private') === 'public') {
-    return true;
-  }
-  return Boolean(user && target.owner_email === user.email);
-}
-
-function canScanImageTarget(target: ImageTargetEntry, user: StoredUser): boolean {
-  if (user.role === 'admin') {
-    return true;
-  }
-  const ownerEmail = target.owner_email?.trim().toLowerCase();
-  const userEmail = user.email.trim().toLowerCase();
-  if (ownerEmail && ownerEmail === userEmail) {
-    return true;
-  }
-  const accessMode = imageTargetAccessMode(target);
-  if (accessMode === 'any_signed_in') {
-    return true;
-  }
-  return accessMode === 'specific_accounts'
-    && normalizeStoredAllowedEmails(target.allowed_emails, ownerEmail).includes(userEmail);
-}
-
-function canManageImageTarget(target: ImageTargetEntry, user: StoredUser): boolean {
-  if (user.role === 'admin') {
-    return true;
-  }
-  return Boolean(target.owner_email && target.owner_email === user.email);
-}
-
 function readBearerToken(request: Request): string | null {
   const header = request.headers.get('Authorization') ?? '';
   const match = /^Bearer\s+(.+)$/i.exec(header);
@@ -3370,28 +2409,6 @@ async function serveGeneratedModel(objectKey: string, env: WorkerEnv): Promise<R
     headers: {
       ...corsHeaders,
       'Content-Type': object.httpMetadata?.contentType ?? 'model/gltf-binary',
-      'Cache-Control': 'public, max-age=31536000, immutable',
-    },
-  });
-}
-
-async function serveImageTarget(objectKey: string, env: WorkerEnv): Promise<Response> {
-  if (!env.MODEL_BUCKET) {
-    return jsonResponse({ error: 'Model bucket binding is not configured.' }, 500);
-  }
-  if (!objectKey.startsWith(imageTargetImagePrefix)) {
-    return jsonResponse({ error: 'Image target not found.' }, 404);
-  }
-
-  const object = await env.MODEL_BUCKET.get(objectKey);
-  if (!object?.body) {
-    return jsonResponse({ error: 'Image target not found.' }, 404);
-  }
-
-  return new Response(object.body, {
-    headers: {
-      ...corsHeaders,
-      'Content-Type': object.httpMetadata?.contentType ?? 'image/jpeg',
       'Cache-Control': 'public, max-age=31536000, immutable',
     },
   });
@@ -3445,83 +2462,6 @@ async function readKnownJobs(env: WorkerEnv): Promise<StoredJob[]> {
 
 async function readGeneratedModelsIndex(env: WorkerEnv): Promise<GeneratedModelsIndex> {
   return readJsonObject<GeneratedModelsIndex>(env, generatedModelsIndexKey, { models: [] });
-}
-
-async function readImageTargetsIndex(env: WorkerEnv): Promise<ImageTargetsIndex> {
-  const index = await readJsonObject<ImageTargetsIndex>(env, imageTargetsIndexKey, { targets: [] });
-  return {
-    targets: index.targets.map((target) => normalizeStoredImageTarget(target)),
-  };
-}
-
-async function writeImageTargetsIndex(env: WorkerEnv, index: ImageTargetsIndex): Promise<void> {
-  await writeJsonObject(env, imageTargetsIndexKey, index);
-}
-
-async function ensureImageTargetScanIds(
-  env: WorkerEnv,
-  index: ImageTargetsIndex,
-  user: StoredUser,
-  deps: GenerateModelDeps,
-): Promise<void> {
-  const changedTargets = index.targets.filter((target) => !target.scan_id && canManageImageTarget(target, user));
-  if (changedTargets.length === 0) {
-    return;
-  }
-  for (const target of changedTargets) {
-    target.scan_id = deps.randomUUID?.() ?? crypto.randomUUID();
-  }
-  await Promise.all(changedTargets.map((target) => writeJsonObject(env, imageTargetRecordKey(target.id), target)));
-  await writeImageTargetsIndex(env, index);
-}
-
-async function upsertImageTargetEntry(env: WorkerEnv, entry: ImageTargetEntry): Promise<void> {
-  const index = await readImageTargetsIndex(env);
-  const existingIndex = index.targets.findIndex((target) => target.id === entry.id);
-  if (existingIndex >= 0) {
-    index.targets[existingIndex] = entry;
-  } else {
-    index.targets.push(entry);
-  }
-  await writeImageTargetsIndex(env, index);
-  await writeJsonObject(env, imageTargetRecordKey(entry.id), entry);
-}
-
-function imageTargetRecordKey(targetId: string): string {
-  return `${imageTargetRecordPrefix}${safeObjectKeyPart(targetId)}.json`;
-}
-
-function createUniqueImageTargetId(existingTargets: ImageTargetEntry[], now: Date, label: string): string {
-  const baseId = `target-${formatTimestamp(now)}-${slugifyModelLabel(label)}`;
-  if (!existingTargets.some((target) => target.id === baseId)) {
-    return baseId;
-  }
-
-  let suffix = 2;
-  while (existingTargets.some((target) => target.id === `${baseId}-${suffix}`)) {
-    suffix += 1;
-  }
-  return `${baseId}-${suffix}`;
-}
-
-function normalizeStoredImageTarget(target: ImageTargetEntry): ImageTargetEntry {
-  const normalizedGroups = normalizeImageTargetGroups(target.groups);
-  const objects = normalizeImageTargetObjects(target.objects, target.model, target.placement, normalizedGroups);
-  const groups = usedImageTargetGroups(normalizedGroups, objects);
-  const firstModel = objects.find(isImageTargetModelObject);
-  const { model: _storedModel, placement: _storedPlacement, ...targetWithoutAliases } = target;
-  return {
-    ...targetWithoutAliases,
-    ...(firstModel ? {
-      model: firstModel.model,
-      placement: firstModel.placement,
-    } : {}),
-    objects,
-    groups,
-    visibility: target.visibility ?? 'private',
-    access_mode: imageTargetAccessMode(target),
-    allowed_emails: normalizeStoredAllowedEmails(target.allowed_emails, target.owner_email),
-  };
 }
 
 async function readUsersIndex(env: WorkerEnv): Promise<UsersIndex> {
@@ -3823,24 +2763,18 @@ function getPublicOrigin(env: WorkerEnv, requestOrigin?: string): string {
   return (env.PUBLIC_MODEL_ORIGIN || requestOrigin || '').replace(/\/+$/, '');
 }
 
+/** `20260719-180000`, from the ISO string. */
 function formatTimestamp(date: Date): string {
-  const pad = (value: number): string => value.toString().padStart(2, '0');
-  return [
-    date.getUTCFullYear(),
-    pad(date.getUTCMonth() + 1),
-    pad(date.getUTCDate()),
-    '-',
-    pad(date.getUTCHours()),
-    pad(date.getUTCMinutes()),
-    pad(date.getUTCSeconds()),
-  ].join('');
+  return isoDateTime(date).replace(/[-:]/g, '').replace(' ', '-');
 }
 
+/** `2026-07-19 18:00:00 UTC`. */
 function formatDisplayTimestamp(date: Date): string {
-  const pad = (value: number): string => value.toString().padStart(2, '0');
-  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(
-    date.getUTCHours(),
-  )}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} UTC`;
+  return `${isoDateTime(date)} UTC`;
+}
+
+function isoDateTime(date: Date): string {
+  return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
 function formatJobLabel(date: Date, targetObject: string | null): string {
@@ -3882,10 +2816,6 @@ function slugifyModelLabel(value: string): string {
 
 function uploadedModelLabel(fileName: string): string {
   return fileName.replace(/\.glb$/i, '').trim() || 'Uploaded model';
-}
-
-function normalizeModelMimeType(_value: unknown): string {
-  return 'model/gltf-binary';
 }
 
 function normalizeImageMimeType(value: string): string {
@@ -3998,22 +2928,13 @@ function randomBase64UrlBytes(length: number): string {
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  return bytesToBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
 function base64UrlToBytes(value: string): Uint8Array {
-  const base64 = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
+  return base64ToBytes(
+    value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '='),
+  );
 }
 
 function bytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -4033,20 +2954,30 @@ function constantTimeEqual(left: string, right: string): boolean {
 }
 
 function base64ToArrayBuffer(value: string): ArrayBuffer {
+  return bytesToArrayBuffer(base64ToBytes(value));
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  return bytesToBase64(new Uint8Array(buffer));
+}
+
+// ponytail: hand-rolled because Node 22 (the CI floor) has no
+// Uint8Array.prototype.toBase64. Swap both cores for the native methods once
+// the Node floor reaches 24.
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string): Uint8Array {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index);
   }
-  return bytes.buffer;
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
-  }
-  return btoa(binary);
+  return bytes;
 }
