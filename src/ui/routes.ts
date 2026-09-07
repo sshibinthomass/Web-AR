@@ -25,7 +25,6 @@ export interface RouteMeta {
   title: string;
   shortTitle: string;
   section: NavigationSection;
-  parent: HudRoute;
   requiresAuth: boolean;
   requiresAdmin: boolean;
   shell: RouteShell;
@@ -38,7 +37,6 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
     title: 'Home',
     shortTitle: 'Home',
     section: 'home',
-    parent: 'home',
     requiresAuth: false,
     requiresAdmin: false,
     shell: 'standard',
@@ -49,7 +47,6 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
     title: 'Camera to 3D',
     shortTitle: 'Camera',
     section: 'create',
-    parent: 'home',
     requiresAuth: true,
     requiresAdmin: false,
     shell: 'immersive',
@@ -60,7 +57,6 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
     title: 'Image to 3D',
     shortTitle: 'Image',
     section: 'create',
-    parent: 'home',
     requiresAuth: true,
     requiresAdmin: false,
     shell: 'standard',
@@ -71,7 +67,6 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
     title: 'Upload a model',
     shortTitle: 'Upload',
     section: 'create',
-    parent: 'home',
     requiresAuth: true,
     requiresAdmin: false,
     shell: 'standard',
@@ -82,7 +77,6 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
     title: 'Place in AR',
     shortTitle: 'Place',
     section: 'ar',
-    parent: 'home',
     requiresAuth: false,
     requiresAdmin: false,
     shell: 'standard',
@@ -93,7 +87,6 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
     title: 'Photo to AR',
     shortTitle: 'Photo',
     section: 'create',
-    parent: 'home',
     requiresAuth: true,
     requiresAdmin: false,
     shell: 'immersive',
@@ -104,7 +97,6 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
     title: 'AI photo to AR',
     shortTitle: 'AI photo',
     section: 'create',
-    parent: 'home',
     requiresAuth: true,
     requiresAdmin: false,
     shell: 'immersive',
@@ -115,7 +107,6 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
     title: 'Text or voice to 3D',
     shortTitle: 'Text or voice',
     section: 'create',
-    parent: 'home',
     requiresAuth: true,
     requiresAdmin: false,
     shell: 'standard',
@@ -126,7 +117,6 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
     title: 'Multi-object AR',
     shortTitle: 'Multi-object',
     section: 'ar',
-    parent: 'home',
     requiresAuth: false,
     requiresAdmin: false,
     shell: 'immersive',
@@ -137,7 +127,6 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
     title: 'Models',
     shortTitle: 'Models',
     section: 'models',
-    parent: 'home',
     requiresAuth: false,
     requiresAdmin: false,
     shell: 'standard',
@@ -148,7 +137,6 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
     title: 'Account',
     shortTitle: 'Account',
     section: 'account',
-    parent: 'home',
     requiresAuth: false,
     requiresAdmin: false,
     shell: 'standard',
@@ -159,7 +147,6 @@ export const ROUTES: Record<HudRoute, RouteMeta> = {
     title: 'Admin',
     shortTitle: 'Admin',
     section: 'account',
-    parent: 'home',
     requiresAuth: true,
     requiresAdmin: true,
     shell: 'standard',

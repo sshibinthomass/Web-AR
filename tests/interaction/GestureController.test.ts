@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GestureController, isInteractiveTarget } from '../../src/interaction/GestureController';
-import { clampScale, getAngleBetweenTouches, getDistanceBetweenTouches } from '../../src/utils/math';
+import { clampScale, getDistanceBetweenTouches } from '../../src/utils/math';
 
 describe('gesture math', () => {
   afterEach(() => {
@@ -11,11 +11,6 @@ describe('gesture math', () => {
     expect(clampScale(0.01)).toBe(0.1);
     expect(clampScale(10)).toBe(5);
     expect(clampScale(1.5)).toBe(1.5);
-  });
-
-  it('calculates twist angle between two points', () => {
-    expect(getAngleBetweenTouches({ x: 0, y: 0 }, { x: 0, y: 1 })).toBeCloseTo(Math.PI / 2);
-    expect(getAngleBetweenTouches({ x: 0, y: 0 }, { x: 1, y: 0 })).toBeCloseTo(0);
   });
 
   it('calculates distance between touches', () => {
@@ -65,7 +60,7 @@ describe('gesture math', () => {
       onTap: () => undefined,
       onDrag: () => undefined,
       onPinch: () => undefined,
-    }, { longPressDurationMs: 450, longPressMoveTolerancePx: 12 });
+    });
     controller.connect();
 
     target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));
@@ -86,7 +81,7 @@ describe('gesture math', () => {
       onTap: () => undefined,
       onDrag: () => undefined,
       onPinch: () => undefined,
-    }, { longPressDurationMs: 450, longPressMoveTolerancePx: 12 });
+    });
     controller.connect();
 
     target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));
@@ -107,7 +102,7 @@ describe('gesture math', () => {
         onTap: () => undefined,
         onDrag: () => undefined,
         onPinch: () => undefined,
-      }, { longPressDurationMs: 450 });
+      });
       controller.connect();
 
       target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));
@@ -127,7 +122,7 @@ describe('gesture math', () => {
       onTap: () => undefined,
       onDrag: () => undefined,
       onPinch: () => undefined,
-    }, { longPressDurationMs: 450 });
+    });
     controller.connect();
 
     target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));
@@ -149,7 +144,7 @@ describe('gesture math', () => {
       onTap: () => undefined,
       onDrag: () => undefined,
       onPinch: () => undefined,
-    }, { longPressDurationMs: 450 });
+    });
     controller.connect();
 
     target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));
@@ -169,7 +164,7 @@ describe('gesture math', () => {
       onTap: taps,
       onDrag: drags,
       onPinch: () => undefined,
-    }, { longPressDurationMs: 450 });
+    });
     controller.connect();
 
     target.dispatchEvent(touchEvent('touchstart', [{ clientX: 20, clientY: 30 }]));

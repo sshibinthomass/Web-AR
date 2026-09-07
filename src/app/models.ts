@@ -12,5 +12,3 @@ export type ModelOption = {
 };
 
 export type ModelVisibility = 'public' | 'private';
-
-export const MODEL_OPTIONS: ModelOption[] = [];

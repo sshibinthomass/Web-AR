@@ -48,7 +48,6 @@ describe('route metadata', () => {
     }
     expect(ROUTES['full-flow'].title).toBe('Photo to AR');
     expect(ROUTES.dynamic.title).toBe('AI photo to AR');
-    expect(ROUTES.speech.parent).toBe('home');
     expect(ROUTES.camera.initialStatus).toBe('Frame one object, then capture an image.');
   });
 

@@ -439,15 +439,9 @@ function createDefaultControls(camera: THREE.PerspectiveCamera, domElement: HTML
 }
 
 function observeElementResize(element: HTMLElement, callback: () => void): () => void {
-  const ResizeObserverCtor = globalThis.ResizeObserver;
-  if (typeof ResizeObserverCtor !== 'undefined') {
-    const observer = new ResizeObserverCtor(callback);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }
-
-  globalThis.addEventListener('resize', callback);
-  return () => globalThis.removeEventListener('resize', callback);
+  const observer = new ResizeObserver(callback);
+  observer.observe(element);
+  return () => observer.disconnect();
 }
 
 function prepareModelForPreview(root: THREE.Object3D): THREE.Box3 {

@@ -9,16 +9,8 @@ export function clampScale(value: number): number {
   return Math.min(5, Math.max(0.1, value));
 }
 
-export function getAngleBetweenTouches(a: Point2, b: Point2): number {
-  return Math.atan2(b.y - a.y, b.x - a.x);
-}
-
 export function getDistanceBetweenTouches(a: Point2, b: Point2): number {
   return Math.hypot(b.x - a.x, b.y - a.y);
-}
-
-export function matrixToPosition(matrix: THREE.Matrix4): THREE.Vector3 {
-  return new THREE.Vector3().setFromMatrixPosition(matrix);
 }
 
 export function screenPointToFloorPoint(

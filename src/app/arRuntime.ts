@@ -3,10 +3,6 @@ import { GestureController } from '../interaction/GestureController';
 import { ObjectTransformController } from '../interaction/ObjectTransformController';
 import { SpatialMotionController } from '../interaction/SpatialMotionController';
 import { SelectionFeedbackController } from '../interaction/SelectionFeedbackController';
-import {
-  classifyPlacementGesture,
-  type PlacementGestureZone,
-} from '../interaction/PlacementGestureZone';
 import { createScene, type SceneContext } from '../scene/createScene';
 import { LayoutSceneManager } from '../scene/LayoutSceneManager';
 import { screenPointToFloorPoint, type Point2 } from '../utils/math';
@@ -24,7 +20,6 @@ export const arRuntime = {
   ObjectTransformController,
   SpatialMotionController,
   SelectionFeedbackController,
-  classifyPlacementGesture,
   LayoutSceneManager,
   createScene,
   screenPointToFloorPoint,
@@ -38,4 +33,4 @@ export const arRuntime = {
 };
 
 export type ARRuntime = typeof arRuntime;
-export type { PlacementGestureZone, Point2, SceneContext };
+export type { Point2, SceneContext };

@@ -12,10 +12,8 @@ interface GestureHandlers {
   onGestureEnd?(): void;
 }
 
-interface GestureOptions {
-  longPressDurationMs?: number;
-  longPressMoveTolerancePx?: number;
-}
+const LONG_PRESS_DURATION_MS = 450;
+const LONG_PRESS_MOVE_TOLERANCE_PX = 12;
 
 export class GestureController {
   private active = false;
@@ -24,20 +22,11 @@ export class GestureController {
   private lastPinchDistance: number | null = null;
   private longPressTimer: ReturnType<typeof setTimeout> | null = null;
   private longPressActivated = false;
-  private readonly longPressDurationMs: number;
-  private readonly longPressMoveTolerancePx: number;
 
   constructor(
     private readonly target: HTMLElement,
     private readonly handlers: GestureHandlers,
-    {
-      longPressDurationMs = 450,
-      longPressMoveTolerancePx = 12,
-    }: GestureOptions = {},
-  ) {
-    this.longPressDurationMs = longPressDurationMs;
-    this.longPressMoveTolerancePx = longPressMoveTolerancePx;
-  }
+  ) {}
 
   connect(): void {
     this.target.addEventListener('touchstart', this.onTouchStart, { passive: false });
@@ -100,7 +89,7 @@ export class GestureController {
       if (
         !this.longPressActivated
         && this.startPoint
-        && getDistanceBetweenTouches(this.startPoint, point) >= this.longPressMoveTolerancePx
+        && getDistanceBetweenTouches(this.startPoint, point) >= LONG_PRESS_MOVE_TOLERANCE_PX
       ) {
         this.cancelLongPress();
       }
@@ -136,7 +125,7 @@ export class GestureController {
 
     if (this.startPoint && this.lastSinglePoint) {
       const distance = getDistanceBetweenTouches(this.startPoint, this.lastSinglePoint);
-      if (!this.longPressActivated && distance < 12) {
+      if (!this.longPressActivated && distance < LONG_PRESS_MOVE_TOLERANCE_PX) {
         this.handlers.onTap(this.lastSinglePoint);
       }
     }
@@ -165,7 +154,7 @@ export class GestureController {
       this.longPressTimer = null;
       this.longPressActivated = true;
       this.handlers.onLongPress?.(point);
-    }, this.longPressDurationMs);
+    }, LONG_PRESS_DURATION_MS);
   }
 
   private cancelLongPress(): void {
